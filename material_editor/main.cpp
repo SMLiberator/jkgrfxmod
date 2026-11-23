@@ -776,6 +776,10 @@ private:
             mode_=kind;
             observedRoot_=root_; savedRoot_=root_;
             undo_.clear(); redo_.clear(); groupActive_=false;
+            sectionSelection_=-2;
+            sectionSeen_.fill(false);
+            sectionActive_.fill(false);
+            inspectedChannel_=0;
             file_=path;loaded_=true;dirty_=false;
             selection_=root_["materials"].empty()?-1:0;
             nativeCacheKey_.clear();
@@ -1209,6 +1213,7 @@ private:
     void imageInfo(const char *label,const char *key) {
         std::string value=stringValue(effectiveSelected(),key);
         ImGui::PushID(key);
+        ImGui::PushID(label);
         if(isSource()) {
             // Reference and import are different actions. A copied file is
             // intentionally not removed when an undo reverts its JSON path.
@@ -1228,16 +1233,22 @@ private:
             sourceTextureActions(key,false);
             if(value.empty()&&imageSlot(key)!=BaseMap) {
                 ImGui::PopID();
+                ImGui::PopID();
                 return;
             }
         } else {
             if(value.empty()) {
-                ImGui::PopID();
-                return;
-            }
-            ImGui::TextWrapped("%s: %s",label,value.c_str());
+                if(imageSlot(key)!=BaseMap ||
+                   !preview_->imageInfo(BaseMap).valid()) {
+                    ImGui::PopID();
+                    ImGui::PopID();
+                    return;
+                }
+            } else
+                ImGui::TextWrapped("%s: %s",label,value.c_str());
         }
         showTextureDetails(key,value);
+        ImGui::PopID();
         ImGui::PopID();
     }
     void packTextureField(const char *label,const char *key) {
@@ -1250,6 +1261,10 @@ private:
             if(!fs::exists(fs::u8path(file_).parent_path()/
                            fs::u8path(file),ec))
                 ImGui::TextDisabled("Source texture is missing.");
+            // The material preview's GPU texture is valid for this default
+            // only if the selected material actually inherits the same file.
+            if(validSelection()&&stringValue(effectiveSelected(),key)==file)
+                showTextureDetails(key,file);
         }
         ImGui::PopID();
     }
@@ -1281,6 +1296,10 @@ private:
         if(isSource()) {
             ImGui::PushID("pack_environment_map");
             sourceTextureActions("environment_map",true);
+            const auto file=stringValue(root_,"environment_map");
+            if(!file.empty()&&validSelection()&&
+               stringValue(effectiveSelected(),"environment_map")==file)
+                showTextureDetails("environment_map",file);
             ImGui::PopID();
         }
         const std::string env=stringValue(root_,"environment_map");
@@ -1564,6 +1583,7 @@ private:
             sectionSeen_.fill(false);
             sectionActive_.fill(false);
         }
+        ImGui::PushID(file_.c_str());
         ImGui::PushID(selection_);
         const Document &effective=effectiveSelected();
         const auto usesMap=[&](const char *key) {
@@ -1758,6 +1778,7 @@ private:
             ImGui::Separator();
             ImGui::TextWrapped("MAT replacements and signatures are preserved exactly when saving. Compiled textures are read-only.");
         }
+        ImGui::PopID();
         ImGui::PopID();
     }
     void comboField(const char *label,const char *key,
