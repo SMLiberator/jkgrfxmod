@@ -649,11 +649,12 @@
                 };
                 engine_camera first_camera{};
                 bool all_faces_ready=true;
+                bool shared_gpu_timing=false;
                 {
                 // Isolated, nonblocking GPU timestamp pair for Shared only.
                 basic_presentation_gpu_profile<1>::completed_sample
                     shared_gpu_completed{};
-                bool const shared_gpu_timing=profile_shared &&
+                shared_gpu_timing=profile_shared &&
                     shared_capture_gpu_queries.begin(shared_gpu_completed);
                 if(shared_gpu_completed.ready) {
                     shared_capture_gpu_ns_window+=
