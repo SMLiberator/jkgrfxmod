@@ -473,10 +473,8 @@ GLuint MaterialPreview::channelTexture(PreviewTexture slot,int channel) {
     glBindTexture(GL_TEXTURE_2D,0);
     return cached;
 }
-// The three photographic Poly Haven 1K HDR panoramas are embedded as
-// Windows RCDATA, not installed next to the portable EXE. Tone-map once on
-// loading: the preview's shader already expects sRGB LDR environment images.
-// Retain a generated offline fallback when assets were not bundled.
+// Three compact Poly Haven preview PNGs are stored as Win32 RCDATA.
+// Original HDR files are build-only; no runtime tone mapping or 1K blobs.
 namespace {
 bool loadBundledPreset(int preset,int &width,int &height,
                        std::vector<unsigned char> &out) {
@@ -491,47 +489,18 @@ bool loadBundledPreset(int preset,int &width,int &height,
     const DWORD length=SizeofResource(module,info);
     if(!bytes||length==0||length>INT_MAX)return false;
     int w=0,h=0,channels=0;
-    float *decoded=stbi_loadf_from_memory(
+    // PNGs have north at the top, but GL's first row is the south pole.
+    stbi_set_flip_vertically_on_load(1);
+    unsigned char *decoded=stbi_load_from_memory(
         static_cast<const stbi_uc *>(bytes),static_cast<int>(length),
         &w,&h,&channels,3);
     if(!decoded)return false;
-    const bool valid=w>0&&h>0&&w<=4096&&h<=2048&&
-                     std::uint64_t(w)*h<=8388608ULL;
-    if(!valid) {
+    if(w!=512||h!=256) {
         stbi_image_free(decoded);
         return false;
     }
-    // The bundled originals are already the reduced 1K (1024x512) HDRs.
-    // Upload at most 512x256: the preview only samples them for blurry
-    // reflections, and there is no benefit in consuming full 1K GPU storage.
-    const int destW=std::min(w,512);
-    const int destH=std::min(h,256);
-    out.resize(std::size_t(destW)*destH*3);
-    const float exposure=preset==0?0.65f:preset==1?0.40f:1.65f;
-    for(int y=0;y<destH;++y)for(int x=0;x<destW;++x) {
-        // Average a source footprint before tone mapping rather than
-        // point-sampling, retaining useful bright light-panel features.
-        const int left=x*w/destW, right=std::max(left+1,(x+1)*w/destW);
-        const int top=y*h/destH, bottom=std::max(top+1,(y+1)*h/destH);
-        for(int channel=0;channel<3;++channel) {
-            double sum=0.0;
-            for(int sy=top;sy<bottom;++sy)for(int sx=left;sx<right;++sx) {
-                // HDR files store north at the top; OpenGL expects south
-                // first for the preview shader's equirectangular lookup.
-                const float v=decoded[(std::size_t(h-1-sy)*w+sx)*3+channel];
-                if(std::isfinite(v))sum+=std::max(v,0.0f);
-            }
-            const float value=static_cast<float>(
-                sum/double((right-left)*(bottom-top)));
-            const float linear=1.0f-std::exp(-value*exposure);
-            const float encoded=linear<=0.0031308f?12.92f*linear:
-                1.055f*std::pow(linear,1.0f/2.4f)-0.055f;
-            out[(std::size_t(y)*destW+x)*3+channel]=
-                static_cast<unsigned char>(
-                    std::lround(std::clamp(encoded,0.0f,1.0f)*255.0f));
-        }
-    }
-    width=destW;height=destH;
+    width=w;height=h;
+    out.assign(decoded,decoded+std::size_t(w)*h*3);
     stbi_image_free(decoded);
     return true;
 #else
