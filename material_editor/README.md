@@ -267,9 +267,23 @@ so emissive signs and lamps are easier to inspect. The preview-only
 **Intensity** slider (0.0–2.0x, default 1.0) multiplies ambient/directional
 diffuse and direct-specular illumination, but **never changes the material's
 emissive factor, MatCap contribution, or environment reflections**. Its value
-does not enter script.json or metadata.json. Lighting is determined by the
-selected preset even when the material/pack specifies its own EnvMap, or a
-preview-only EnvMap override is active.
+does not enter script.json or metadata.json.
+
+**EnvMap** chooses the image used for reflections, independently from
+**Preset**, which sets the current lighting profile. The source menu has
+three choices: **Material / pack** (use the authored image, if assigned),
+**Preset** (force the Studio, Outdoor or Night panorama even if a material
+EnvMap exists), and **Custom image** (enabled after using **Load custom...**).
+A missing material/custom image falls back to the current preset panorama.
+Switching sources does not overwrite any pack property or discard a loaded
+custom image. This is useful when an in-game global EnvMap changes at
+runtime: the material's authored image is not necessarily what the game
+will reflect. The preview never updates the in-game material.
+
+To limit GPU bandwidth and memory, the editor downsamples the bundled
+**1K (1024×512) HDR source panoramas** to a maximum of **512×256** for
+the preview's tone-mapped reflection textures. The 1K HDR source data is
+still bundled in the EXE; the full-size original HDR downloads are not used.
 
 Instead of the old flat-gradient reflection environments, the Windows build
 bundles three photographic 1K equirectangular HDR panoramas into the EXE as
