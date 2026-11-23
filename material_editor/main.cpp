@@ -2012,6 +2012,78 @@ private:
         sectionActive_[index]=active;
         return ImGui::CollapsingHeader(label);
     }
+    void renderMatReplacements() {
+        if(!ImGui::CollapsingHeader("MAT replacements",
+                                  ImGuiTreeNodeFlags_DefaultOpen))return;
+        const Document entries=selected().value("replaces",Document::array());
+        if(!entries.is_array()) {
+            ImGui::TextDisabled("Invalid MAT replacement list.");
+            return;
+        }
+        for(size_t i=0;i<entries.size();++i) {
+            ImGui::PushID(static_cast<int>(i));
+            editor_source::MatReplacement replacement;
+            const bool valid=editor_source::readMatReplacement(
+                entries[i],mode_,replacement);
+            if(!valid)ImGui::TextDisabled("Unsupported replacement record");
+            if(isSource()) {
+                // Preserve the author's short-string vs [path,cel] form
+                // unless explicitly selecting a nonzero cel.
+                std::string path=replacement.name;
+                ImGui::TextDisabled("MAT %zu",i+1);
+                ImGui::SameLine();
+                ImGui::SetNextItemWidth(-1.0f);
+                if(ImGui::InputTextWithHint("##matPath","mat/example.mat",&path)) {
+                    replacement.name=path;
+                    selected()["replaces"][i]=
+                        editor_source::writeSourceMatReplacement(replacement);
+                    changed("replaces",ImGui::IsItemActive());
+                }
+                int cel=replacement.cel;
+                ImGui::SetNextItemWidth(120.0f);
+                if(ImGui::InputInt("Cel",&cel)) {
+                    if(cel>=0) {
+                        replacement.cel=cel;
+                        replacement.specificCel|=cel!=0;
+                        selected()["replaces"][i]=
+                            editor_source::writeSourceMatReplacement(replacement);
+                        changed("replaces",ImGui::IsItemActive());
+                    }
+                }
+                if(ImGui::IsItemHovered())
+                    ImGui::SetTooltip("Cel 0 is used for plain MAT filenames.");
+                ImGui::SameLine();
+                ImGui::BeginDisabled(entries.size()<=1);
+                if(ImGui::SmallButton("Remove")&&entries.size()>1) {
+                    selected()["replaces"].erase(i);
+                    changed("replaces");
+                    ImGui::EndDisabled();
+                    ImGui::PopID();
+                    break;
+                }
+                ImGui::EndDisabled();
+                if(path.empty())
+                    ImGui::TextColored(ImVec4(1.0f,.65f,.35f,1.0f),
+                                       "Enter a MAT filename before saving.");
+            } else {
+                if(valid)
+                    ImGui::TextWrapped("%zu. %s  (cel %d)",
+                        i+1,replacement.name.c_str(),replacement.cel);
+            }
+            ImGui::PopID();
+            if(i+1<entries.size())ImGui::Separator();
+        }
+        if(isSource()) {
+            if(ImGui::Button("Add MAT replacement")) {
+                // Empty until authored; source validation prevents saving an
+                // unfinished entry instead of fabricating a real MAT path.
+                selected()["replaces"].push_back("");
+                changed("replaces");
+            }
+        } else {
+            ImGui::TextDisabled("Read-only: edit script.json and recompile to update MAT signatures.");
+        }
+    }
     void renderMaterialProperties() {
         if(!validSelection()) {
             ImGui::TextWrapped("Select a material to edit its properties.");
@@ -2049,17 +2121,10 @@ private:
                 selected()["name"]=updated;
                 changed("name",ImGui::IsItemActive());
             }
-            if(ImGui::TreeNode("MAT replacements")) {
-                ImGui::TextWrapped("%s",
-                    selected().value("replaces",Document::array()).dump().c_str());
-                ImGui::TreePop();
-            }
-            // Source defaults are still displayed and may be overridden.
-            // The source editor offers path/reference options on right-click.
         } else {
             ImGui::TextWrapped("Material: %s",name.c_str());
-            // The preview follows edits directly; disk writes happen on Save.
         }
+        renderMatReplacements();
         if(materialSection("Albedo",0,true)) {
             auto v=rgba(effectiveSelected(),"albedo_factor",{1,1,1,1});
             colorField("Tint / alpha","albedo_factor",v.data(),4);
