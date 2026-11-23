@@ -1503,52 +1503,43 @@ private:
     bool floatField(const char *label,const char *key,float fallback,
                     float low,float high,bool allowAboveSlider=false) {
         Document &obj=selected();
-        float v=number(effectiveSelected(),key,fallback);
+        const float value=number(effectiveSelected(),key,fallback);
         ImGui::PushID(key);
-        const bool hasOverride=obj.find(key)!=obj.end();
-        const float available=ImGui::GetContentRegionAvail().x;
-        // Double-click a native ImGui slider to type a precise value.
-        // The separate numeric box remains only for properties that can
-        // legitimately exceed the displayed slider's upper bound.
-        const float manualWidth=allowAboveSlider?83.0f:0.0f;
-        ImGui::SetNextItemWidth(std::max(100.0f,
-            available-manualWidth));
-        float position=std::clamp(v,low,high);
+        // A single full-width slider. Its built-in double-click/Ctrl+click
+        // numeric input replaces the redundant reflection strength box.
+        // The optional extended range affects numeric input and wheel only;
+        // dragging the slider itself retains its usual 0..1 range.
+        ImGui::SetNextItemWidth(-1.0f);
+        float position=value;
         bool modified=false;
         const std::string format=std::string(label)+": %.3f";
-        if(ImGui::SliderFloat("##slider",&position,low,high,format.c_str(),
-                              ImGuiSliderFlags_AlwaysClamp)) {
-            obj[key]=position;changed(key,ImGui::IsItemActive());modified=true;
+        const ImGuiSliderFlags flags=allowAboveSlider
+            ?ImGuiSliderFlags_None:ImGuiSliderFlags_AlwaysClamp;
+        const bool dragged=ImGui::SliderFloat(
+            "##slider",&position,low,high,format.c_str(),flags);
+        if(dragged&&std::isfinite(position)) {
+            obj[key]=std::max(low,position);
+            changed(key,ImGui::IsItemActive());
+            modified=true;
         }
-        float wheelValue=modified?position:v;
-        if(editor_wheel::adjust(wheelValue,numericWheelForLastItem(),
-                    low,allowAboveSlider
-                        ?std::numeric_limits<float>::max():high)) {
+        float wheelValue=modified?position:value;
+        if(editor_wheel::adjust(
+                wheelValue,numericWheelForLastItem(),low,
+                allowAboveSlider?std::numeric_limits<float>::max():high)) {
             obj[key]=wheelValue;
             changed(key);
             modified=true;
         }
-        if(ImGui::IsItemClicked(ImGuiMouseButton_Right)&&hasOverride) {
-            // Reset removes the local override, restoring a source pack's
-            // inherited value or a compiled material's default.
-            obj.erase(key);changed(key);modified=true;
+        if(ImGui::IsItemClicked(ImGuiMouseButton_Right)&&
+           obj.contains(key)) {
+            obj.erase(key);
+            changed(key);
+            modified=true;
         }
         if(ImGui::IsItemHovered())
-            ImGui::SetTooltip("Left drag to adjust; double-click to type; right-click to reset.");
-        if(allowAboveSlider) {
-            ImGui::SameLine();
-            ImGui::SetNextItemWidth(75.0f);
-            float typed=v;
-            if(ImGui::InputFloat("##exact_value",&typed,0,0,"%.3f")) {
-                if(std::isfinite(typed)) {
-                    typed=std::max(low,typed);
-                    obj[key]=typed;changed(key,ImGui::IsItemActive());
-                    modified=true;
-                }
-            }
-            if(ImGui::IsItemHovered()&&v>high)
-                ImGui::SetTooltip("Values above the slider maximum are valid.");
-        }
+            ImGui::SetTooltip(allowAboveSlider
+                ?"Left drag: 0-1; double-click: type any nonnegative value; right-click: reset."
+                :"Left drag: adjust; double-click: type; right-click: reset.");
         ImGui::PopID();
         return modified;
     }
@@ -2459,8 +2450,6 @@ private:
         }
         renderMatReplacements();
         if(materialSection("Albedo",0,true)) {
-            auto v=rgba(effectiveSelected(),"albedo_factor",{1,1,1,1});
-            colorField("Tint / alpha","albedo_factor",v.data(),4);
             // Native JK albedo and an imported albedo_map are alternate
             // sources, never simultaneous inputs. Toggling or loading a
             // replacement makes one explicit choice in a single Undo step.
@@ -2508,21 +2497,22 @@ private:
             } else {
                 imageInfo("Albedo texture","albedo_map");
             }
+            auto v=rgba(effectiveSelected(),"albedo_factor",{1,1,1,1});
+            colorField("Tint / alpha","albedo_factor",v.data(),4);
             scrollField("Scroll (U,V) / sec","albedo_scroll");
             // Texture import, replacement, and removal are available above.
         }
         if(materialSection("Emissive",1,emits)) {
+            imageInfo("Emissive map","emissive_map");
             auto v=rgb(effectiveSelected(),"emissive_factor",{0,0,0});
             rgbDragField("Emissive RGB","emissive_factor",v,.05f,0,32);
-            imageInfo("Emissive map","emissive_map");
             scrollField("Scroll (U,V) / sec","emissive_scroll");
             pulseField(false);
         }
         if(materialSection("Reflections",2,reflects)) {
+            imageInfo("Surface map","surface_map");
             bool hasSurface=effectiveSelected().find("surface_map")!=effectiveSelected().end();
             floatField("Strength","reflection_strength",hasSurface?1.0f:0.0f,0,1,true);
-            if(number(effectiveSelected(),"reflection_strength",hasSurface?1.0f:0.0f)>1.0f)
-                ImGui::TextDisabled("Above 1: explicitly overridden in the numeric field.");
             floatField("Roughness","roughness",hasSurface?1.0f:0.0f,0,1);
             floatField("Metalness","metalness",hasSurface?1.0f:0.0f,0,1);
             static const char *modes[]={"envmap","screen","fixed","planar","hemi","cube","shared"};
@@ -2530,14 +2520,13 @@ private:
                                             "Hemisphere","Cubemap","Shared"};
             comboField("Game reflection mode","reflection_mode",
                        modes,modeLabels,7);
-            imageInfo("Surface map","surface_map");
         }
         if(materialSection("Normal maps",3,normals)) {
             imageInfo("Normal map 1","normal_map");
+            imageInfo("Normal map 2","normal_map2");
+            ImGui::Spacing();
             floatField("Normal map 1 strength","normal_strength",1,0,4);
             scrollField("Normal map 1 scroll (U,V) / sec","normal_scroll");
-            ImGui::Spacing();
-            imageInfo("Normal map 2","normal_map2");
             floatField("Normal map 2 strength","normal_strength2",1,0,4);
             scrollField("Normal map 2 scroll (U,V) / sec","normal_scroll2");
         }
@@ -2568,19 +2557,19 @@ private:
                 ImGui::TextDisabled("A displacement texture is required.");
         }
         if(materialSection("Clearcoat",5,coat)) {
+            imageInfo("Coat RGB","clearcoat_surface_map");
+            imageInfo("Coat normal","clearcoat_normal_map");
             bool map=effectiveSelected().find("clearcoat_surface_map")!=effectiveSelected().end();
             floatField("Coat strength","clearcoat_strength",map?1.0f:0.0f,0,1);
             floatField("Coat roughness","clearcoat_roughness",.1f,0,1);
             floatField("Coat transmission","clearcoat_transmission",1,0,1);
-            imageInfo("Coat RGB","clearcoat_surface_map");
-            imageInfo("Coat normal","clearcoat_normal_map");
         }
         if(materialSection("MatCap",6,matcap)) {
+            imageInfo("MatCap","matcap_map");
+            imageInfo("MatCap mask","matcap_surface_map");
             floatField("MatCap roughness","matcap_roughness",0,0,1);
             auto v=rgb(effectiveSelected(),"matcap_factor",{1,1,1});
             rgbDragField("MatCap RGB factor","matcap_factor",v,.02f,0,4);
-            imageInfo("MatCap","matcap_map");
-            imageInfo("MatCap mask","matcap_surface_map");
         }
         if(materialSection("Other settings",7,false)) {
             static const char *alphas[]={"blend","mask","dithered"};
