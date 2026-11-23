@@ -255,8 +255,40 @@ MatCap roughness are always 0..1. Normal strengths are 0..4; per-channel
 MatCap factors are 0..4. All saved values use the existing renderer metadata.
 
 The preview renders the selected material using an environment image and
-studio-style lighting, without the former three-way shading diagnostics.
+preset-dependent ambient and directional lighting, without the former three-way shading diagnostics.
 Unicode Windows filesystem paths are supported for image loading.
+
+## Lighting intensity and embedded environment images
+
+The preview has three lighting presets. **Studio** retains the original
+neutral fill and direct-specular levels; **Outdoor** adds brighter, warm
+sunlight and cool ambient fill; **Night** uses weak, cool-toned illumination
+so emissive signs and lamps are easier to inspect. The preview-only
+**Intensity** slider (0.0–2.0x, default 1.0) multiplies ambient/directional
+diffuse and direct-specular illumination, but **never changes the material's
+emissive factor, MatCap contribution, or environment reflections**. Its value
+does not enter script.json or metadata.json. Lighting is determined by the
+selected preset even when the material/pack specifies its own EnvMap, or a
+preview-only EnvMap override is active.
+
+Instead of the old flat-gradient reflection environments, the Windows build
+bundles three photographic 1K equirectangular HDR panoramas into the EXE as
+Win32 resources, tone-mapping to sRGB once during preview loading:
+
+- **Studio:** [Studio Small 02](https://polyhaven.com/a/studio_small_02)
+- **Outdoor:** [Hilly Terrain 01](https://polyhaven.com/a/hilly_terrain_01)
+- **Night:** [Vignaioli Night](https://polyhaven.com/a/vignaioli_night)
+
+The photographs are by Poly Haven contributors, published under
+[CC0](https://polyhaven.com/license). The source archives are downloaded
+from Poly Haven's asset CDN during first CMake configuration, not at app
+startup. No HDR or PNG files accompany the distributed executable. If a
+local/offline build cannot fetch an asset, its existing built-in generated
+fallback remains available. The Windows CI sets
+`-DJKGM_REQUIRE_PRESET_HDRI=ON` to require all three photographic assets
+before publishing the executable. These are tone-mapped LDR reflection
+images in the preview, **not** physically integrated HDR image-based lighting;
+the simple diffuse/directional shader still supplies its approximate lighting.
 
 ## Preview Fresnel toggle
 
