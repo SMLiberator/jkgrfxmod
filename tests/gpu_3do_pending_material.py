@@ -35,5 +35,9 @@ assert "retain_deferred_gpu_hud_material(found->second);" in renderer
 # The collect/sort and the submit loop remain within this call, so none of
 # their borrowed pointers can outlive the corresponding material cache.
 assert draw.index("pending_draw candidate{") < draw.index("std::sort(draws.begin()")
-assert draw.index("std::sort(draws.begin()") < draw.index("auto const &material=*draw.texture;")
+# The profiler can dereference pending materials before sorting. The actual
+# submission still happens after the draw list has been collected and sorted.
+submit=draw.index("auto submit_draws=[&]")
+assert draw.index("std::sort(draws.begin()") < submit
+assert submit < draw.index("auto const &material=*draw.texture;", submit)
 print("GPU 3DO pending material borrowing checks passed")
