@@ -149,3 +149,13 @@ target_include_directories(editor-animation-tests PRIVATE
 if(MSVC)
   target_compile_options(editor-animation-tests PRIVATE /W3 /EHsc /utf-8)
 endif()
+
+# Headless policy regression: a material, preset, or custom image may be
+# selected for reflections regardless of the separate illumination preset.
+add_executable(editor-environment-tests
+  preview_environment_tests.cpp preview_environment.hpp)
+target_include_directories(editor-environment-tests PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/..)
+if(MSVC)
+  target_compile_options(editor-environment-tests PRIVATE /W3 /EHsc /utf-8)
+endif()
