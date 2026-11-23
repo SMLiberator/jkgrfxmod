@@ -943,6 +943,11 @@
                         return;
                     }
                 }
+                // Like the main-camera path, transform the local eye once
+                // per model, not once for every opaque material group.
+                std::array<float,3> local_eye{};
+                bool const has_local_eye=!parallel &&
+                    gpu_3do_local_eye(modelview,local_eye);
                 // Capture blending is disabled. Shared capture sorts only
                 // uninterrupted fully opaque runs. Alpha-tested groups keep
                 // authored order; Hemi/Cube/EnvMap behavior is unchanged.
@@ -987,12 +992,10 @@
                            frustum,modelview,
                            group.bounds_min,group.bounds_max))continue;
                     // Match the main-camera authored JK face-plane test.
-                    if(!(group.face_type&0x1U) &&
+                    if(has_local_eye && !(group.face_type&0x1U) &&
                        group.plane_count>0 &&
                        group.plane_start+group.plane_count<=
                            inst.geometry->face_planes.size()) {
-                        std::array<float,3> local_eye{};
-                        if(gpu_3do_local_eye(modelview,local_eye)) {
                             bool any_visible=false;
                             for(uint32_t p=group.plane_start;
                                 p<group.plane_start+group.plane_count;++p) {
@@ -1007,7 +1010,6 @@
                                 ++total_model_backface_culled;
                                 continue;
                             }
-                        }
                     }
                     }
                     model_group_scratch.push_back(&entry);
