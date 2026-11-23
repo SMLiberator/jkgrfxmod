@@ -4,6 +4,35 @@ A standalone Windows material editor using **Dear ImGui + OpenGL 3.3**.
 There are no Qt libraries, external GUI DLLs, game EXE, renderer DLL,
 or in-game hot-reload dependencies.
 
+## Source image management and smart material sections
+
+When editing `script.json`, every material texture slot includes
+**Reference...** (keep the selected image in its existing location),
+**Import copy...** (copy it into the source pack's script directory with a
+unique filename), and **Remove override** where applicable. In-pack paths
+become relative references; external paths remain absolute when referencing.
+Nothing is silently imported, rewritten or converted, and existing local
+files are never overwritten by an import. Imported image files remain on disk
+if the user later undoes/cancels the JSON change; this avoids accidentally
+deleting assets shared by other materials. Pack-default texture paths support
+these actions too.
+
+The properties panel shows a thumbnail of each loaded image, its dimensions,
+original channel count, format and file size. **Inspect channels...** opens
+a larger RGBA preview or grayscale R/G/B/A view. Packed surface maps expose
+the reflection/roughness/metalness channel meaning; clearcoat masks expose
+coverage/roughness/transmission. Channel views are generated lazily and
+cached until a texture is reloaded. Missing or unsupported images are
+reported without altering the source path. Compiled textures support
+inspection but remain read-only.
+
+Material feature headers now start open only if active: albedo is always
+open; emissive is active for map/color/pulse; reflections for a surface map
+or positive strength; normal/parallax/MatCap for their texture maps; clearcoat
+for an active layer or map. Inherited source-pack properties count as active.
+Per-material expansion state remains under user control, and adding a new
+feature opens its section without auto-collapsing other sections.
+
 ## Source and compiled pack workflows
 
 The editor now supports both pack document modes:
@@ -32,9 +61,10 @@ milestone.
 Source images are loaded directly from the script's folder. The preview
 uses unpremultiplied source textures, whereas compiled textures are read
 with the compiler's premultiplied-alpha convention. Image paths can be
-typed into source material slots; importing/converting texture files and
-MAT signature generation remain separate future work. The editor does
-not rewrite, copy or convert asset files when saving.
+typed into source material slots, chosen through a file picker, or
+copied into the source pack with an explicit **Import copy** action.
+Compiling image conversions and generating MAT signatures remain future
+work. Saving a script changes JSON only, never the referenced image files.
 
 Pack defaults follow the compiler's existing inheritance logic,
 including `keep_albedo` versus `albedo_map` and the inherited alpha-cutoff
@@ -67,10 +97,10 @@ modes that normally capture live scenes. These modes are not equivalent
 in-game: the studio preview is a deliberate approximation for editing.
 Renderer parity should eventually be checked using captured reference images.
 
-**Compiler status:** This milestone cannot yet import/convert new image files
-or generate MAT replacement signatures. Continue using the existing
-command-line compiler for initial pack compilation; then edit the compiled
-metadata in the GUI. Incremental compilation remains the next development phase.
+**Compiler status:** The editor can reference or copy source image files, but
+does not yet convert images to compiled textures or generate MAT replacement
+signatures. Run the existing command-line compiler for creating game-ready
+packs. Integrated compilation remains a separate development milestone.
 
 ## Portable Windows build
 
@@ -145,30 +175,33 @@ indicator. Undo/redo history is cleared when another pack is opened.
   their final alpha coverage is composited. Basic additive and multiply
   blend-mode behavior is supported in the preview.
 - **Keep Albedo** material previews can now load an original MAT texture.
-  Select the game's assets directory under Material Properties > Albedo:
-  the editor indexes loose MATs and CMPs and the entries inside GOB/GOO
+  Configure the game's assets directory and colormap under **File > JK / MotS
+  game assets**. The editor indexes loose MATs/CMPs and entries in GOB/GOO
   archives. The first replacement record's MAT cel is used for the preview.
   A 16-bit native MAT can load without a palette; 8-bit MATs need a matching
-  CMP palette. The editor attempts the standard dflt.cmp first and offers
-  a separate CMP picker for other game/level colormaps. This uses an
+  CMP palette. The reader attempts the standard dflt.cmp first and lets you
+  choose a separate CMP for other game/level colormaps. This uses an
   editor-side reader based on the compiler's MAT/CMP layouts, and never
   modifies the original MAT, material pack, or renderer.
 - If the original game assets have not been selected, native MAT pixels
-  cannot be recovered from compiled metadata alone: the material preview
-  uses an untextured fallback and displays instructions in the Albedo panel.
+  cannot be recovered from compiled metadata alone. The material preview
+  uses an untextured fallback and points to the File menu.
 
-All game-asset source selections, shader diagnostics, Fresnel state and
-rotation are **preview-only**; saving continues to write only material
-property changes into metadata.json.
+Game asset and CMP paths are saved independently of material packs at
+`%APPDATA%\\JkGfxMod\\material-editor.json` and restored on the next launch,
+including under Wine. Changing or clearing either selection updates
+the native MAT preview without dirtying or modifying the pack JSON.
+Preview Fresnel, camera controls, and diagnostics remain preview-only.
 
 ## Preview navigation
 
 The preview now orbits an upright camera around the stationary material,
 rather than applying quaternion rotation to the object. With either left
-or middle mouse drag, horizontal motion changes yaw around world +Y, and
-vertical motion changes the camera's pitch (drag up to orbit downward). Up remains up, there is no
+mouse drag, horizontal motion changes yaw around world +Y, and
+vertical motion changes the camera's pitch (drag up to orbit downward).
+**Middle mouse drag pans** instead of rotating. Up remains up, there is no
 unintended camera roll, and pitch stops just before the poles. Each drag
-starts from the mouse-down view. Space resets the view.
+starts from the mouse-down view. Space resets rotation, pan and zoom.
 
 The environment map, direct studio light, normal mapping, and surface UVs
 remain in world/object space while the camera orbits; MatCap is evaluated
@@ -255,7 +288,8 @@ rectangle than the former radio controls. Changing the shape resets the
 camera. Scrolling the mouse wheel over the preview zooms its orbit camera,
 without modifying the rendered material or zooming when the pointer is over
 other panels. Zoom uses a bounded, multiplicative distance (1.35–16 units).
-Space or Reset view restores the shape's default angle and 3.5-unit distance.
+Space or Reset view restores each shape's default camera (4.4-unit distance
+for Cube; 3.5 for Sphere and Plane).
 
 **Tools** in the top menu exposes Dear ImGui's built-in **Demo**, **Metrics /
 Debugger** and **Style Editor**. The demo showcases widgets with working
