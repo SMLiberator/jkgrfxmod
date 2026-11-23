@@ -80,7 +80,7 @@ the camera-centered `shared` projection, even when no material explicitly
 selects `shared`. The existing `enable_reflections` remains the master switch.
 
 
-`"reflection_mode":"shared"` is a lazy, camera-centered six-face cubemap by default (or Hemi with `experimental_shared_hemi=true`)
+`"reflection_mode":"shared"` is a lazy, camera-centered six-face cubemap
 (mode 7) for GPU-cached world and 3DO materials. When no visible material
 uses this mode or falls back from a specialized mode, no shared probe is captured. The probe is refreshed using
 `reflection_capture_update_interval` and `reflection_capture_resolution`;

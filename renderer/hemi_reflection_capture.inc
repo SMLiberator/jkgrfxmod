@@ -369,9 +369,9 @@
                     static_capture_owners.emplace(owner,eligible);
                     return eligible;
                 };
-                // Shared keeps authored mode 7 for material sampling.
-                bool const paraboloid_mode=selected_mode==5 ||
-                    (candidate.is_shared && the_config->experimental_shared_hemi);
+                // Shared (mode 7) and Cube (mode 6) always use six faces;
+                // only dedicated Hemi (mode 5) uses two paraboloid disks.
+                bool const paraboloid_mode=selected_mode==5;
                 int const face_count=paraboloid_mode?2:6;
                 if(paraboloid_mode && !paraboloid_capture_program)
                     paraboloid_capture_program=
@@ -1358,8 +1358,7 @@
             }
             if(the_config->profile_renderer && gpu_3do_present_serial%120U==0U)
                 LOG_INFO(candidate.is_shared
-                             ?(paraboloid_mode?"SHARED hemi owner=":
-                                                "SHARED cube owner=")
+                             ?"SHARED cube owner="
                              :(paraboloid_mode?"HEMI paraboloid owner=":
                                                 "CUBE capture owner="),
                          selected_owner,

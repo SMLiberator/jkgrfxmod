@@ -296,74 +296,40 @@ vec3 world_environment_reflection(vec3 base_color,vec2 uv,out float metalness,
         vec3 world_dir=camera_right_axis*reflection.x+
                        camera_forward_axis*reflection.z+
                        camera_up_axis*reflection.y;
-        if(shared_reflection_ready==2) {
-            vec3 d=normalize(world_dir);
-            float up_weight=smoothstep(-0.087155743,0.087155743,d.z);
+        vec3 a=abs(world_dir);
+        float major=max(a.x,max(a.y,a.z));
+        if(major>0.000001) {
+            int layer=0;
+            vec3 right_axis=vec3(0.0),up_axis=vec3(0.0);
+            if(a.x>=a.y && a.x>=a.z) {
+                layer=world_dir.x>=0.0?0:1;
+                right_axis=vec3(0.0,world_dir.x>=0.0?-1.0:1.0,0.0);
+                up_axis=vec3(0.0,0.0,1.0);
+            } else if(a.y>=a.z) {
+                layer=world_dir.y>=0.0?2:3;
+                right_axis=vec3(world_dir.y>=0.0?1.0:-1.0,0.0,0.0);
+                up_axis=vec3(0.0,0.0,1.0);
+            } else {
+                layer=world_dir.z>=0.0?4:5;
+                right_axis=vec3(0.0,world_dir.z>=0.0?1.0:-1.0,0.0);
+                up_axis=vec3(1.0,0.0,0.0);
+            }
             ivec3 dims=textureSize(shared_reflection_map,0);
             vec2 inset=0.5/vec2(dims.xy);
-            float lod=roughness*log2(max(float(max(dims.x,dims.y)),1.0));
-            vec3 weighted_color=vec3(0.0);
-            float weighted_coverage=0.0;
-            for(int hemisphere=0;hemisphere<2;++hemisphere) {
-                float weight=hemisphere==0?up_weight:1.0-up_weight;
-                if(weight<=0.00001)continue;
-                float axis_sign=hemisphere==0?1.0:-1.0;
-                float denom=1.0+axis_sign*d.z;
-                if(denom<=0.00001)continue;
-                vec2 q=vec2(d.x,axis_sign*d.y)/denom;
-                vec2 uv_hemi=q*(0.5/1.091308501)+vec2(0.5);
-                if(any(lessThan(uv_hemi,vec2(0.0))) ||
-                   any(greaterThan(uv_hemi,vec2(1.0))))continue;
-                uv_hemi=clamp(uv_hemi,inset,vec2(1.0)-inset);
-                float coverage=textureLod(shared_reflection_map,
-                    vec3(uv_hemi,float(hemisphere)),0.0).a;
-                if(coverage<=0.0001)continue;
+            vec2 uv_cube=clamp(
+                0.5+0.5*vec2(dot(world_dir,right_axis),
+                             dot(world_dir,up_axis))/major,
+                inset,vec2(1.0)-inset);
+            float coverage=textureLod(shared_reflection_map,
+                vec3(uv_cube,float(layer)),0.0).a;
+            if(coverage>0.0001) {
+                float lod=roughness*log2(
+                    max(float(max(dims.x,dims.y)),1.0));
                 vec4 captured=textureLod(shared_reflection_map,
-                    vec3(uv_hemi,float(hemisphere)),lod);
-                if(captured.a<=0.0001)continue;
-                float contribution=weight*coverage;
-                weighted_color+=(captured.rgb/captured.a)*contribution;
-                weighted_coverage+=contribution;
-            }
-            if(weighted_coverage>0.0001)
-                env=mix(env,weighted_color/weighted_coverage,
-                    clamp(weighted_coverage,0.0,1.0));
-        } else {
-            vec3 a=abs(world_dir);
-            float major=max(a.x,max(a.y,a.z));
-            if(major>0.000001) {
-                int layer=0;
-                vec3 right_axis=vec3(0.0),up_axis=vec3(0.0);
-                if(a.x>=a.y && a.x>=a.z) {
-                    layer=world_dir.x>=0.0?0:1;
-                    right_axis=vec3(0.0,world_dir.x>=0.0?-1.0:1.0,0.0);
-                    up_axis=vec3(0.0,0.0,1.0);
-                } else if(a.y>=a.z) {
-                    layer=world_dir.y>=0.0?2:3;
-                    right_axis=vec3(world_dir.y>=0.0?1.0:-1.0,0.0,0.0);
-                    up_axis=vec3(0.0,0.0,1.0);
-                } else {
-                    layer=world_dir.z>=0.0?4:5;
-                    right_axis=vec3(0.0,world_dir.z>=0.0?1.0:-1.0,0.0);
-                    up_axis=vec3(1.0,0.0,0.0);
-                }
-                ivec3 dims=textureSize(shared_reflection_map,0);
-                vec2 inset=0.5/vec2(dims.xy);
-                vec2 uv_cube=clamp(
-                    0.5+0.5*vec2(dot(world_dir,right_axis),
-                                 dot(world_dir,up_axis))/major,
-                    inset,vec2(1.0)-inset);
-                float coverage=textureLod(shared_reflection_map,
-                    vec3(uv_cube,float(layer)),0.0).a;
-                if(coverage>0.0001) {
-                    float lod=roughness*log2(
-                        max(float(max(dims.x,dims.y)),1.0));
-                    vec4 captured=textureLod(shared_reflection_map,
-                        vec3(uv_cube,float(layer)),lod);
-                    if(captured.a>0.0001)
-                        env=mix(env,captured.rgb/captured.a,
-                                clamp(coverage,0.0,1.0));
-                }
+                    vec3(uv_cube,float(layer)),lod);
+                if(captured.a>0.0001)
+                    env=mix(env,captured.rgb/captured.a,
+                            clamp(coverage,0.0,1.0));
             }
         }
     }

@@ -1572,7 +1572,7 @@ namespace jkgm {
                      " samples=",capture_gpu_samples,
                      " ring_busy_skips=",capture_gpu_skipped,
                      " supported=",capture_gpu_queries.is_supported(),
-                     " NOTE=nonblocking_GPU;probe_includes_shared_hemi_cube_EnvMap");
+                     " NOTE=nonblocking_GPU;probe_includes_shared_cube_hemi_cube_EnvMap");
             capture_gpu_ns.fill(0U);
             capture_gpu_samples=capture_gpu_skipped=0U;
             LOG_INFO("PERF capture_cpu_us_avg photo=",
@@ -1602,8 +1602,7 @@ namespace jkgm {
                          " rejected_3do_groups=",s.eligibility_3do_rejected,
                          " rejected_world_faces=",s.eligibility_world_rejected,
                          " NOTE=main_camera_conservative_frustum_only;no_GPU_readback");
-                LOG_INFO("PERF shared_capture_gpu_us mode=",
-                         the_config->experimental_shared_hemi?"hemi":"cube",
+                LOG_INFO("PERF shared_capture_gpu_us mode=cube",
                          " capture_per_sample=",
                          shared_capture_gpu_samples_window
                            ?(shared_capture_gpu_ns_window/1000U)/
@@ -6172,12 +6171,9 @@ namespace jkgm {
                 }
                 auto const &capture_camera=active_probe
                     ?active_probe->camera:frame_camera.camera;
-                // Sample the ready texture's real projection, not the live
-                // experiment flag (which can differ during reconfiguration).
-                int const capture_projection=hemi_active
-                    ?(reflection_mode==7 &&
-                      active_probe->target->layers()==2?5:reflection_mode)
-                    :0;
+                // Shared (mode 7) is always a cubemap; only dedicated
+                // Hemi (mode 5) uses the dual-paraboloid projection.
+                int const capture_projection=hemi_active?reflection_mode:0;
                 prog.set_hemi_reflection(hemi_active,
                     make_point(capture_camera.right[0],
                                capture_camera.right[1],
@@ -11422,11 +11418,11 @@ namespace jkgm {
                 the_config->enable_reflection_capture &&
                 shared_reflection_ready_this_frame();
             if(!ready) {
-                shader.set_shared_reflection(false,false);
+                shader.set_shared_reflection(false);
                 return;
             }
             auto const it=reflection_probes.find(shared_reflection_owner_key);
-            shader.set_shared_reflection(true,it->second.target->layers()==2);
+            shader.set_shared_reflection(true);
             gl::set_active_texture_unit(23);
             gl::bind_texture_raw(GL_TEXTURE_2D_ARRAY,
                           it->second.target->color_texture());

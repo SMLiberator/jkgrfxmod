@@ -557,12 +557,11 @@ void jkgm::shaders::world_cache_preview_shader::set_matcap(
     }
 }
 void jkgm::shaders::world_cache_preview_shader::set_shared_reflection(
-    bool ready,bool hemisphere)
+    bool ready)
 {
     gl::set_uniform_integer(shared_reflection_sampler,23);
-    // 0=absent, 1=Cube (six layers), 2=Hemi (two disks).
-    gl::set_uniform_integer(shared_reflection_ready,
-                            ready?(hemisphere?2:1):0);
+    // Shared always uses a six-layer cubemap.
+    gl::set_uniform_integer(shared_reflection_ready,ready?1:0);
 }
 void jkgm::shaders::world_cache_preview_shader::set_reflection_camera(
     std::array<float,3> const &position,

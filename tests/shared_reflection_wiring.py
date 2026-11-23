@@ -31,14 +31,17 @@ assert '?0U:candidate.owner' in capture
 assert '!candidate.is_global && !candidate.is_shared &&' in capture
 assert 'capture_static_owner(owner)' in capture  # Cog-only global capture survives
 assert 'the_config->reflection_capture_update_interval' in capture
+assert 'bool const paraboloid_mode=selected_mode==5;' in capture
 assert 'int const face_count=paraboloid_mode?2:6;' in capture
+assert '"SHARED cube owner="' in capture
 assert 'effective_capture_reflection_mode(material.reflection_mode)==7' in renderer
 assert 'reflection_probes.find(shared_reflection_owner_key)' in renderer
 assert 'bind_world_shared_reflection(shader);' in renderer
 assert renderer.count('bind_world_shared_reflection(shader);')==2
-assert 'void set_shared_reflection(bool ready,bool hemisphere)' in shader_h
+assert 'void set_shared_reflection(bool ready);' in shader_h
 assert 'world_cache_preview_shader::set_shared_reflection(' in shader_cpp
-assert 'bool ready,bool hemisphere)' in shader_cpp
+assert 'bool ready)' in shader_cpp
+assert 'ready?1:0' in shader_cpp
 assert '"shared_reflection_map",23,sampler_kind::texture_array' in samplers
 assert '#ifdef JKGM_REFLECTION_PROBE' in world
 assert 'uniform sampler2DArray shared_reflection_map;' in world
@@ -46,6 +49,10 @@ assert 'has_shared=mode==7 && shared_reflection_ready!=0;' in world
 assert 'coverage=textureLod(shared_reflection_map,' in world
 assert 'mode==6 || mode==7' in model
 assert 'has_hemi=(mode==5 || mode==6 || mode==7)' in model
+assert 'if(mode==5)' in model
+assert '(mode==7 &&' not in model
+assert 'shared_reflection_ready==2' not in world
+assert 'vec3 a=abs(world_dir);' in world
 assert 'vec2 env_uv=mode==3' not in world
 assert 'vec2 env_uv=mode==3' not in model
 assert 'max(max(planar.a,screen.a),has_shared?1.0:0.0)' in world

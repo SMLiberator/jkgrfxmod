@@ -377,10 +377,6 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             j.at("enable_reflection_probes").get_to(
                 rv->enable_reflection_probes);
         }
-        if(j.contains("experimental_shared_hemi")) {
-            j.at("experimental_shared_hemi").get_to(
-                rv->experimental_shared_hemi);
-        }
         if(j.contains("debug_reflection_mode")) {
             auto const &v=j.at("debug_reflection_mode");
             if(!v.is_string())throw std::runtime_error(
