@@ -1428,7 +1428,7 @@ private:
         }
     }
     void showTextureDetails(const char *key,const std::string &storedFile,
-                            bool previewMatches=true) {
+                            bool previewMatches=true,bool packField=false) {
         const int index=imageSlot(key);
         if(index<0)return;
         const auto slot=static_cast<PreviewTexture>(index);
@@ -1463,7 +1463,7 @@ private:
             else
                 ImGui::SetTooltip("Load an image to assign this map.");
         }
-        sourceTextureContextMenu(key,false);
+        sourceTextureContextMenu(key,packField);
         if(!ImGui::BeginPopup("##textureChannels"))return;
         if(!storedFile.empty())
             ImGui::TextWrapped("%s",storedFile.c_str());
@@ -1531,22 +1531,21 @@ private:
         ImGui::PopID();
     }
     void packTextureField(const char *label,const char *key) {
-        packTextField(label,key,false,true);
         ImGui::PushID(key);
-        sourceTextureActions(key,true);
+        ImGui::TextUnformatted(label);
         const auto file=stringValue(root_,key);
-        if(!file.empty()) {
-            std::error_code ec;
-            const bool staged=stagedImages_.count(file)!=0;
-            if(!staged&&!fs::exists(fs::u8path(file_).parent_path()/
-                                   fs::u8path(file),ec))
-                ImGui::TextDisabled("Source texture is missing.");
-            // The material preview's GPU texture is valid for this default
-            // only if the selected material actually inherits the same file.
-            if(validSelection())
-                showTextureDetails(key,file,
-                    stringValue(effectiveSelected(),key)==file);
+        bool matches=false;
+        if(validSelection()) {
+            const auto selectedFile=stringValue(effectiveSelected(),key);
+            matches=selectedFile==file;
+            if(std::string(key)=="environment_map"&&selectedFile.empty())
+                matches=true; // The preview falls back to the pack EnvMap.
         }
+        showTextureDetails(key,file,matches,true);
+        ImGui::SameLine();
+        ImGui::BeginGroup();
+        sourceTextureActions(key,true);
+        ImGui::EndGroup();
         ImGui::PopID();
     }
     void packTextField(const char *label,const char *key,
@@ -1572,17 +1571,7 @@ private:
         packTextField("Name","name");
         packTextField("Description","description",true);
         packTextField("Comment (optional)","comment",true,true);
-        packTextField("Default environment map (optional)","environment_map",
-                      false,true);
-        if(loaded_) {
-            ImGui::PushID("pack_environment_map");
-            sourceTextureActions("environment_map",true);
-            const auto file=stringValue(root_,"environment_map");
-            if(!file.empty()&&validSelection())
-                showTextureDetails("environment_map",file,
-                    stringValue(effectiveSelected(),"environment_map")==file);
-            ImGui::PopID();
-        }
+        packTextureField("Default environment map","environment_map");
         const std::string env=stringValue(root_,"environment_map");
         if(!env.empty()&&!stagedImages_.count(env)) {
             std::error_code ec;
@@ -1776,10 +1765,8 @@ private:
     void renderSourcePackDefaults() {
         ImGui::Separator();
         if(!ImGui::CollapsingHeader("Source material defaults"))return;
-        ImGui::TextWrapped(
-            "These properties apply to source materials without their own "
-            "overrides. Use x to remove a pack-wide default.");
-        if(ImGui::TreeNode("Default texture paths")) {
+        ImGui::TextDisabled("Defaults apply where a material has no override.");
+        if(ImGui::TreeNode("Default textures")) {
             for(const auto &entry:std::initializer_list<std::pair<const char*,const char*>>{
                 {"Albedo map","albedo_map"},{"Emissive map","emissive_map"},
                 {"Normal map","normal_map"},{"Normal map 2","normal_map2"},
