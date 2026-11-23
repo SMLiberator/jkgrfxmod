@@ -319,6 +319,8 @@ public:
                                    "Ctrl+S",false,loaded_))save();
                 if(ImGui::MenuItem("Save As...","Ctrl+Shift+S",false,loaded_))
                     saveAs();
+                if(ImGui::MenuItem("Revert",nullptr,false,loaded_))
+                    requestRevertPack();
                 ImGui::Separator();
                 if(ImGui::BeginMenu("JK / MotS game assets")) {
                     renderGameAssetMenu();
@@ -338,6 +340,10 @@ public:
                 if(ImGui::MenuItem(redoLabel.c_str(),"Ctrl+Y / Ctrl+Shift+Z",
                                    false,!redo_.empty()))
                     redo();
+                ImGui::Separator();
+                if(ImGui::MenuItem("Revert Material",nullptr,false,
+                                   canRevertMaterial()))
+                    revertSelectedMaterial();
                 ImGui::EndMenu();
             }
             if(ImGui::BeginMenu("Tools")) {
@@ -353,6 +359,7 @@ public:
         renderViewport();
         renderProperties();
         renderUnsavedDialog();
+        renderRevertDialog();
         // These in-app tools show live widget/layout geometry, hover IDs,
         // docking internals and an editable palette for UI experimentation.
         if(showDemo_)ImGui::ShowDemoWindow(&showDemo_);
@@ -519,6 +526,28 @@ private:
         } else if(action==PendingAction::Open) {
             openFile();
         }
+    }
+    void renderRevertDialog() {
+        if(openRevertDialog_) {
+            ImGui::OpenPopup("Revert pack##confirmation");
+            openRevertDialog_=false;
+        }
+        if(!ImGui::BeginPopupModal("Revert pack##confirmation",nullptr,
+                                   ImGuiWindowFlags_AlwaysAutoResize))
+            return;
+        ImGui::TextWrapped("Reload %s from disk?",
+                           fs::u8path(file_).filename().u8string().c_str());
+        ImGui::TextWrapped("All unsaved material and pack changes will be lost.");
+        ImGui::TextWrapped("The pack's Undo/Redo history will be cleared.");
+        ImGui::Separator();
+        if(ImGui::Button("Revert changes",ImVec2(150,0))) {
+            if(revertPack())ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if(ImGui::Button("Cancel",ImVec2(90,0))||
+           ImGui::IsKeyPressed(ImGuiKey_Escape))
+            ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
     }
     void renderUnsavedDialog() {
         if(openUnsavedDialog_) {
@@ -734,6 +763,21 @@ private:
         return loaded_&&selection_>=0&&
                size_t(selection_)<root_["materials"].size();
     }
+    bool canRevertMaterial() const {
+        return validSelection()&&savedRoot_.contains("materials")&&
+               savedRoot_["materials"].is_array()&&
+               size_t(selection_)<savedRoot_["materials"].size()&&
+               selected()!=savedRoot_["materials"][size_t(selection_)];
+    }
+    void revertSelectedMaterial() {
+        if(!canRevertMaterial())return;
+        const auto index=size_t(selection_);
+        if(!editor_source::revertMaterial(root_,savedRoot_,index))return;
+        // Record as one ordinary material edit, so Ctrl+Z restores the
+        // previous unsaved state without affecting other materials or defaults.
+        changed("Revert Material");
+        status_="Restored material from last save (Undo available).";
+    }
     void changed(const char *key="Material property",bool continuous=false) {
         if(!validSelection())return;
         Document &entry=selected();
@@ -826,6 +870,36 @@ private:
         }
         preview_->setMaterial(p);
     }
+    void activatePack(Document doc,const std::string &path,
+                      int preferredIndex=-1,const std::string &preferredName={}) {
+        const auto kind=editor_source::detect(fs::u8path(path),doc);
+        int target=doc["materials"].empty()?-1:0;
+        if(target>=0&&preferredIndex>=0) {
+            target=std::min(preferredIndex,int(doc["materials"].size())-1);
+            if(!preferredName.empty()) {
+                for(size_t i=0;i<doc["materials"].size();++i) {
+                    const auto &mat=doc["materials"][i];
+                    if(mat.is_object()&&stringValue(mat,"name")==preferredName) {
+                        target=int(i);
+                        break;
+                    }
+                }
+            }
+        }
+        root_=std::move(doc);
+        mode_=kind;
+        observedRoot_=root_;savedRoot_=root_;
+        undo_.clear();redo_.clear();groupActive_=false;
+        sectionSelection_=-2;
+        sectionSeen_.fill(false);
+        sectionActive_.fill(false);
+        inspectedChannel_=0;
+        file_=path;loaded_=true;dirty_=false;
+        selection_=target;
+        nativeCacheKey_.clear();
+        nativeLoaded_={};nativeStatus_.clear();
+        syncPreview();
+    }
     void open() {
         if(dirty_) {
             pendingAction_=PendingAction::Open;
@@ -838,30 +912,39 @@ private:
         const std::string path=chooseFile(window_,false);
         if(path.empty())return;
         try {
-            std::ifstream stream(fs::u8path(path),std::ios::binary);
-            if(!stream)throw std::runtime_error("Unable to open file.");
-            Document doc;stream>>doc;
-            if(!doc.is_object()||doc.find("materials")==doc.end()||
-               !doc["materials"].is_array())
-                throw std::runtime_error("Not a material pack (missing materials array).");
-            const auto kind=editor_source::detect(fs::u8path(path),doc);
-            root_=std::move(doc);
-            mode_=kind;
-            observedRoot_=root_; savedRoot_=root_;
-            undo_.clear(); redo_.clear(); groupActive_=false;
-            sectionSelection_=-2;
-            sectionSeen_.fill(false);
-            sectionActive_.fill(false);
-            inspectedChannel_=0;
-            file_=path;loaded_=true;dirty_=false;
-            selection_=root_["materials"].empty()?-1:0;
-            nativeCacheKey_.clear();
-            syncPreview();
-            status_=std::string(isSource()?"Opened source script.json: ":"Opened compiled metadata.json: ")+
+            Document doc=editor_source::readPack(fs::u8path(path));
+            activatePack(std::move(doc),path);
+            status_=std::string(isSource()?"Opened source script.json: ":
+                                 "Opened compiled metadata.json: ")+
                     std::to_string(root_["materials"].size())+" materials.";
         } catch(const std::exception &e) {
             status_=std::string("Open failed: ")+e.what();
-            MessageBoxA(glfwGetWin32Window(window_),status_.c_str(),"Material editor",MB_ICONERROR);
+            MessageBoxA(glfwGetWin32Window(window_),status_.c_str(),
+                        "Material editor",MB_ICONERROR);
+        }
+    }
+    void requestRevertPack() {
+        if(!loaded_)return;
+        if(dirty_)openRevertDialog_=true;
+        else revertPack(); // Also useful to reload external disk edits.
+    }
+    bool revertPack() {
+        if(!loaded_)return false;
+        try {
+            // Read before touching the current document. A missing, locked,
+            // or malformed disk file must leave all unsaved edits intact.
+            Document disk=editor_source::readPack(fs::u8path(file_));
+            const int index=selection_;
+            const std::string name=validSelection()?
+                stringValue(selected(),"name"):std::string{};
+            activatePack(std::move(disk),file_,index,name);
+            status_="Reloaded pack from disk; Undo/Redo history cleared.";
+            return true;
+        } catch(const std::exception &e) {
+            status_=std::string("Revert failed: ")+e.what();
+            MessageBoxA(glfwGetWin32Window(window_),status_.c_str(),
+                        "Revert failed",MB_ICONERROR);
+            return false;
         }
     }
     void save() {writeMetadata(file_,false);}
@@ -1910,7 +1993,8 @@ private:
     NativeMatImage nativeLoaded_;
     std::string nativeCacheKey_,nativeStatus_;
     bool loaded_=false,dirty_=false,groupActive_=false,
-         layoutConfigured_=false,openUnsavedDialog_=false,exitApproved_=false;
+         layoutConfigured_=false,openUnsavedDialog_=false,
+         openRevertDialog_=false,exitApproved_=false;
     bool showDemo_=false,showMetrics_=false,showStyleEditor_=false;
     PendingAction pendingAction_=PendingAction::None;
     int selection_=-1,environment_=0;
