@@ -189,6 +189,67 @@ void testExclusiveAlbedoSource() {
     editor_source::validate(root,editor_source::Kind::Source);
 }
 
+void testDuplicateMaterial() {
+    Document source={
+        {"name","Variants"},{"description","Material copies"},
+        {"roughness",0.6f},
+        {"materials",Document::array({
+            {{"name","Vehicle paint"},
+             {"replaces",Document::array({"mat/car.mat"})},
+             {"albedo_map","body.png"},
+             {"normal_strength",0.75f}},
+            {{"name","VEHICLE PAINT (COPY)"},
+             {"replaces",Document::array({"mat/other.mat"})}}
+        })}
+    };
+    const auto unchanged=source["materials"][0];
+    const size_t first=editor_source::duplicateMaterial(source,0);
+    check(first==2,"duplicate must append the copy");
+    check(source["materials"][first]["name"]=="Vehicle paint (copy 2)",
+          "copy name must avoid case-insensitive collisions");
+    Document cloned=source["materials"][first];
+    cloned["name"]=unchanged["name"];
+    check(cloned==unchanged,
+          "duplicate must preserve all source material fields");
+    source["materials"][first]["albedo_map"]="variant.png";
+    check(source["materials"][0]==unchanged,
+          "editing a duplicate must not modify its source");
+    editor_source::validate(source,Kind::Source);
+    const size_t next=editor_source::duplicateMaterial(source,0);
+    check(source["materials"][next]["name"]=="Vehicle paint (copy 3)",
+          "repeated copies need unique suffixes");
+    editor_source::validate(source,Kind::Source);
+    const Document afterCopy=source["materials"];
+    source["materials"].erase(first);
+    source["materials"]=afterCopy; // Structural Undo restores the whole list.
+    check(source["materials"][first]["albedo_map"]=="variant.png",
+          "structural Undo must restore the duplicate's edited state");
+
+    Document compiled={
+        {"name","Compiled"},{"description","Compiled copies"},
+        {"materials",Document::array({{
+            {"name","Body"},{"roughness",0.3f},
+            {"replaces",Document::array({
+                {{"name","mat/car.mat"},{"cel",2}}})},
+            {"replaces_signatures",Document::array({
+                "0123456789abcdef0123456789abcdef"})}
+        }})}
+    };
+    const auto compiledOriginal=compiled["materials"][0];
+    const size_t compiledCopy=editor_source::duplicateMaterial(compiled,0);
+    check(compiled["materials"][compiledCopy]["name"]=="Body (copy)",
+          "compiled material duplicate gets an independent name");
+    cloned=compiled["materials"][compiledCopy];
+    cloned["name"]=compiledOriginal["name"];
+    check(cloned==compiledOriginal,
+          "compiled duplicate must preserve MAT signatures and properties");
+    editor_source::validate(compiled,Kind::Compiled);
+    bool rejected=false;
+    try {editor_source::duplicateMaterial(compiled,999);}
+    catch(const std::runtime_error &) {rejected=true;}
+    check(rejected,"out-of-range duplicates must fail without mutation");
+}
+
 void testMaterialListEdits() {
     Document source={
         {"name","Editable"},{"description","Material management"},
@@ -366,7 +427,7 @@ int main(){
     try {
         testSourceInheritance();testPackAlbedoAndAlphaOverrides();
         testAnimationInheritance();
-        testMaterialListEdits();
+        testMaterialListEdits();testDuplicateMaterial();
         testMatReplacementEditing();testExclusiveAlbedoSource();
         testCompiledAndValidation();testRepositorySourcePack();
         testRevertMaterialAndPack();
