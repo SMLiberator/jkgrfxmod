@@ -12,6 +12,7 @@
 #include "common/json_incl.hpp"
 #include "common/stb_image.h"
 #include "preview.hpp"
+#include "editor_image.hpp"
 #include "source_pack.hpp"
 #include "editor_ini_settings.hpp"
 #include <windows.h>
@@ -25,6 +26,7 @@
 #include <fstream>
 #include <limits>
 #include <memory>
+#include <map>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -826,6 +828,12 @@ private:
         effectiveEntry_=editor_source::effectiveMaterial(root_,selected(),mode_);
         PreviewMaterial p=fromMetadata(effectiveEntry_,root_,
                                      fs::u8path(file_).parent_path());
+        for(size_t i=0;i<TextureCount;++i) {
+            const auto name=fs::u8path(p.files[i]).filename().u8string();
+            auto found=stagedImages_.find(name);
+            if(found!=stagedImages_.end())
+                p.stagedImages[i]=found->second;
+        }
         // Source textures are straight-alpha input; compiled color PNGs
         // have been premultiplied by the pack compiler.
         p.albedoPremultiplied=!isSource();
@@ -887,6 +895,7 @@ private:
             }
         }
         root_=std::move(doc);
+        stagedImages_.clear();
         mode_=kind;
         observedRoot_=root_;savedRoot_=root_;
         undo_.clear();redo_.clear();groupActive_=false;
@@ -1254,41 +1263,92 @@ private:
             if(std::string(key)==item.first)return int(item.second);
         return -1;
     }
-    void assignSourceTexture(const char *key,bool importCopy,bool packField) {
-        if(!isSource())return;
+    static editor_images::Role textureRole(const char *key) {
+        const std::string field(key);
+        if(field=="albedo_map")
+            return editor_images::Role::Albedo;
+        if(field=="displacement_map")
+            return editor_images::Role::Height;
+        if(field=="emissive_map"||field=="matcap_map"||
+           field=="environment_map")
+            return editor_images::Role::Color;
+        return editor_images::Role::Data;
+    }
+    std::string reservedTextureName(const std::string &selectedFile) const {
+        const fs::path original=fs::u8path(selectedFile);
+        std::string name=original.stem().u8string();
+        if(name.empty())name="texture";
+        // Avoid invalid Windows filename chars in imported output names.
+        for(char &ch:name)
+            if(ch=='<'||ch=='>'||ch==':'||ch=='"'||ch=='/'||
+               ch=='\\'||ch=='|'||ch=='?'||ch=='*')
+                ch='_';
+        const auto directory=fs::u8path(file_).parent_path();
+        for(unsigned suffix=1;suffix<100000;++suffix) {
+            const auto proposed=name+"-import-"+std::to_string(suffix)+".png";
+            if(stagedImages_.count(proposed))continue;
+            std::error_code ec;
+            if(!fs::exists(directory/fs::u8path(proposed),ec))
+                return proposed;
+        }
+        throw std::runtime_error("Could not reserve a unique texture filename.");
+    }
+    void stageTexture(const char *key,bool packField) {
+        if(!loaded_)return;
         const std::string chosen=chooseFile(
             window_,true,fs::u8path(file_).parent_path().u8string());
         if(chosen.empty())return;
         try {
+            const auto role=textureRole(key);
+            auto image=std::make_shared<const editor_images::Image>(
+                editor_images::load(fs::u8path(chosen),role,isSource()));
+            const std::string name=reservedTextureName(chosen);
+            // Reference the eventual pack-local PNG without writing it yet.
+            stagedImages_[name]=std::move(image);
+            Document &obj=packField?root_:selected();
+            obj[key]=name;
+            if(packField)changedPack(key);
+            else changed(key);
+            status_="Staged texture in memory ("+std::to_string(
+                stagedImages_[name]->channels)+" channels). Save to write PNG.";
+        } catch(const std::exception &e) {
+            status_=std::string("Texture import failed: ")+e.what();
+            MessageBoxA(glfwGetWin32Window(window_),status_.c_str(),
+                        "Material texture",MB_ICONERROR);
+        }
+    }
+    void referenceSourceTexture(const char *key,bool packField) {
+        if(!isSource())return;
+        const auto chosen=chooseFile(
+            window_,true,fs::u8path(file_).parent_path().u8string());
+        if(chosen.empty())return;
+        try {
             validateSelectedImage(chosen);
-            const auto stored=importCopy
-                ?importedImagePath(file_,chosen)
-                :referencedImagePath(file_,chosen);
+            const std::string stored=referencedImagePath(file_,chosen);
             Document &obj=packField?root_:selected();
             obj[key]=stored;
             if(packField)changedPack(key);
             else changed(key);
-            status_=importCopy
-                ?"Copied texture into the source pack; save the script to keep its reference."
-                :"Referenced texture without copying; save the script to keep its reference.";
+            status_="Referenced source texture without copying.";
         } catch(const std::exception &e) {
-            status_=std::string("Texture selection failed: ")+e.what();
+            status_=std::string("Reference failed: ")+e.what();
             MessageBoxA(glfwGetWin32Window(window_),status_.c_str(),
                         "Material texture",MB_ICONERROR);
         }
     }
     void sourceTextureActions(const char *key,bool packField) {
-        if(!isSource())return;
+        if(!loaded_)return;
         ImGui::PushID("##sourceTextureActions");
-        if(ImGui::SmallButton("Reference..."))
-            assignSourceTexture(key,false,packField);
-        ImGui::SameLine();
-        if(ImGui::SmallButton("Import copy..."))
-            assignSourceTexture(key,true,packField);
+        if(isSource()) {
+            if(ImGui::SmallButton("Reference..."))
+                referenceSourceTexture(key,packField);
+            ImGui::SameLine();
+        }
+        if(ImGui::SmallButton(isSource()?"Import PNG (on Save)...":
+                                       "Load PNG (on Save)..."))
+            stageTexture(key,packField);
         Document &obj=packField?root_:selected();
         if(obj.contains(key)) {
-            // Keep this on its own row: narrow inspector panels shouldn't
-            // clip the third action beside Reference and Import.
             if(ImGui::SmallButton("Remove override")) {
                 obj.erase(key);
                 if(packField)changedPack(key);
@@ -1382,8 +1442,8 @@ private:
         ImGui::PushID(key);
         ImGui::PushID(label);
         if(isSource()) {
-            // Reference and import are different actions. A copied file is
-            // intentionally not removed when an undo reverts its JSON path.
+            // Source references remain verbatim, whereas imports are held
+            // as processed pixels until Save.
             ImGui::TextUnformatted(label);
             const bool inherited=editor_source::isInherited(root_,selected(),key,mode_) ||
                 (std::string(key)=="environment_map"&&
@@ -1404,15 +1464,15 @@ private:
                 return;
             }
         } else {
-            if(value.empty()) {
-                if(imageSlot(key)!=BaseMap ||
-                   !preview_->imageInfo(BaseMap).valid()) {
-                    ImGui::PopID();
-                    ImGui::PopID();
-                    return;
-                }
-            } else
-                ImGui::TextWrapped("%s: %s",label,value.c_str());
+            ImGui::TextUnformatted(label);
+            if(!value.empty())
+                ImGui::TextWrapped("%s",value.c_str());
+            sourceTextureActions(key,false);
+            if(value.empty()&&
+               (imageSlot(key)!=BaseMap||
+                !preview_->imageInfo(BaseMap).valid())) {
+                ImGui::PopID();ImGui::PopID();return;
+            }
         }
         showTextureDetails(key,value);
         ImGui::PopID();
@@ -1460,7 +1520,7 @@ private:
         packTextField("Comment (optional)","comment",true,true);
         packTextField("Default environment map (optional)","environment_map",
                       false,true);
-        if(isSource()) {
+        if(loaded_) {
             ImGui::PushID("pack_environment_map");
             sourceTextureActions("environment_map",true);
             const auto file=stringValue(root_,"environment_map");
@@ -1943,7 +2003,7 @@ private:
             imageInfo("Coat surface","clearcoat_surface_map");
             imageInfo("Coat normal","clearcoat_normal_map");
             ImGui::Separator();
-            ImGui::TextWrapped("MAT replacements and signatures are preserved exactly when saving. Compiled textures are read-only.");
+            ImGui::TextWrapped("MAT replacements and signatures are preserved. Imported images are written on Save.");
         }
         ImGui::PopID();
         ImGui::PopID();
@@ -1989,6 +2049,10 @@ private:
     editor_source::Kind mode_=editor_source::Kind::Compiled;
     std::vector<Edit> undo_,redo_;
     std::string file_,status_,override_;
+    // Drafts survive Undo/Redo until a pack is closed or reverted. An
+    // unreferenced draft is never written to disk during Save.
+    std::map<std::string,std::shared_ptr<const editor_images::Image>>
+        stagedImages_;
     NativeMatSource nativeSource_;
     NativeMatImage nativeLoaded_;
     std::string nativeCacheKey_,nativeStatus_;
