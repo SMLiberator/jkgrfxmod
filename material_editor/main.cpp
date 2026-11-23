@@ -1377,11 +1377,51 @@ private:
             renderMaterialProperties();
         ImGui::End();
     }
+    // A section is initially open only when its material feature is in use.
+    // Each material has independent ImGui open/closed state, so switching
+    // selection doesn't discard manual expansion choices.
+    bool materialSection(const char *label,int index,bool active) {
+        if(index<0||index>=int(sectionSeen_.size()))
+            return ImGui::CollapsingHeader(label);
+        if(!sectionSeen_[index]) {
+            ImGui::SetNextItemOpen(active,ImGuiCond_Once);
+            sectionSeen_[index]=true;
+        } else if(active&&!sectionActive_[index]) {
+            // A newly assigned map/factor automatically exposes its section.
+            // Never auto-collapse when a map is cleared or when user toggles.
+            ImGui::SetNextItemOpen(true,ImGuiCond_Always);
+        }
+        sectionActive_[index]=active;
+        return ImGui::CollapsingHeader(label);
+    }
     void renderMaterialProperties() {
         if(!validSelection()) {
             ImGui::TextWrapped("Select a material to edit its properties.");
             return;
         }
+        if(sectionSelection_!=selection_) {
+            sectionSelection_=selection_;
+            sectionSeen_.fill(false);
+            sectionActive_.fill(false);
+        }
+        ImGui::PushID(selection_);
+        const Document &effective=effectiveSelected();
+        const auto usesMap=[&](const char *key) {
+            return !stringValue(effective,key).empty();
+        };
+        const auto emissive=rgb(effective,"emissive_factor",{0,0,0});
+        const bool emits=usesMap("emissive_map")||
+            std::any_of(emissive.begin(),emissive.end(),
+                        [](float value){return value>0.00001f;})||
+            effective.contains("emissive_pulse");
+        const bool reflects=usesMap("surface_map")||
+            number(effective,"reflection_strength",0.0f)>0.00001f;
+        const bool normals=usesMap("normal_map")||usesMap("normal_map2");
+        const bool parallax=usesMap("displacement_map");
+        const bool coat=usesMap("clearcoat_surface_map")||
+            usesMap("clearcoat_normal_map")||
+            number(effective,"clearcoat_strength",0.0f)>0.00001f;
+        const bool matcap=usesMap("matcap_map");
         const std::string name=stringValue(selected(),"name");
         if(isSource()) {
             std::string updated=name;
@@ -1400,7 +1440,7 @@ private:
             ImGui::TextDisabled(
                 "Changes update the preview immediately; save metadata separately.");
         }
-        if(ImGui::CollapsingHeader("Albedo",ImGuiTreeNodeFlags_DefaultOpen)) {
+        if(materialSection("Albedo",0,true)) {
             auto v=rgba(effectiveSelected(),"albedo_factor",{1,1,1,1});
             colorField("Tint / alpha","albedo_factor",v.data(),4);
             if(isSource()) {
@@ -1449,7 +1489,7 @@ private:
             else
                 ImGui::TextDisabled("Existing compiled PNG textures are read-only.");
         }
-        if(ImGui::CollapsingHeader("Emissive",ImGuiTreeNodeFlags_DefaultOpen)) {
+        if(materialSection("Emissive",1,emits)) {
             auto v=rgb(effectiveSelected(),"emissive_factor",{0,0,0});
             if(ImGui::DragFloat3("Emissive RGB",v.data(),.05f,0,32,"%.2f")) {
                 setArray(selected(),"emissive_factor",v.data(),3);
@@ -1457,7 +1497,7 @@ private:
             }
             imageInfo("Emissive map","emissive_map");
         }
-        if(ImGui::CollapsingHeader("Reflections",ImGuiTreeNodeFlags_DefaultOpen)) {
+        if(materialSection("Reflections",2,reflects)) {
             bool hasSurface=effectiveSelected().find("surface_map")!=effectiveSelected().end();
             floatField("Strength","reflection_strength",hasSurface?1.0f:0.0f,0,1,true);
             if(number(effectiveSelected(),"reflection_strength",hasSurface?1.0f:0.0f)>1.0f)
@@ -1472,12 +1512,12 @@ private:
             ImGui::TextDisabled("Preview uses EnvMap for all game reflection modes.");
             imageInfo("Surface (R/G/B)","surface_map");
         }
-        if(ImGui::CollapsingHeader("Normal maps",ImGuiTreeNodeFlags_DefaultOpen)) {
+        if(materialSection("Normal maps",3,normals)) {
             floatField("Normal strength","normal_strength",1,0,4);
             floatField("Layer 2 strength","normal_strength2",1,0,4);
             imageInfo("Normal 1","normal_map");imageInfo("Normal 2","normal_map2");
         }
-        if(ImGui::CollapsingHeader("Parallax mapping",ImGuiTreeNodeFlags_DefaultOpen)) {
+        if(materialSection("Parallax mapping",4,parallax)) {
             imageInfo("Displacement map","displacement_map");
             ImGui::TextUnformatted("Displacement factor");
             ImGui::PushID("displacement_factor");
@@ -1503,7 +1543,7 @@ private:
             if(!effectiveSelected().contains("displacement_map"))
                 ImGui::TextDisabled("A displacement texture is required.");
         }
-        if(ImGui::CollapsingHeader("Clearcoat",ImGuiTreeNodeFlags_DefaultOpen)) {
+        if(materialSection("Clearcoat",5,coat)) {
             bool map=effectiveSelected().find("clearcoat_surface_map")!=effectiveSelected().end();
             floatField("Coat strength","clearcoat_strength",map?1.0f:0.0f,0,1);
             floatField("Coat roughness","clearcoat_roughness",.1f,0,1);
@@ -1511,7 +1551,7 @@ private:
             imageInfo("Coat RGB","clearcoat_surface_map");
             imageInfo("Coat normal","clearcoat_normal_map");
         }
-        if(ImGui::CollapsingHeader("MatCap",ImGuiTreeNodeFlags_DefaultOpen)) {
+        if(materialSection("MatCap",6,matcap)) {
             floatField("MatCap roughness","matcap_roughness",0,0,1);
             auto v=rgb(effectiveSelected(),"matcap_factor",{1,1,1});
             if(ImGui::DragFloat3("MatCap RGB factor",v.data(),.02f,0,4,"%.2f")) {
@@ -1521,7 +1561,7 @@ private:
             imageInfo("MatCap","matcap_map");
             imageInfo("MatCap mask","matcap_surface_map");
         }
-        if(ImGui::CollapsingHeader("Other settings")) {
+        if(materialSection("Other settings",7,false)) {
             static const char *alphas[]={"blend","mask","dithered"};
             static const char *alphaLabels[]={"Blend (smooth alpha)","Mask (alpha cutoff)",
                                               "Dithered transparency"};
@@ -1541,9 +1581,9 @@ private:
             floatField("Depth bias","depth_bias",0,-16,16);
         }
         if(isSource()) {
-            if(ImGui::CollapsingHeader("Material environment override"))
+            if(materialSection("Material environment override",8,usesMap("environment_map")))
                 imageInfo("Environment map","environment_map");
-        } else if(ImGui::CollapsingHeader("Compiled textures")) {
+        } else if(materialSection("Compiled textures",9,false)) {
             imageInfo("Environment","environment_map");
             imageInfo("Albedo","albedo_map");
             imageInfo("Surface","surface_map");
@@ -1556,8 +1596,9 @@ private:
             imageInfo("Coat surface","clearcoat_surface_map");
             imageInfo("Coat normal","clearcoat_normal_map");
             ImGui::Separator();
-            ImGui::TextWrapped("MAT replacements/signatures are preserved exactly when saving. Texture importing and incremental recompilation are not included in this milestone.");
+            ImGui::TextWrapped("MAT replacements and signatures are preserved exactly when saving. Compiled textures are read-only.");
         }
+        ImGui::PopID();
     }
     void comboField(const char *label,const char *key,
                     const char *const*values,const char *const*labels,int count) {
@@ -1618,6 +1659,9 @@ private:
     float dragStartYaw_=0.35f,dragStartPitch_=-0.15f;
     ImGuiMouseButton dragButton_=ImGuiMouseButton_Left;
     ImGuiTextFilter filter_;
+    int sectionSelection_=-2;
+    std::array<bool,10> sectionSeen_{};
+    std::array<bool,10> sectionActive_{};
 };
 
 int runEditor() {
