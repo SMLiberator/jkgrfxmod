@@ -92,27 +92,6 @@ void validateSelectedImage(const std::string &filename) {
        std::uint64_t(width)*std::uint64_t(height)>16777216ull)
         throw std::runtime_error("Unsupported image file or dimensions.");
 }
-std::string importedImagePath(const std::string &script,const std::string &chosen) {
-    const fs::path source=fs::u8path(chosen);
-    if(!fs::is_regular_file(source))
-        throw std::runtime_error("Selected image is not a readable file.");
-    const fs::path directory=fs::u8path(script).parent_path();
-    fs::path destination=directory/source.filename();
-    std::error_code ec;
-    if(fs::equivalent(source,destination,ec))
-        return destination.filename().u8string();
-    // Never overwrite an existing pack-local texture. Use predictable
-    // suffixes and preserve the source image format/extension.
-    unsigned suffix=1;
-    while(fs::exists(destination)) {
-        if(suffix>99999)
-            throw std::runtime_error("No free import filename.");
-        destination=directory/(source.stem().u8string()+"-"+
-            std::to_string(suffix++)+source.extension().u8string());
-    }
-    fs::copy_file(source,destination,fs::copy_options::none);
-    return destination.filename().u8string();
-}
 std::string referencedImagePath(const std::string &script,const std::string &chosen) {
     // A filename inside the script's tree becomes a portable relative path.
     // Other locations stay absolute and are referenced without copying.
@@ -1546,8 +1525,9 @@ private:
         const auto file=stringValue(root_,key);
         if(!file.empty()) {
             std::error_code ec;
-            if(!fs::exists(fs::u8path(file_).parent_path()/
-                           fs::u8path(file),ec))
+            const bool staged=stagedImages_.count(file)!=0;
+            if(!staged&&!fs::exists(fs::u8path(file_).parent_path()/
+                                   fs::u8path(file),ec))
                 ImGui::TextDisabled("Source texture is missing.");
             // The material preview's GPU texture is valid for this default
             // only if the selected material actually inherits the same file.
@@ -1591,7 +1571,7 @@ private:
             ImGui::PopID();
         }
         const std::string env=stringValue(root_,"environment_map");
-        if(!env.empty()) {
+        if(!env.empty()&&!stagedImages_.count(env)) {
             std::error_code ec;
             if(!fs::exists(fs::u8path(file_).parent_path()/fs::u8path(env),ec))
                 ImGui::TextColored(ImVec4(1,.7f,.3f,1),
