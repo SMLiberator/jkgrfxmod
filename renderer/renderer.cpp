@@ -13563,6 +13563,65 @@ namespace jkgm {
             std::unordered_set<uint64_t> acquired_owners;
             for(auto const &inst:offscreen.nodes)
                 if(inst.shadow_owner)acquired_owners.insert(inst.shadow_owner);
+            // Precompute only immutable bounds and native-view transforms.
+            // Portal discovery, posed geometry, material state, GL and alpha
+            // ordering remain on the main thread.
+            std::vector<gpu_3do_instance const *> planar_models;
+            planar_models.reserve(offscreen.nodes.size()+
+                                  frame_gpu_3do_instances.size());
+            for(auto const &inst:offscreen.nodes)
+                planar_models.push_back(&inst);
+            for(auto const &inst:frame_gpu_3do_instances)
+                if(!inst.shadow_owner ||
+                   !acquired_owners.count(inst.shadow_owner))
+                    planar_models.push_back(&inst);
+            std::vector<reflection_capture_parallel_visibility>
+                planar_model_visibility;
+            std::vector<uint8_t> planar_world_rejected;
+            bool planar_parallel=false;
+            if(the_config->experimental_multithreading) {
+                size_t group_work=0U;
+                for(auto const *inst:planar_models)
+                    if(inst->geometry)group_work+=inst->geometry->groups.size();
+                if(group_work+planar_frame_candidates.size()>=512U) {
+                    if(!cpu_visibility_workers)
+                        cpu_visibility_workers=
+                            std::make_unique<cpu_render_workers>();
+                    auto &workers=*cpu_visibility_workers;
+                    if(workers.available()) {
+                        planar_model_visibility.resize(planar_models.size());
+                        planar_world_rejected.resize(
+                            planar_frame_candidates.size(),0U);
+                        auto const &cached_world=*world_cache_target;
+                        planar_parallel=workers.execute([&](unsigned lane) {
+                            for(size_t i=lane;i<planar_models.size();
+                                i+=cpu_render_workers::lanes)
+                                prepare_reflection_capture_parallel_visibility(
+                                    *planar_models[i],view,reflected_frustum,
+                                    false,0.0f,planar_model_visibility[i]);
+                            for(size_t i=lane;i<planar_frame_candidates.size();
+                                i+=cpu_render_workers::lanes) {
+                                auto const &face=planar_frame_candidates[i];
+                                if(face.count==0U || face.passable_adjoin ||
+                                   face.sky_flags!=0U ||
+                                   face.first_index>=cached_world.mesh.indices.size())
+                                    continue;
+                                auto const index=
+                                    cached_world.cached_surface_lookup.size()>
+                                        face.surface_index
+                                    ?cached_world.cached_surface_lookup[face.surface_index]
+                                    :std::numeric_limits<uint32_t>::max();
+                                if(index>=cached_world.mesh.surfaces.size())continue;
+                                auto const &surface=cached_world.mesh.surfaces[index];
+                                planar_world_rejected[i]=
+                                    gpu_3do_batch_outside_frustum(
+                                        reflected_frustum,view,
+                                        surface.bounds_min,surface.bounds_max)?1U:0U;
+                            }
+                        });
+                    }
+                }
+            }
             offscreen_capture_gl_scope restore;
             glBindFramebuffer(GL_FRAMEBUFFER,planar_capture_target->framebuffer());
             glViewport(0,0,setup.width,setup.height);
@@ -13643,7 +13702,9 @@ namespace jkgm {
             gl::set_front_face_raw(GL_CW); // reflected camera reverses handedness
             std::map<std::tuple<uintptr_t,int32_t,uint32_t>,
                 std::vector<world_cache_draw_candidate const *>> world_groups;
+            size_t planar_world_index=0U;
             for(auto const &face:planar_frame_candidates) {
+                size_t const face_index=planar_world_index++;
                 if(face.count==0U || face.passable_adjoin ||
                    face.sky_flags!=0U ||
                    face.first_index>=cache.mesh.indices.size())
@@ -13653,9 +13714,10 @@ namespace jkgm {
                     :std::numeric_limits<uint32_t>::max();
                 if(index>=cache.mesh.surfaces.size())continue;
                 auto const &surface=cache.mesh.surfaces[index];
-                if(gpu_3do_batch_outside_frustum(
+                if((planar_parallel && planar_world_rejected[face_index]) ||
+                   (!planar_parallel && gpu_3do_batch_outside_frustum(
                        reflected_frustum,view,
-                       surface.bounds_min,surface.bounds_max)) {
+                       surface.bounds_min,surface.bounds_max))) {
                     ++world_culled;continue;
                 }
                 world_groups[std::make_tuple(face.material,face.cel,
@@ -13715,7 +13777,7 @@ namespace jkgm {
             };
             std::vector<planar_emissive_model_group> emissive_models;
             std::vector<planar_emissive_model_group> faded_models;
-            auto draw_model=[&](gpu_3do_instance const &inst) {
+            auto draw_model=[&](gpu_3do_instance const &inst,size_t model_index) {
                 if(inst.shadow_only || inst.camera_hud ||
                    inst.is_projected_decal || inst.is_sprite_quad ||
                    inst.thing_opacity<=0.0f ||
@@ -13740,13 +13802,19 @@ namespace jkgm {
                            sector,planar_thing_sector_visibility))
                         return;
                 }
-                auto const modelview=gpu_3do_native_modelview(
-                    view,inst.transform);
+                auto const *parallel=planar_parallel &&
+                    planar_model_visibility[model_index].ready
+                    ?&planar_model_visibility[model_index]:nullptr;
+                auto const modelview=parallel?parallel->modelview:
+                    gpu_3do_native_modelview(view,inst.transform);
                 if(!gpu_3do_matrix_finite(modelview))return;
                 std::array<float,3> mesh_min{},mesh_max{};
-                if(inst.geometry->cached_group_bounds(mesh_min,mesh_max) &&
-                   gpu_3do_batch_outside_frustum(
-                       reflected_frustum,modelview,mesh_min,mesh_max)) {
+                if((parallel &&
+                    parallel->mesh!=reflection_capture_cull::visible) ||
+                   (!parallel &&
+                    inst.geometry->cached_group_bounds(mesh_min,mesh_max) &&
+                    gpu_3do_batch_outside_frustum(
+                        reflected_frustum,modelview,mesh_min,mesh_max))) {
                     model_culled+=inst.geometry->groups.size();
                     return; // avoid GL cache lookup and every group test
                 }
@@ -13775,10 +13843,14 @@ namespace jkgm {
                 // reverse winding. Two reversals restore the normal front.
                 gl::set_front_face_raw(gpu_3do_reversed_winding(inst.transform)
                     ?GL_CCW:GL_CW);
-                for(auto const &group:inst.geometry->groups) {
-                    if(gpu_3do_batch_outside_frustum(
+                for(size_t group_index=0;
+                    group_index<inst.geometry->groups.size();++group_index) {
+                    auto const &group=inst.geometry->groups[group_index];
+                    if((parallel &&
+                        parallel->groups[group_index]!=reflection_capture_cull::visible) ||
+                       (!parallel && gpu_3do_batch_outside_frustum(
                            reflected_frustum,modelview,
-                           group.bounds_min,group.bounds_max)) {
+                           group.bounds_min,group.bounds_max))) {
                         ++model_culled;continue;
                     }
                     bool const solid=group.solid_color ||
@@ -13819,11 +13891,8 @@ namespace jkgm {
                     ++model_drawn;
                 }
             };
-            for(auto const &inst:offscreen.nodes)draw_model(inst);
-            for(auto const &inst:frame_gpu_3do_instances)
-                if(inst.shadow_owner==0U ||
-                   !acquired_owners.count(inst.shadow_owner))
-                    draw_model(inst);
+            for(size_t i=0;i<planar_models.size();++i)
+                draw_model(*planar_models[i],i);
             // Alpha-faded model groups must composite behind any opaque
             // reflected geometry; sort back-to-front in the mirrored camera.
             if(!faded_models.empty()) {
