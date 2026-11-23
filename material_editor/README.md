@@ -189,10 +189,17 @@ RGB fields display their channel names.
 
 **Left-click/drag** adjusts numeric values normally, **double-click**
 (or Ctrl+click) opens precise numeric entry, and **right-click on a
-numeric control resets it**. Right-click never changes what ordinary left
-click does. On source materials, resetting a local override reveals the
-pack-inherited value. Right-clicking either U/V channel resets the whole
-scroll pair; right-clicking an RGB drag resets the entire RGB factor.
+numeric control resets it**. **Scroll the mouse wheel while hovering a
+numeric slider/drag field** to change its value by **0.05 per wheel tick**
+(up increases, down decreases; fractional wheel deltas work too). Hovered
+controls claim the wheel to avoid scrolling the properties pane at the
+same time. Wheel adjustment is clamped to the parameter's valid range,
+and participates in normal material Undo/Redo. Right-click never changes
+what ordinary left click does. On source materials, resetting a local
+override reveals the pack-inherited value. Right-clicking either U/V
+channel resets the whole scroll pair; right-clicking an RGB drag resets
+the entire RGB factor. The preview canvas still uses the wheel for
+camera zoom instead of numeric editing.
 Pulse fields reset **individually** to their canonical defaults. The live
 preview's lighting slider also resets to **1.00×** on right-click, while
 retaining its explicit **Reset** button for convenience. A separate
