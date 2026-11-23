@@ -197,3 +197,14 @@ target_include_directories(editor-wheel-tests PRIVATE
 if(MSVC)
   target_compile_options(editor-wheel-tests PRIVATE /W3 /EHsc /utf-8)
 endif()
+
+# Interact with ImGui itself (no GLFW window): the pinned slider widget only
+# converts Ctrl+click to text input by default; our wrapper adds double-click.
+add_executable(editor-slider-tests
+  editor_slider_tests.cpp editor_slider.hpp)
+target_include_directories(editor-slider-tests PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/..)
+target_link_libraries(editor-slider-tests PRIVATE editor_imgui)
+if(MSVC)
+  target_compile_options(editor-slider-tests PRIVATE /W3 /EHsc /utf-8)
+endif()
