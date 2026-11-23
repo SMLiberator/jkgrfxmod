@@ -16,6 +16,9 @@ assert '#include "cpu_render_workers.hpp"' in renderer
 assert "if(prepare_both && the_config->experimental_multithreading)" in renderer
 assert "prepared_indices.size()>=48U && group_work>=256U" in renderer
 assert "prepared_parallel=workers.execute(" in renderer
+assert "std::unique_ptr<cpu_render_workers> cpu_visibility_workers;" in renderer
+assert "cpu_visibility_workers.reset();" in renderer
+assert "static cpu_render_workers workers;" not in renderer
 assert "if(!reuse_alpha) for(auto const &inst:instances)" in renderer
 assert "if(parallel) {" in renderer
 assert "if(!parallel && have_perspective_frustum" in renderer

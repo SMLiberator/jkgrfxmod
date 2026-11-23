@@ -622,6 +622,10 @@ namespace jkgm {
         gpu_3do_pack_profile packed_3do_upload_profile;
         std::unordered_map<uint64_t,uint64_t> gpu_3do_last_drawn;
         uint64_t gpu_3do_present_serial=0;
+        // No worker threads unless the opt-in mode sees a large 3DO
+        // workload. Owned by this renderer, not a function-static DLL
+        // singleton, so threads join BEFORE renderer/context teardown.
+        std::unique_ptr<cpu_render_workers> cpu_visibility_workers;
         // OpenGL buffer sweep diagnostics, separate from native mesh caching.
         struct gpu_gl_sweep_profile {
             uint64_t sweeps=0,scanned=0,evicted=0;
@@ -1924,6 +1928,7 @@ namespace jkgm {
 
         ~renderer_impl() override
         {
+            cpu_visibility_workers.reset(); // join while the DLL is still live
             // Photos belong to this renderer/GL context; never carry pending
             // Thing identities into a replacement renderer instance.
             get_camera_to_mat_controls().clear();
@@ -5043,7 +5048,10 @@ namespace jkgm {
                 }
                 // Thread wakeup/barrier costs outweigh small workloads.
                 if(prepared_indices.size()>=48U && group_work>=256U) {
-                    static cpu_render_workers workers;
+                    if(!cpu_visibility_workers)
+                        cpu_visibility_workers=
+                            std::make_unique<cpu_render_workers>();
+                    auto &workers=*cpu_visibility_workers;
                     if(workers.available()) {
                         prepared_visibility.resize(instances.size());
                         for(auto &entry:prepared_visibility)entry.ready=false;
