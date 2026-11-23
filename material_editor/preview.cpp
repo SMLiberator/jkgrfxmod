@@ -312,42 +312,54 @@ GLuint MaterialPreview::compileShader(GLenum type,const char *source) {
     return sh;
 }
 GLuint MaterialPreview::loadTexture(const std::string &filename,bool srgb,
-                                    PreviewImageInfo *details) {
+                                    PreviewImageInfo *details,bool heightMap) {
     if(filename.empty())return 0;
     int w=0,h=0,channels=0;
-    // Native Windows paths may contain non-ASCII characters. Decode the
-    // UTF-8 metadata path via filesystem and feed stb_image from memory.
+    // Decode Windows Unicode metadata paths from file bytes; preserve
+    // RGB/R channels on upload rather than forcing RGBA everywhere.
     std::ifstream source(std::filesystem::u8path(filename),std::ios::binary);
     if(!source)return 0;
     std::vector<unsigned char> bytes(
         (std::istreambuf_iterator<char>(source)),std::istreambuf_iterator<char>());
-    if(bytes.empty() ||
+    if(bytes.empty()||
        bytes.size()>static_cast<size_t>(std::numeric_limits<int>::max()))
         return 0;
-    stbi_set_flip_vertically_on_load(1);
-    unsigned char *pixels=stbi_load_from_memory(
-        bytes.data(),int(bytes.size()),&w,&h,&channels,4);
-    if(!pixels||w<=0||h<=0) {
-        if(pixels)stbi_image_free(pixels);
+    if(!stbi_info_from_memory(bytes.data(),int(bytes.size()),
+                              &w,&h,&channels)||w<=0||h<=0)
         return 0;
-    }
-    GLuint t=0;glGenTextures(1,&t);
-    glBindTexture(GL_TEXTURE_2D,t);
-    glTexImage2D(GL_TEXTURE_2D,0,srgb?GL_SRGB8_ALPHA8:GL_RGBA8,
-                 w,h,0,GL_RGBA,GL_UNSIGNED_BYTE,pixels);
+    // Grayscale art used for a full-color slot must replicate R into RGB.
+    // Only displacement can safely use a single GL_RED channel.
+    const int components=channels==3?3:channels==1?
+        (heightMap?1:3):4;
+    stbi_set_flip_vertically_on_load(1);
+    int decodedChannels=0;
+    unsigned char *pixels=stbi_load_from_memory(
+        bytes.data(),int(bytes.size()),&w,&h,&decodedChannels,components);
+    if(!pixels)return 0;
+    const GLenum format=components==1?GL_RED:components==3?GL_RGB:GL_RGBA;
+    const GLenum internal=srgb?
+        (components==4?GL_SRGB8_ALPHA8:GL_SRGB8):
+        (components==1?GL_R8:components==3?GL_RGB8:GL_RGBA8);
+    GLint oldUnpack=4;
+    glGetIntegerv(GL_UNPACK_ALIGNMENT,&oldUnpack);
+    glPixelStorei(GL_UNPACK_ALIGNMENT,1);
+    GLuint tex=0;glGenTextures(1,&tex);
+    glBindTexture(GL_TEXTURE_2D,tex);
+    glTexImage2D(GL_TEXTURE_2D,0,internal,w,h,0,format,
+                 GL_UNSIGNED_BYTE,pixels);
     glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_REPEAT);
     glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR_MIPMAP_LINEAR);
     glGenerateMipmap(GL_TEXTURE_2D);
+    glPixelStorei(GL_UNPACK_ALIGNMENT,oldUnpack);
     if(details) {
-        details->width=w;
-        details->height=h;
+        details->width=w;details->height=h;
         details->channels=channels;
         details->bytes=bytes.size();
     }
     stbi_image_free(pixels);
-    return t;
+    return tex;
 }
 GLuint MaterialPreview::uploadStaged(const editor_images::Image &image,
                                      bool srgb,PreviewImageInfo *details) {
@@ -521,7 +533,8 @@ void MaterialPreview::reloadImages() {
             textures_[i]=uploadStaged(*material_.stagedImages[i],
                                      srgb,&imageInfo_[i]);
         else
-            textures_[i]=loadTexture(material_.files[i],srgb,&imageInfo_[i]);
+            textures_[i]=loadTexture(material_.files[i],srgb,&imageInfo_[i],
+                                     i==DisplacementMap);
     }
     std::string envfile=envOverride_.empty()?material_.files[EnvironmentMap]:envOverride_;
     if(envOverride_.empty()&&material_.stagedImages[EnvironmentMap])
