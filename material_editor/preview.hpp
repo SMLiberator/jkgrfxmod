@@ -75,7 +75,7 @@ private:
     struct Vertex { float x,y,z,nx,ny,nz,u,v; };
     GLuint compileShader(GLenum type, const char *source);
     GLuint loadTexture(const std::string &path, bool srgb,
-                       PreviewImageInfo *details=nullptr);
+                       PreviewImageInfo *details=nullptr,bool heightMap=false);
     GLuint uploadStaged(const editor_images::Image &image,bool srgb,
                         PreviewImageInfo *details);
     GLuint createPreset();
