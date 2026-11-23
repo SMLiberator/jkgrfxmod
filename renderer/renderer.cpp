@@ -744,6 +744,10 @@ namespace jkgm {
         static constexpr uint64_t shared_reflection_owner_key=~uint64_t(0);
         static constexpr uint64_t debug_reflection_owner_key=~uint64_t(1);
         std::unique_ptr<reflection_debug_view_shader> reflection_debug_view_program;
+        // present_game() presents the PREVIOUS scene before capturing the
+        // next one. Keep the exact camera and serial of the probe being shown.
+        engine_camera reflection_debug_display_camera{};
+        uint64_t reflection_debug_display_serial=0U;
         // Authored metadata stays unchanged; only sampling/capture changes.
         // Explicit CaptureEnvMap remains an independent COG operation.
         int effective_capture_reflection_mode(int mode) const {
@@ -1974,6 +1978,8 @@ namespace jkgm {
                 camera_to_mat_targets.clear();
                 reflection_probes.clear();
                 reflection_debug_view_program.reset();
+                reflection_debug_display_camera={};
+                reflection_debug_display_serial=0U;
                 reflection_world_buckets.invalidate();
                 reflection_sky_candidates.clear();
                 reflection_sky_frame=~uint64_t(0);
@@ -2037,6 +2043,8 @@ namespace jkgm {
                 planar_last_refresh={};
                 // New scenes may reuse native owner IDs; never sample old probes.
                 reflection_probes.clear();
+                reflection_debug_display_camera={};
+                reflection_debug_display_serial=0U;
                 // A pause/menu transition must not erase a taken photograph.
                 // Captures are cleared on actual world change, explicit MAT
                 // reload, and renderer/GL-context destruction only.
@@ -2833,13 +2841,15 @@ namespace jkgm {
         {
             auto const &debug=the_config->debug_reflection_mode;
             if(debug=="off" || mode!=renderer_mode::ingame || !ogs ||
-               !frame_world_cache_camera.valid ||
-               !frame_world_cache_camera.camera.valid)return;
+               !reflection_debug_display_camera.valid ||
+               gpu_3do_present_serial==0U ||
+               reflection_debug_display_serial!=gpu_3do_present_serial-1U)
+                return;
             uint64_t const owner=debug=="shared"
                 ?shared_reflection_owner_key:debug_reflection_owner_key;
             auto const it=reflection_probes.find(owner);
             if(it==reflection_probes.end() || !it->second.ready ||
-               it->second.seen_frame!=gpu_3do_present_serial ||
+               it->second.seen_frame!=reflection_debug_display_serial ||
                !it->second.target || !it->second.target->ready())return;
             bool const hemi=it->second.target->layers()==2;
             if(!hemi && it->second.target->layers()!=6)return;
@@ -2861,7 +2871,7 @@ namespace jkgm {
             shader.use_program();
             shader.set_sampler(0);
             shader.set_projection(hemi);
-            shader.set_camera(frame_world_cache_camera.camera,
+            shader.set_camera(reflection_debug_display_camera,
                 get<x>(conf_scr_res),get<y>(conf_scr_res));
             gl::set_active_texture_unit(0);
             gl::bind_texture_raw(GL_TEXTURE_2D_ARRAY,

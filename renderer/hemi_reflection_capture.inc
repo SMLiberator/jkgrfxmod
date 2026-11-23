@@ -1141,6 +1141,22 @@
             entry.mode=selected_mode;
             entry.ready=true;
             entry.last_refresh=now;
+            // The scene is displayed at the start of the NEXT present_game().
+            // Store its camera before stage_world_cache() overwrites the live
+            // camera at that presentation boundary. The view must not compare
+            // this completed probe against the already-incremented serial.
+            if(candidate.is_debug ||
+               (candidate.is_shared &&
+                the_config->debug_reflection_mode=="shared")) {
+                reflection_debug_display_camera=viewer;
+                reflection_debug_display_serial=gpu_3do_present_serial;
+                if(gpu_3do_present_serial%120U==0U)
+                    LOG_INFO("REFLECTION debug capture mode=",
+                        the_config->debug_reflection_mode,
+                        " serial=",reflection_debug_display_serial,
+                        " layers=",output_layers,
+                        " size=",output_side);
+            }
             if(the_config->profile_renderer)
                 ++reflection_refreshes_window[candidate.is_global?3U:
                     candidate.is_shared?0U:paraboloid_mode?1U:2U];

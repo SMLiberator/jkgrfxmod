@@ -15,7 +15,12 @@ for mode in ("off","cube","hemi","shared"):
     assert f'rv->debug_reflection_mode!="{mode}"' in parser
 assert "debug_reflection_owner_key" in renderer
 assert "draw_reflection_debug_view();" in renderer
-assert "frame_world_cache_camera.camera" in renderer
+assert "reflection_debug_display_camera" in renderer
+assert "reflection_debug_display_serial" in renderer
+assert "reflection_debug_display_serial!=gpu_3do_present_serial-1U" in renderer
+assert "it->second.seen_frame!=reflection_debug_display_serial" in renderer
+assert "reflection_debug_display_serial=gpu_3do_present_serial;" in capture
+assert "reflection_debug_display_camera=viewer;" in capture
 assert "get<x>(conf_scr_res),get<y>(conf_scr_res)" in renderer
 assert "it->second.target->color_texture()" in renderer
 assert "debug.is_debug=true;" in capture
