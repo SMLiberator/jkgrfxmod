@@ -2,6 +2,7 @@
 #include "glad.h"
 #include "editor_image.hpp"
 #include "editor_animation.hpp"
+#include "preview_environment.hpp"
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -10,8 +11,6 @@
 #include <vector>
 
 enum class PreviewShape { Sphere, Plane, Cube };
-// Preview reflection image selection is separate from the lighting preset.
-enum class PreviewEnvironmentSource { MaterialPack, Preset, Custom };
 // Keep camera framing in sync with the actual cube mesh dimensions.
 constexpr float kPreviewCubeHalfExtent = 0.85f;
 
