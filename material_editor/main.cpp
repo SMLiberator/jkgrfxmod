@@ -15,6 +15,7 @@
 #include "preview.hpp"
 #include "editor_image.hpp"
 #include "editor_wheel.hpp"
+#include "editor_slider.hpp"
 #include "source_pack.hpp"
 #include "editor_ini_settings.hpp"
 #include <windows.h>
@@ -1390,8 +1391,9 @@ private:
             ImGui::TextDisabled("LIGHTING");
             ImGui::SetNextItemWidth(std::max(100.0f,
                 ImGui::GetContentRegionAvail().x-53.0f));
-            ImGui::SliderFloat("##lightingIntensity",&lightingIntensity_,
-                               0.0f,2.0f,"Intensity: %.2fx");
+            editor_slider::sliderFloat("##lightingIntensity",&lightingIntensity_,
+                                       0.0f,2.0f,"Intensity: %.2fx",
+                                       ImGuiSliderFlags_AlwaysClamp);
             editor_wheel::adjust(lightingIntensity_,numericWheelForLastItem(),
                                  0.0f,2.0f);
             if(ImGui::IsItemClicked(ImGuiMouseButton_Right))
@@ -1505,8 +1507,8 @@ private:
         Document &obj=selected();
         const float value=number(effectiveSelected(),key,fallback);
         ImGui::PushID(key);
-        // A single full-width slider. Its built-in double-click/Ctrl+click
-        // numeric input replaces the redundant reflection strength box.
+        // The shared slider helper activates Dear ImGui's own numeric
+        // entry on double-click, matching Ctrl+click without a second box.
         // The optional extended range affects numeric input and wheel only;
         // dragging the slider itself retains its usual 0..1 range.
         ImGui::SetNextItemWidth(-1.0f);
@@ -1515,7 +1517,7 @@ private:
         const std::string format=std::string(label)+": %.3f";
         const ImGuiSliderFlags flags=allowAboveSlider
             ?ImGuiSliderFlags_None:ImGuiSliderFlags_AlwaysClamp;
-        const bool dragged=ImGui::SliderFloat(
+        const bool dragged=editor_slider::sliderFloat(
             "##slider",&position,low,high,format.c_str(),flags);
         if(dragged&&std::isfinite(position)) {
             obj[key]=std::max(low,position);
