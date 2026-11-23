@@ -70,6 +70,8 @@ uniform int uUseEnvFresnel; // preview-only: disabled means full EnvMap contribu
 uniform int uOrthographic;
 uniform int uAlbedoPremultiplied, uAlphaMode, uBlendMode;
 uniform float uAlphaCutoff;
+uniform vec2 uAlbedoScroll,uEmissiveScroll,uNormalScroll,uNormalScroll2;
+uniform float uEmissivePulse;
 const float PI=3.14159265358979323846;
 vec3 schlick(vec3 f0,float nv) {
     return f0+(vec3(1.0)-f0)*pow(1.0-clamp(nv,0.0,1.0),5.0);
@@ -151,12 +153,14 @@ void main() {
     vec3 raw=normalize(wn);
     vec2 tc=parallaxUV(uv,raw);
     vec2 slope=vec2(0.0);
-    if(hasNormal!=0)slope+=normalSlope(tNormal,uNormalStrength,tc);
-    if(hasNormal2!=0)slope+=normalSlope(tNormal2,uNormalStrength2,tc);
+    if(hasNormal!=0)slope+=normalSlope(tNormal,uNormalStrength,
+                                         tc+uNormalScroll);
+    if(hasNormal2!=0)slope+=normalSlope(tNormal2,uNormalStrength2,
+                                          tc+uNormalScroll2);
     vec3 N=mappedNormal(raw,slope);
     vec3 V=uOrthographic!=0?normalize(uViewBack):normalize(uCameraPos-wp);
     vec3 R=reflect(-V,N);
-    vec4 albedoTex=hasAlbedo!=0?texture(tAlbedo,tc):vec4(1.0);
+    vec4 albedoTex=hasAlbedo!=0?texture(tAlbedo,tc+uAlbedoScroll):vec4(1.0);
     // Compiled albedo PNGs are sRGB-encoded but premultiplied in linear
     // space by compile.exe. Restore straight color for shading here; apply
     // coverage only once when compositing against the checkerboard.
@@ -213,8 +217,8 @@ void main() {
         coatFresnel*coverage;
     vec3 coatSpec=coatEnvironment+
                   directSpec(coatNormal,V,coatRough,vec3(0.04),coverage);
-    vec3 emission=uEmissive*(hasEmissive!=0?
-        texture(tEmissive,tc).rgb:vec3(1.0));
+    vec3 emission=uEmissive*uEmissivePulse*(hasEmissive!=0?
+        texture(tEmissive,tc+uEmissiveScroll).rgb:vec3(1.0));
 
     // In the game, emissive RGB is separately additive in Normal/Fluid
     // and Additive blending, including with zero-alpha base pigment.
@@ -535,6 +539,12 @@ void MaterialPreview::reloadImages() {
         else
             textures_[i]=loadTexture(material_.files[i],srgb,&imageInfo_[i],
                                      i==DisplacementMap);
+        // UV-animated material maps must repeat along both axes. Equirect
+        // environment images retain their vertical edge clamp.
+        if(textures_[i]) {
+            glBindTexture(GL_TEXTURE_2D,textures_[i]);
+            glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_REPEAT);
+        }
     }
     std::string envfile=envOverride_.empty()?material_.files[EnvironmentMap]:envOverride_;
     if(envOverride_.empty()&&material_.stagedImages[EnvironmentMap])
@@ -666,7 +676,7 @@ void MaterialPreview::draw(int w,int h,float orbitYaw,float orbitPitch,
                            float orbitDistance,
                            const std::array<float,3> &orbitTarget,
                            PreviewShape shape,bool useEnvFresnel,
-                           bool orthographic) {
+                           bool orthographic,double animationSeconds) {
     if(!program_)return;
     resize(w,h);
     glBindFramebuffer(GL_FRAMEBUFFER,fbo_);
@@ -710,6 +720,23 @@ void MaterialPreview::draw(int w,int h,float orbitYaw,float orbitPitch,
                 std::min(aspect,1.0f),std::min(1.0f,1.0f/aspect));
     glUniform4fv(glGetUniformLocation(program_,"uAlbedo"),1,material_.albedo.data());
     v3("uEmissive",material_.emissive);v3("uMatcapFactor",material_.matcapFactor);
+    const auto albedoUV=editor_animation::scrollOffset(
+        material_.albedoScroll,animationSeconds);
+    const auto emissiveUV=editor_animation::scrollOffset(
+        material_.emissiveScroll,animationSeconds);
+    const auto normalUV=editor_animation::scrollOffset(
+        material_.normalScroll,animationSeconds);
+    const auto normalUV2=editor_animation::scrollOffset(
+        material_.normalScroll2,animationSeconds);
+    const auto v2=[this](const char *name,const std::array<float,2> &v) {
+        glUniform2f(glGetUniformLocation(program_,name),v[0],v[1]);
+    };
+    v2("uAlbedoScroll",albedoUV);
+    v2("uEmissiveScroll",emissiveUV);
+    v2("uNormalScroll",normalUV);
+    v2("uNormalScroll2",normalUV2);
+    f1("uEmissivePulse",editor_animation::multiplier(
+        material_.emissivePulse,animationSeconds,material_.pulseSeed));
     f1("uReflection",material_.reflection);f1("uRough",material_.roughness);
     f1("uMetal",material_.metalness);
     f1("uNormalStrength",material_.normalStrength);
