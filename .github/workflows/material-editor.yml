@@ -26,7 +26,7 @@ jobs:
       - name: Build only the editor
         shell: pwsh
         run: |
-          cmake --build build/material-editor --config Release --target jkgm-material-editor editor-source-pack-tests editor-settings-tests editor-image-tests editor-animation-tests editor-environment-tests editor-wheel-tests --parallel
+          cmake --build build/material-editor --config Release --target jkgm-material-editor editor-source-pack-tests editor-settings-tests editor-image-tests editor-animation-tests editor-environment-tests editor-wheel-tests editor-slider-tests --parallel
 
       - name: Verify source-pack inheritance and serialization
         shell: pwsh
@@ -63,6 +63,12 @@ jobs:
         run: |
           & "build/material-editor/Release/editor-wheel-tests.exe"
           if ($LASTEXITCODE -ne 0) { throw "Mouse-wheel regression tests failed" }
+
+      - name: Verify numeric slider double-click activation
+        shell: pwsh
+        run: |
+          & "build/material-editor/Release/editor-slider-tests.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Slider double-click interaction tests failed" }
 
       - name: Verify portable EXE and dynamic library imports
         shell: pwsh
