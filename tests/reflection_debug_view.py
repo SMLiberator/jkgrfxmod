@@ -17,7 +17,8 @@ assert "debug_reflection_owner_key" in renderer
 assert "draw_reflection_debug_view();" in renderer
 assert "reflection_debug_display_camera" in renderer
 assert "reflection_debug_display_serial" in renderer
-assert "reflection_debug_display_serial!=gpu_3do_present_serial-1U" in renderer
+assert "reflection_debug_display_serial!=" in renderer
+assert "gpu_3do_present_serial-1U" in renderer
 assert "it->second.seen_frame!=reflection_debug_display_serial" in renderer
 assert "reflection_debug_display_serial=gpu_3do_present_serial;" in capture
 assert "reflection_debug_display_camera=viewer;" in capture

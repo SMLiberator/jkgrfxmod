@@ -26,7 +26,8 @@ assert 'shared.is_shared=true;' in capture
 assert "reflection_probe_capture_distance_limit(" in capture
 assert "selected_mode,candidate.is_global,candidate.is_shared," in capture
 assert 'active_owners.insert(shared.owner);' in capture
-assert 'candidate.is_shared?0U:candidate.owner' in capture
+assert '(candidate.is_shared || candidate.is_debug)' in capture
+assert '?0U:candidate.owner' in capture
 assert '!candidate.is_global && !candidate.is_shared &&' in capture
 assert 'capture_static_owner(owner)' in capture  # Cog-only global capture survives
 assert 'the_config->reflection_capture_update_interval' in capture
