@@ -202,10 +202,11 @@ the entire RGB factor. The preview canvas still uses the wheel for
 camera zoom instead of numeric editing.
 Pulse fields reset **individually** to their canonical defaults. The live
 preview's lighting slider also resets to **1.00×** on right-click, while
-retaining its explicit **Reset** button for convenience. A separate
-exact-value box remains for reflection strength, since the game permits
-values above its 0–1 slider. Material resets participate in Undo/Redo;
-preview-only lighting never changes material JSON.
+retaining its explicit **Reset** button for convenience. The reflection
+strength slider occupies the full width: double-click (or Ctrl+click)
+to type values above its visual 0–1 range, without a second numeric field.
+Material resets participate in Undo/Redo; preview-only lighting never
+changes material JSON.
 
 ## Source and compiled pack workflows
 
@@ -306,11 +307,13 @@ source distributions for notices.
 
 ## Parameter and environment preview
 
-Reflection strength is normally adjusted with a 0..1 slider, while the
-adjacent numeric field accepts any finite, nonnegative value (the same range
-as the existing compiler). Roughness, metalness, clearcoat channels and
-MatCap roughness are always 0..1. Normal strengths are 0..4; per-channel
-MatCap factors are 0..4. All saved values use the existing renderer metadata.
+Reflection strength uses one full-width 0..1 slider, with double-click
+numeric entry accepting any finite, nonnegative value above 1 when needed
+(the same permitted range as the existing compiler). Values above 1 remain
+visible inside that slider, with the handle at its maximum; dragging uses
+the normal 0..1 range. Roughness, metalness, clearcoat channels and MatCap
+roughness are always 0..1. Normal strengths are 0..4; per-channel MatCap
+factors are 0..4. All saved values use the existing renderer metadata.
 
 The preview renders the selected material using an environment image and
 preset-dependent ambient and directional lighting, without the former three-way shading diagnostics.
@@ -373,10 +376,14 @@ transmission/attenuation, or saved material properties.
 ## Property panel layout
 
 The properties are ordered Albedo, Emissive, Reflections, Normal maps,
-Clearcoat, MatCap, and other settings. Color fields use their own full-width
-row with the label above. Referenced texture paths appear below the color
-field, matching the Emissive section rather than wrapping in a narrow
-right-hand column.
+Parallax mapping, Clearcoat, MatCap, and other settings. **Map selectors
+and thumbnails always appear before their corresponding numeric factors**:
+albedo texture before tint/alpha, emissive map before RGB intensity,
+surface map before reflection strength/roughness/metalness, both normal
+maps before their strengths and scroll controls, clearcoat maps before coat
+factors, and MatCap maps before MatCap factors. The original-MAT albedo
+checkbox stays above the albedo map because it selects which texture source
+is used. Color controls retain their own full-width row.
 
 ## Undo and redo
 
