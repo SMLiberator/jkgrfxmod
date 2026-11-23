@@ -372,7 +372,11 @@
                     ?*paraboloid_capture_program:*hemi_capture_program;
                 // Project the full scene. The dedicated Hemi/Cube distance
                 // budget applies only to Things, not to world geometry.
-                float const probe_distance_limit=candidate.is_debug?0.0f:
+                // Debug captures normally match dedicated probe Thing range,
+                // so a configured 4-unit test is actually visible. Explicit
+                // opt-out preserves an unlimited same-camera reference.
+                float const probe_distance_limit=(candidate.is_debug &&
+                    !the_config->debug_reflection_distance_culling)?0.0f:
                     reflection_probe_capture_distance_limit(
                         selected_mode,candidate.is_global,candidate.is_shared,
                         the_config->reflection_probe_max_distance);
@@ -1155,7 +1159,11 @@
                         the_config->debug_reflection_mode,
                         " serial=",reflection_debug_display_serial,
                         " layers=",output_layers,
-                        " size=",output_side);
+                        " size=",output_side,
+                        " thing_distance_limit=",probe_distance_limit,
+                        " thing_range_rejected=",total_thing_range_culled,
+                        " model_groups_bounds_rejected=",total_model_groups_culled,
+                        " NOTE=world_geometry_no_distance_limit");
             }
             if(the_config->profile_renderer)
                 ++reflection_refreshes_window[candidate.is_global?3U:

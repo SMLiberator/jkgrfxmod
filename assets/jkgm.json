@@ -56,6 +56,7 @@
     "enable_reflection_probes": false,
     "experimental_shared_hemi": false,
     "debug_reflection_mode": "off",
+    "debug_reflection_distance_culling": true,
     "reflection_capture_resolution": 128,
     "reflection_capture_update_interval": 0.0,
     "envmap_capture_face_resolution": 128,
