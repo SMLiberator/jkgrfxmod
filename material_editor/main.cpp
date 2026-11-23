@@ -854,6 +854,7 @@ private:
         if(!loaded_)return;
         const int oldSelection=selection_;
         selection_=static_cast<int>(editor_source::addMaterial(root_,mode_));
+        filter_.Clear(); // Ensure a newly created material is visible.
         changedMaterials("Add material",oldSelection);
     }
     void removeSelectedMaterial() {
