@@ -540,6 +540,8 @@
                 std::vector<reflection_capture_parallel_visibility> capture_model_visibility;
                 std::vector<reflection_capture_cull> capture_world_visibility;
                 bool capture_parallel=false;
+                size_t capture_parallel_work=0U;
+                uint64_t capture_parallel_wall_us=0U;
                 if(the_config->experimental_multithreading) {
                     std::vector<size_t> world_indices;
                     for(auto const &bucket:reflection_world_buckets.buckets())
@@ -548,7 +550,9 @@
                     size_t group_work=0;
                     for(auto const *inst:capture_models)
                         if(inst->geometry)group_work+=inst->geometry->groups.size();
-                    if(size_t(face_count)*(group_work+world_indices.size())>=512U) {
+                    capture_parallel_work=size_t(face_count)*
+                        (group_work+world_indices.size());
+                    if(capture_parallel_work>=512U) {
                         std::array<gpu_3do_matrix34,6> capture_views{};
                         std::array<gpu_3do_native_frustum,6> capture_frusta{};
                         bool views_ready=true;
@@ -584,6 +588,7 @@
                                 capture_world_visibility.resize(
                                     size_t(face_count)*surface_count,
                                     reflection_capture_cull::visible);
+                                auto const parallel_started=profile_clock::now();
                                 capture_parallel=workers.execute([&](unsigned lane) {
                                     for(size_t job=lane;job<size_t(face_count)*count;
                                         job+=cpu_render_workers::lanes) {
@@ -612,6 +617,7 @@
                                             surface.bounds_min,surface.bounds_max);
                                     }
                                 });
+                                capture_parallel_wall_us=elapsed_profile_us(parallel_started,profile_clock::now());
                             }
                         }
                     }
@@ -1180,6 +1186,9 @@
                          " projection_far=",far_plane,
                          " source_faces=",face_count,
                          " portal_views=",portal_views_used,
+                          " parallel=",capture_parallel?1:0,
+                          " parallel_work=",capture_parallel_work,
+                          " parallel_us=",capture_parallel_wall_us,
                          " result_side=",output_side,
                          " result_layers=",output_layers,
                          " world_faces=",total_world_drawn,
