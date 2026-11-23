@@ -179,6 +179,41 @@ inline Document writeSourceMatReplacement(const MatReplacement &replacement) {
     return Document::array({replacement.name,replacement.cel});
 }
 
+// Material names are unique within a pack; keep add/remove operations
+// independent of the GUI so structural Undo/Redo can restore entire arrays.
+inline std::string nextMaterialName(const Document &root) {
+    std::set<std::string> names;
+    if(root.contains("materials")&&root["materials"].is_array())
+        for(const auto &entry:root["materials"])
+            if(entry.is_object()&&entry.contains("name")&&entry["name"].is_string())
+                names.insert(lowerAscii(entry["name"].get<std::string>()));
+    for(unsigned index=1;index<1000000;++index) {
+        const std::string candidate="material_"+std::to_string(index);
+        if(!names.count(lowerAscii(candidate)))return candidate;
+    }
+    throw std::runtime_error("Too many materials");
+}
+inline size_t addMaterial(Document &root,Kind kind) {
+    const std::string name=nextMaterialName(root);
+    Document entry={{"name",name}};
+    if(kind==Kind::Source)
+        entry["replaces"]=Document::array({""});
+    else {
+        entry["replaces"]=Document::array({
+            {{"name",""},{"cel",0}}
+        });
+        entry["replaces_signatures"]=Document::array();
+    }
+    root["materials"].push_back(std::move(entry));
+    return root["materials"].size()-1;
+}
+inline bool removeMaterial(Document &root,size_t index) {
+    if(!root.contains("materials")||!root["materials"].is_array()||
+       index>=root["materials"].size())return false;
+    root["materials"].erase(index);
+    return true;
+}
+
 // These helpers keep the albedo source mutually exclusive. A material
 // override of keep_albedo=true suppresses a pack-level albedo_map too.
 inline void chooseOriginalMatAlbedo(Document &entry,bool keep) {
@@ -230,27 +265,37 @@ inline void validate(const Document &doc,Kind kind) {
             }
         }
     }
-    if(kind!=Kind::Source)return;
-
     std::set<std::string> names;
     for(const auto &material:doc["materials"]) {
         if(!material.is_object()||!material.contains("name")||
            !material["name"].is_string())
-            throw std::runtime_error("Every source material needs a name.");
+            throw std::runtime_error("Every material needs a name.");
         const auto name=material["name"].get<std::string>();
         if(name.empty()||name.find_first_of("<>:\"/\\|?*")!=std::string::npos)
-            throw std::runtime_error("Invalid source material name: "+name);
+            throw std::runtime_error("Invalid material name: "+name);
         if(!names.insert(lowerAscii(name)).second)
-            throw std::runtime_error("Duplicate source material name: "+name);
+            throw std::runtime_error("Duplicate material name: "+name);
         if(!material.contains("replaces")||!material["replaces"].is_array()||
            material["replaces"].empty())
-            throw std::runtime_error("Source material "+name+" needs MAT replacements.");
+            throw std::runtime_error("Material "+name+" needs MAT replacements.");
         for(const auto &entry:material["replaces"]) {
             MatReplacement replacement;
-            if(readMatReplacement(entry,Kind::Source,replacement)&&
+            if(readMatReplacement(entry,kind,replacement)&&
                !replacement.name.empty())continue;
             throw std::runtime_error("Invalid MAT replacement in "+name+
-                                     ": expected a nonempty filename or [filename, cel >= 0].");
+                                     ": expected a nonempty filename and valid cel.");
+        }
+        if(kind==Kind::Compiled) {
+            auto it=material.find("replaces_signatures");
+            if(it==material.end()||!it->is_array()||it->empty())
+                throw std::runtime_error(
+                    "Compiled material "+name+" needs generated MAT signatures.");
+            for(const auto &signature:*it) {
+                if(!signature.is_string()||signature.get<std::string>().size()!=32)
+                    throw std::runtime_error(
+                        "Invalid compiled MAT signature for "+name);
+            }
+            continue;
         }
         // Mirror the compiler's final, resolved mutually exclusive inputs.
         // Material-level original-MAT choices can legitimately suppress a
