@@ -60,7 +60,12 @@ assert "find_unique_native_light(" in renderer
 assert "frame_saber_light_colors.valid[id]" in renderer
 assert "merge_thing_light_colors();" in renderer
 assert "get_registry().consume();" in renderer
-assert "out.native_id=id;" in main
+# The 16-light clipping path must preserve each selected native ID so the
+# per-Thing RGB lookup still uses the correct light after prioritization.
+assert "candidate.native_id=id;" in main
+assert "candidates[eligible]=candidate;" in main
+assert "instance.lights[i]=candidates[choice.indices[i]];" in main
+assert "unsigned const id=light.native_id;" in program
 assert "light.native_id=id;" in world
 assert "uint32_t native_id=0" in gpu
 assert "light_color.push_back(" in program
