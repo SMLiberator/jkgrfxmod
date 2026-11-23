@@ -26,8 +26,9 @@ Neither revert command deletes or rewrites image files on disk.
 
 Data maps (normal, surface R/G/B, displacement R, clearcoat and MatCap
 surface masks) do not use their alpha channels in the current preview
-and game shaders. New imports can treat those maps as opaque, although
-the current compiler still emits RGBA PNGs and retains input alpha bytes.
+and game shaders. The editor writes new data imports without alpha.
+The standalone pack compiler still emits RGBA for those maps; compact
+compiled output from script.json will require the same change there.
 
 Emissive images are **not** equivalent to data maps: the existing
 compiler converts their sRGB to linear light, multiplies RGB by input
@@ -57,9 +58,11 @@ On source packs, imported albedo remains straight-alpha so the regular
 pack compiler doesn't premultiply it twice. All imported images require
 power-of-two dimensions to remain compatible with the compiler.
 
-The preview uploads staged image pixels directly to OpenGL, using
-matching RGB8/sRGB8/R8 formats instead of forcing all image buffers to
-RGBA8. The R/G/B/A channel inspector can inspect staged pixels too.
+The preview uploads staged and saved image pixels directly to OpenGL,
+using matching RGB8/sRGB8/R8 formats where applicable instead of forcing
+all image buffers to RGBA8. The R/G/B/A channel inspector can inspect
+staged pixels too. The standalone game renderer's texture upload path
+is separate and may require changes to realize equivalent GPU savings.
 
 **Save** writes only staged images still referenced by the document,
 using a unique filename and PNG encoding. PNGs are prepared before
@@ -77,8 +80,8 @@ a larger RGBA preview or grayscale R/G/B/A view. Packed surface maps expose
 the reflection/roughness/metalness channel meaning; clearcoat masks expose
 coverage/roughness/transmission. Channel views are generated lazily and
 cached until a texture is reloaded. Missing or unsupported images are
-reported without altering the source path. Compiled textures support
-inspection but remain read-only.
+reported without altering the source path. Compiled texture references
+also accept staged imports; MAT signatures remain unchanged.
 
 Material feature headers now start open only if active: albedo is always
 open; emissive is active for map/color/pulse; reflections for a surface map
@@ -112,11 +115,12 @@ as the original script. The saved source remains usable as the input to
 the existing pack compiler; compilation from within the editor is a later
 milestone.
 
-Source images are loaded directly from the script's folder. The preview
-uses unpremultiplied source textures, whereas compiled textures are read
-with the compiler's premultiplied-alpha convention. Image paths can be
-typed into source material slots, chosen through a file picker, or
-copied into the source pack with an explicit **Import copy** action.
+Source images are loaded directly from the script's folder. Referenced
+source albedo remains straight-alpha; compiled albedo is premultiplied.
+Image paths can be typed into source material slots or chosen through
+the file picker. **Import PNG (on Save)...** stages a converted image
+without writing to disk until Save. The previous eager Import Copy
+behavior has been replaced with this deferred workflow.
 Integrated pack compilation and MAT signature generation remain future
 work. Staged imports are now converted and saved as PNGs next to JSON;
 existing source files referenced through Reference... are never converted
