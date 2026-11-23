@@ -41,6 +41,7 @@ add_executable(jkgm-material-editor WIN32
   editor_image.hpp
   native_mat.cpp
   native_mat.hpp
+  ../base/md5.cpp
   source_pack.hpp
   editor_ini_settings.hpp
   ../glad/glad.cpp)
@@ -141,7 +142,8 @@ add_executable(editor-settings-tests
   editor_settings_tests.cpp
   editor_ini_settings.hpp
   native_mat.cpp
-  native_mat.hpp)
+  native_mat.hpp
+  ../base/md5.cpp)
 target_include_directories(editor-settings-tests PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..)
 target_link_libraries(editor-settings-tests PRIVATE editor_imgui)
