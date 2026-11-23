@@ -189,7 +189,9 @@ RGB fields display their channel names.
 
 **Left-click/drag** adjusts numeric values normally, **double-click**
 (or Ctrl+click) opens precise numeric entry, and **right-click on a
-numeric control resets it**. **Scroll the mouse wheel while hovering a
+numeric control resets it**. The editor explicitly enables double-click
+for Dear ImGui sliders (whose default only accepts Ctrl+click), so the
+reflection and clearcoat sliders behave like the drag fields. **Scroll the mouse wheel while hovering a
 numeric slider/drag field** to change its value by **0.05 per wheel tick**
 (up increases, down decreases; fractional wheel deltas work too). Hovered
 controls claim the wheel to avoid scrolling the properties pane at the
