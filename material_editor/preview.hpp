@@ -16,6 +16,13 @@ enum PreviewTexture : std::size_t {
     DisplacementMap, TextureCount
 };
 
+// Describes the decoded image currently bound to a material preview slot.
+struct PreviewImageInfo {
+    int width=0,height=0,channels=0;
+    std::uintmax_t bytes=0;
+    bool valid() const {return width>0&&height>0;}
+};
+
 struct PreviewMaterial {
     std::array<std::string, TextureCount> files{};
     std::array<float, 4> albedo{1, 1, 1, 1};
@@ -51,13 +58,20 @@ public:
               float orbitDistance, const std::array<float,3> &orbitTarget,
               PreviewShape shape, bool useEnvFresnel, bool orthographic);
     GLuint outputTexture() const { return output_; }
+    GLuint imageTexture(PreviewTexture slot) const {return textures_[slot];}
+    const PreviewImageInfo &imageInfo(PreviewTexture slot) const {
+        return imageInfo_[slot];
+    }
+    // On-demand 256-pixel grayscale view of R/G/B/A; cached until reload.
+    GLuint channelTexture(PreviewTexture slot,int channel);
     const std::string &environmentDescription() const { return envDescription_; }
     bool hasLoadedEnvironmentFile() const { return loadedEnvironmentFile_; }
 
 private:
     struct Vertex { float x,y,z,nx,ny,nz,u,v; };
     GLuint compileShader(GLenum type, const char *source);
-    GLuint loadTexture(const std::string &path, bool srgb);
+    GLuint loadTexture(const std::string &path, bool srgb,
+                       PreviewImageInfo *details=nullptr);
     GLuint createPreset();
     GLuint uploadNativeAlbedo();
     void reloadImages();
@@ -66,6 +80,8 @@ private:
 
     PreviewMaterial material_;
     std::array<GLuint, TextureCount> textures_{};
+    std::array<PreviewImageInfo, TextureCount> imageInfo_{};
+    std::array<std::array<GLuint,4>, TextureCount> channelTextures_{};
     GLuint program_ = 0, vao_ = 0, vbo_ = 0, fbo_ = 0, output_ = 0, depth_ = 0;
     std::string envOverride_, envDescription_, error_;
     bool loadedEnvironmentFile_ = false;
