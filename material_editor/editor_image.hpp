@@ -1,6 +1,8 @@
 #pragma once
 #include <cstdint>
 #include <filesystem>
+#include <optional>
+#include <string>
 #include <vector>
 
 // Editor-side image staging. Color textures are premultiplied in LINEAR
@@ -22,4 +24,10 @@ Image fromRGBA(const std::uint8_t *rgba,int width,int height,
                int sourceChannels,Role role,bool sourcePack);
 Image load(const std::filesystem::path &file,Role role,bool sourcePack);
 std::vector<std::uint8_t> png(const Image &image);
+// Reuse a compatible existing PNG in the same folder as script.json or
+// metadata.json. Never copy or convert that image when another material
+// chooses it. Images in other folders/non-PNGs still use normal staging.
+std::optional<std::string> packLocalPngReference(
+    const std::filesystem::path &document,
+    const std::filesystem::path &selected);
 } // namespace editor_images
