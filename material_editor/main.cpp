@@ -195,6 +195,35 @@ std::string stringValue(const Document &obj,const char *key) {
     auto it=obj.find(key);
     return it!=obj.end()&&it->is_string()?it->get<std::string>():std::string{};
 }
+std::array<float,2> scrollSpeed(const Document &entry,const char *key) {
+    const auto it=entry.find(key);
+    if(it==entry.end()||!it->is_array()||it->size()!=2)return {};
+    std::array<float,2> result{};
+    for(int i=0;i<2;++i) {
+        if(!(*it)[i].is_number())return {};
+        try {
+            result[i]=(*it)[i].get<float>();
+            if(!std::isfinite(result[i]))return {};
+        } catch(...) {return {}; }
+    }
+    return result;
+}
+editor_animation::Pulse pulseSettings(const Document &entry) {
+    editor_animation::Pulse result;
+    auto it=entry.find("emissive_pulse");
+    if(it==entry.end()||!it->is_object())return result;
+    const std::string wave=stringValue(*it,"wave");
+    if(wave=="square")result.wave=editor_animation::Wave::Square;
+    else if(wave=="flicker")result.wave=editor_animation::Wave::Flicker;
+    else if(wave=="random")result.wave=editor_animation::Wave::Random;
+    result.rate=number(*it,"rate",1.0f);
+    result.min=number(*it,"min",0.0f);
+    result.max=number(*it,"max",1.0f);
+    result.phase=number(*it,"phase",0.0f);
+    result.enabled=result.rate>0.0f&&result.min>=0.0f&&
+                   result.max>=result.min;
+    return result;
+}
 std::string resolvedFile(const fs::path &directory,const std::string &name) {
     if(name.empty())return {};
     fs::path p=fs::u8path(name);
@@ -207,6 +236,11 @@ PreviewMaterial fromMetadata(const Document &entry,const Document &root,
     p.albedo=rgba(entry,"albedo_factor",p.albedo);
     p.emissive=rgb(entry,"emissive_factor",p.emissive);
     p.matcapFactor=rgb(entry,"matcap_factor",p.matcapFactor);
+    p.albedoScroll=scrollSpeed(entry,"albedo_scroll");
+    p.emissiveScroll=scrollSpeed(entry,"emissive_scroll");
+    p.normalScroll=scrollSpeed(entry,"normal_scroll");
+    p.normalScroll2=scrollSpeed(entry,"normal_scroll2");
+    p.emissivePulse=pulseSettings(entry);
     const char *names[]={"albedo_map","surface_map",nullptr,"normal_map",
         "normal_map2","emissive_map","matcap_map","matcap_surface_map",
         "clearcoat_surface_map","clearcoat_normal_map","displacement_map"};
@@ -259,7 +293,9 @@ public:
         loadUserSettings();
     }
     void frame() {
-        // Let ImGui's own editable text boxes handle Ctrl+Z while typing.
+        if(animationPlaying_)
+            animationSeconds_+=std::max(0.0f,ImGui::GetIO().DeltaTime);
+        // Let ImGui''s own editable text boxes handle Ctrl+Z while typing.
         if(!ImGui::GetIO().WantTextInput) {
             if(ImGui::IsKeyPressed(ImGuiKey_Space,false) &&
                !ImGui::IsPopupOpen(nullptr,ImGuiPopupFlags_AnyPopupId))
@@ -823,6 +859,9 @@ private:
         // Source textures are straight-alpha input; compiled color PNGs
         // have been premultiplied by the pack compiler.
         p.albedoPremultiplied=!isSource();
+        // Game material-instance IDs can differ, but the preview's seed
+        // stays stable across edits and mirrors the same random waveform.
+        p.pulseSeed=std::uint64_t(selection_)+1;
         const Document &entry=effectiveEntry_;
         bool keep=entry.value("keep_albedo",false)||
                   entry.value("use_original_albedo",false);
@@ -1152,6 +1191,9 @@ private:
         if(ImGui::Button("Use material / pack envmap")) {
             override_.clear();preview_->setEnvironmentOverride({});
         }
+        ImGui::Checkbox("Animate",&animationPlaying_);
+        ImGui::SameLine();
+        if(ImGui::SmallButton("Restart animation"))animationSeconds_=0.0;
         ImGui::Checkbox("Fresnel",&envFresnel_);
         ImGui::SameLine();
         if(ImGui::Checkbox("Orthographic",&orthographic_) &&
@@ -1171,7 +1213,7 @@ private:
         if(preview_->valid()) {
             preview_->draw(int(area.x),int(area.y),orbitYaw_,orbitPitch_,
                            orbitDistance_,orbitTarget_,shape_,envFresnel_,
-                           orthographic_);
+                           orthographic_,animationSeconds_);
             // Image() is a passive item: dragging it moves the ImGui window.
             // An invisible button claims the mouse press for viewport orbiting,
             // while the image is drawn over that item's exact screen rectangle.
@@ -1294,6 +1336,112 @@ private:
             if(ImGui::SmallButton("x")){obj.erase(key);changed(key);}
         }
         // The next TextWrapped/imageInfo item naturally starts on a full line.
+        ImGui::PopID();
+    }
+    // A single compact signed UV speed pair. Removing the local value
+    // restores an inherited pack speed in source mode.
+    void scrollField(const char *label,const char *key,bool packField=false) {
+        Document &obj=packField?root_:selected();
+        const Document &resolved=packField?root_:effectiveSelected();
+        auto speed=scrollSpeed(resolved,key);
+        const bool own=obj.contains(key);
+        ImGui::PushID(key);
+        ImGui::TextUnformatted(label);
+        ImGui::SetNextItemWidth(std::max(100.0f,
+            ImGui::GetContentRegionAvail().x-(own?32.0f:0.0f)));
+        if(ImGui::DragFloat2("##speed",speed.data(),0.01f,0,0,"%.3f")&&
+           std::isfinite(speed[0])&&std::isfinite(speed[1])) {
+            setArray(obj,key,speed.data(),2);
+            if(packField)changedPack(key,ImGui::IsItemActive());
+            else changed(key,ImGui::IsItemActive());
+        }
+        if(own) {
+            ImGui::SameLine();
+            if(ImGui::SmallButton("x")) {
+                obj.erase(key);
+                if(packField)changedPack(key);
+                else changed(key);
+            }
+        }
+        ImGui::PopID();
+    }
+    void pulseField(bool packField=false) {
+        constexpr const char *key="emissive_pulse";
+        Document &obj=packField?root_:selected();
+        // Snapshot resolved settings before calling changed()/changedPack(),
+        // which refreshes the effective material immediately.
+        const Document &effective=packField?root_:effectiveSelected();
+        Document pulse=effective.value(key,Document());
+        if(!pulse.is_object())pulse=Document::object();
+        const bool active=pulse.contains("wave");
+        const bool own=obj.contains(key);
+        ImGui::PushID(key);
+        ImGui::TextUnformatted("Emissive pulse");
+        if(!active) {
+            if(ImGui::SmallButton("Add pulse")) {
+                obj[key]={{"wave","sine"},{"rate",1.0f},
+                          {"min",0.0f},{"max",1.0f},{"phase",0.0f}};
+                if(packField)changedPack(key);
+                else changed(key);
+            }
+            ImGui::PopID();
+            return;
+        }
+        if(own) {
+            ImGui::SameLine();
+            if(ImGui::SmallButton("Remove pulse")) {
+                obj.erase(key);
+                if(packField)changedPack(key);
+                else changed(key);
+                ImGui::PopID();
+                return;
+            }
+        } else if(!packField&&isSource()&&root_.contains(key)) {
+            ImGui::SameLine();
+            if(ImGui::SmallButton("Neutralize inherited pulse")) {
+                obj[key]={{"wave","sine"},{"rate",1.0f},
+                          {"min",1.0f},{"max",1.0f},{"phase",0.0f}};
+                changed(key);
+                ImGui::PopID();
+                return;
+            }
+        }
+        const char *waves[]={"Sine","Square","Flicker","Random"};
+        const char *values[]={"sine","square","flicker","random"};
+        int chosen=0;
+        const std::string wave=stringValue(pulse,"wave");
+        for(int i=0;i<4;++i)if(wave==values[i])chosen=i;
+        ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+        if(ImGui::Combo("Wave",&chosen,waves,4)) {
+            pulse["wave"]=values[chosen];
+            obj[key]=pulse;
+            if(packField)changedPack(key);
+            else changed(key);
+        }
+        // Inputs are committed only when valid under compile/main.cpp's
+        // contract: rate > 0, 0 <= min <= max, and finite phase.
+        const auto editNumber=[&](const char *label,const char *field,
+                                  float fallback) {
+            float value=number(pulse,field,fallback);
+            ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+            if(!ImGui::DragFloat(label,&value,0.01f,0,0,"%.3f")||
+               !std::isfinite(value))return;
+            const std::string name(field);
+            if(name=="rate"&&value<=0.0f)value=0.001f;
+            if(name=="min") {
+                value=std::max(0.0f,value);
+                pulse["max"]=std::max(value,number(pulse,"max",1.0f));
+            }
+            if(name=="max")value=std::max(value,number(pulse,"min",0.0f));
+            pulse[field]=value;
+            obj[key]=pulse;
+            if(packField)changedPack(key,ImGui::IsItemActive());
+            else changed(key,ImGui::IsItemActive());
+        };
+        editNumber("Rate (seconds / cycle)","rate",1.0f);
+        editNumber("Minimum multiplier","min",0.0f);
+        editNumber("Maximum multiplier","max",1.0f);
+        editNumber("Phase (cycles)","phase",0.0f);
         ImGui::PopID();
     }
     static int imageSlot(const char *key) {
@@ -1813,8 +1961,14 @@ private:
         if(root_.value("keep_albedo",false)&&root_.contains("albedo_map"))
             ImGui::TextColored(ImVec4(1,.6f,.3f,1),
                 "Warning: keep_albedo and albedo_map defaults conflict.");
-        ImGui::TextDisabled(
-            "Additional defaults (scroll, pulse) remain preserved in JSON.");
+        if(ImGui::TreeNode("Animation defaults")) {
+            scrollField("Albedo scroll (U,V) / sec","albedo_scroll",true);
+            scrollField("Emissive scroll (U,V) / sec","emissive_scroll",true);
+            scrollField("Normal 1 scroll (U,V) / sec","normal_scroll",true);
+            scrollField("Normal 2 scroll (U,V) / sec","normal_scroll2",true);
+            pulseField(true);
+            ImGui::TreePop();
+        }
     }
     void renderProperties() {
         ImGui::Begin("Material Properties");
@@ -1911,6 +2065,7 @@ private:
                 }
             }
             imageInfo("Albedo texture","albedo_map");
+            scrollField("Scroll (U,V) / sec","albedo_scroll");
             bool keeps=effectiveSelected().value("keep_albedo",false)||
                        effectiveSelected().value("use_original_albedo",false);
             if(isSource()&&keeps&&effectiveSelected().contains("albedo_map"))
@@ -1942,6 +2097,8 @@ private:
                 changed("emissive_factor",ImGui::IsItemActive());
             }
             imageInfo("Emissive map","emissive_map");
+            scrollField("Scroll (U,V) / sec","emissive_scroll");
+            pulseField(false);
         }
         if(materialSection("Reflections",2,reflects)) {
             bool hasSurface=effectiveSelected().find("surface_map")!=effectiveSelected().end();
@@ -1960,9 +2117,11 @@ private:
         if(materialSection("Normal maps",3,normals)) {
             imageInfo("Normal map 1","normal_map");
             floatField("Normal map 1 strength","normal_strength",1,0,4);
+            scrollField("Normal map 1 scroll (U,V) / sec","normal_scroll");
             ImGui::Spacing();
             imageInfo("Normal map 2","normal_map2");
             floatField("Normal map 2 strength","normal_strength2",1,0,4);
+            scrollField("Normal map 2 scroll (U,V) / sec","normal_scroll2");
         }
         if(materialSection("Parallax mapping",4,parallax)) {
             imageInfo("Displacement map","displacement_map");
@@ -2092,6 +2251,8 @@ private:
     PreviewShape shape_=PreviewShape::Sphere;
     bool envFresnel_=false,orthographic_=false;
     int inspectedChannel_=0;
+    bool animationPlaying_=true;
+    double animationSeconds_=0.0;
     float orbitYaw_=0.35f,orbitPitch_=-0.15f,orbitDistance_=3.5f;
     std::array<float,3> orbitTarget_{0.0f,0.0f,0.0f};
     std::array<float,3> dragStartTarget_{0.0f,0.0f,0.0f};
