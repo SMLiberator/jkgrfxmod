@@ -865,7 +865,10 @@ private:
         const Document &entry=effectiveEntry_;
         bool keep=entry.value("keep_albedo",false)||
                   entry.value("use_original_albedo",false);
-        if(keep && p.files[BaseMap].empty()) {
+        if(keep) {
+            p.files[BaseMap].clear();
+            p.stagedImages[BaseMap].reset();
+
             std::string matName;
             int cel=0;
             auto it=entry.find("replaces");
@@ -1518,7 +1521,9 @@ private:
             // Reference the eventual pack-local PNG without writing it yet.
             stagedImages_[name]=std::move(image);
             Document &obj=packField?root_:selected();
-            obj[key]=name;
+            if(std::string(key)=="albedo_map")
+                editor_source::chooseAlbedoImage(obj,name);
+            else obj[key]=name;
             if(packField)changedPack(key);
             else changed(key);
             status_="Staged texture in memory ("+std::to_string(
@@ -1538,7 +1543,9 @@ private:
             validateSelectedImage(chosen);
             const std::string stored=referencedImagePath(file_,chosen);
             Document &obj=packField?root_:selected();
-            obj[key]=stored;
+            if(std::string(key)=="albedo_map")
+                editor_source::chooseAlbedoImage(obj,stored);
+            else obj[key]=stored;
             if(packField)changedPack(key);
             else changed(key);
             status_="Referenced source texture without copying.";
@@ -1584,6 +1591,8 @@ private:
             ImGui::SetNextItemWidth(260.0f);
             if(ImGui::InputText("Source path",&raw)) {
                 if(raw.empty())obj.erase(key);
+                else if(std::string(key)=="albedo_map")
+                    editor_source::chooseAlbedoImage(obj,raw);
                 else obj[key]=raw;
                 if(packField)changedPack(key,ImGui::IsItemActive());
                 else changed(key,ImGui::IsItemActive());
@@ -1894,8 +1903,8 @@ private:
         if(it==root_.end()&&alias)it=root_.find("use_original_albedo");
         if(it!=root_.end()&&it->is_boolean())value=it->get<bool>();
         if(ImGui::Checkbox(label,&value)) {
-            root_[key]=value;
-            if(alias)root_.erase("use_original_albedo");
+            if(alias)editor_source::chooseOriginalMatAlbedo(root_,value);
+            else root_[key]=value;
             changedPack(key);
         }
         if(has) {
@@ -2128,48 +2137,54 @@ private:
         if(materialSection("Albedo",0,true)) {
             auto v=rgba(effectiveSelected(),"albedo_factor",{1,1,1,1});
             colorField("Tint / alpha","albedo_factor",v.data(),4);
-            if(isSource()) {
-                bool keep=effectiveSelected().value("keep_albedo",false);
-                if(ImGui::Checkbox("Keep original MAT albedo",&keep)) {
-                    selected()["keep_albedo"]=keep;
+            // Native JK albedo and an imported albedo_map are alternate
+            // sources, never simultaneous inputs. Toggling or loading a
+            // replacement makes one explicit choice in a single Undo step.
+            bool keep=effectiveSelected().value("keep_albedo",false);
+            if(ImGui::Checkbox("Keep original MAT albedo",&keep)) {
+                editor_source::chooseOriginalMatAlbedo(selected(),keep);
+                changed("keep_albedo");
+            }
+            const bool ownKeep=selected().contains("keep_albedo")||
+                               selected().contains("use_original_albedo");
+            if(isSource()&&ownKeep) {
+                ImGui::SameLine();
+                if(ImGui::SmallButton("Use pack default##keep")) {
+                    selected().erase("keep_albedo");
                     selected().erase("use_original_albedo");
                     changed("keep_albedo");
                 }
-                const bool ownKeep=selected().contains("keep_albedo")||
-                                   selected().contains("use_original_albedo");
-                if(ownKeep) {
-                    ImGui::SameLine();
-                    if(ImGui::SmallButton("Use pack default##keep")) {
-                        selected().erase("keep_albedo");
-                        selected().erase("use_original_albedo");
-                        changed("keep_albedo");
-                    }
-                }
             }
-            imageInfo("Albedo texture","albedo_map");
+            // Resolve current value again after a checkbox change (syncPreview
+            // refreshes effectiveEntry_ during changed()).
+            keep=effectiveSelected().value("keep_albedo",false);
+            if(keep) {
+                editor_source::MatReplacement original;
+                const Document replacements=selected().value(
+                    "replaces",Document::array());
+                const bool hasOriginal=replacements.is_array()&&
+                    !replacements.empty()&&
+                    editor_source::readMatReplacement(
+                        replacements[0],mode_,original);
+                ImGui::TextUnformatted("Original MAT albedo");
+                if(hasOriginal)
+                    ImGui::TextDisabled("%s (cel %d)",
+                                        original.name.c_str(),original.cel);
+                const auto &thumbnail=preview_->imageInfo(BaseMap);
+                const GLuint image=preview_->imageTexture(BaseMap);
+                if(image&&thumbnail.valid()) {
+                    const float aspect=float(thumbnail.width)/thumbnail.height;
+                    const ImVec2 size(aspect>=1.0f?64.0f:64.0f*aspect,
+                                      aspect>=1.0f?64.0f/aspect:64.0f);
+                    ImGui::Image(ImTextureRef((ImTextureID)image),size,
+                                 ImVec2(0,1),ImVec2(1,0));
+                } else if(isSource()) {
+                    ImGui::TextDisabled("Preview unavailable; set game assets/CMP under File.");
+                }
+            } else {
+                imageInfo("Albedo texture","albedo_map");
+            }
             scrollField("Scroll (U,V) / sec","albedo_scroll");
-            bool keeps=effectiveSelected().value("keep_albedo",false)||
-                       effectiveSelected().value("use_original_albedo",false);
-            if(isSource()&&keeps&&effectiveSelected().contains("albedo_map"))
-                ImGui::TextColored(ImVec4(1,.7f,.3f,1),
-                    "Compiler conflict: keep_albedo and albedo_map.");
-            if(keeps) {
-                ImGui::Separator();
-                ImGui::TextUnformatted("Original JK MAT albedo (preview only)");
-                ImGui::TextDisabled("Configure game assets and CMP under File.");
-                if(!nativeSource_.roots().empty()) {
-                    ImGui::TextWrapped("Game assets: %zu folders, %zu indexed files",
-                        nativeSource_.roots().size(),nativeSource_.indexedFiles());
-                }
-                if(!nativeSource_.palette().empty())
-                    ImGui::TextWrapped("CMP: %s",nativeSource_.palette().c_str());
-                if(nativeLoaded_.width>0)
-                    ImGui::TextWrapped("Using: %s",
-                                       nativeLoaded_.description.c_str());
-                else if(!nativeStatus_.empty())
-                    ImGui::TextWrapped("%s",nativeStatus_.c_str());
-                ImGui::TextDisabled("MAT/CMP preview does not alter metadata.");
-            }
             // Texture import, replacement, and removal are available above.
         }
         if(materialSection("Emissive",1,emits)) {
