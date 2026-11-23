@@ -122,13 +122,17 @@ without game assets. Changes are staged and committed with the JSON
 atomically. All asset roots and colormap files need to correspond to the
 same game resources the original pack compiler would use.
 
-The **Materials** tab has **Add material** and **Remove material** actions
-(with deletion confirmation). Both source and compiled materials can be
-renamed in Material Properties. New materials start with a unique name
+The **Materials** tab has **Add**, **Duplicate**, and **Remove** actions
+(with deletion confirmation). **Duplicate** makes an independent copy
+of the selected material's settings, image references, and MAT targets
+(including existing compiled signatures), assigns a unique `(copy)` name,
+and selects the copy. Change its MAT replacements when making a new
+variant for another game texture. Both source and compiled materials can
+be renamed in Material Properties. New materials start with a unique name
 and an empty MAT replacement that must be completed before saving.
-Material-list changes are a single Undo/Redo operation and restore
-selection correctly. A current material is not silently reverted to a
-different saved material after a structural list change.
+Structural Add/Duplicate/Remove edits use a single Undo/Redo step and
+restore selection correctly. A current material is not silently reverted
+to a different saved material after a structural list change.
 
 **Keep original MAT albedo** is available for source and compiled materials.
 It uses the first MAT replacement's original image (and cel) for preview,
@@ -167,6 +171,26 @@ animation** resets it to zero; neither changes pack metadata. Preview random
 waveforms use the selected material's stable list index as a seed (the game
 uses a runtime instance ID), so exact random values can differ in-game.
 All other surface masks continue to use the original UV coordinates.
+
+## Slider and numeric input behavior
+
+Parameter names and their numeric values appear **inside** standard slider
+and drag controls. Emissive pulse **Wave**, **Rate**, **Minimum**, **Maximum**
+and **Phase** now remain legible even in the narrower inspector panes;
+U/V scrolling and RGB fields show their individual channel names.
+**Drag** with the left mouse button for continuous adjustments, or
+**double-click** a numeric slider/drag to type an exact value (also
+accessible with Ctrl+click). An ordinary left click continues to adjust
+the slider; it does not unexpectedly erase the value.
+
+Click **Reset** beside a parameter to restore the corresponding default.
+On source materials, resetting a local numeric override reveals the
+pack-inherited value. Pulse parameters have individual Reset buttons
+to restore their canonical defaults while preserving other pulse settings.
+The live preview's **Lighting > Reset** button restores **1.00×** without
+changing any material or pack JSON. A separate exact-value box remains for
+reflection strength, since the game permits values above its 0–1 slider.
+All material resets participate in Undo/Redo.
 
 ## Source and compiled pack workflows
 
