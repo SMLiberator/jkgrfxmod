@@ -296,6 +296,9 @@
     <ClInclude Include="gpu_3do_parallel_visibility.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="reflection_capture_parallel_visibility.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="cpu_render_workers.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
