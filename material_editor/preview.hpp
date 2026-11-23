@@ -1,8 +1,10 @@
 #pragma once
 #include "glad.h"
+#include "editor_image.hpp"
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -25,6 +27,8 @@ struct PreviewImageInfo {
 
 struct PreviewMaterial {
     std::array<std::string, TextureCount> files{};
+    std::array<std::shared_ptr<const editor_images::Image>,TextureCount>
+        stagedImages{}; // decoded edited pixels, before any disk write
     std::array<float, 4> albedo{1, 1, 1, 1};
     std::array<float, 3> emissive{0, 0, 0};
     std::array<float, 3> matcapFactor{1, 1, 1};
@@ -72,6 +76,8 @@ private:
     GLuint compileShader(GLenum type, const char *source);
     GLuint loadTexture(const std::string &path, bool srgb,
                        PreviewImageInfo *details=nullptr);
+    GLuint uploadStaged(const editor_images::Image &image,bool srgb,
+                        PreviewImageInfo *details);
     GLuint createPreset();
     GLuint uploadNativeAlbedo();
     void reloadImages();
