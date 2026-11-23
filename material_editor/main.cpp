@@ -1548,7 +1548,7 @@ private:
         ImGui::TextUnformatted(label);
         const float available=ImGui::GetContentRegionAvail().x;
         const float width=std::max(55.0f,
-            (available-(own?32.0f:0.0f)-ImGui::GetStyle().ItemSpacing.x)/2.0f);
+            (available-(own?54.0f:0.0f)-ImGui::GetStyle().ItemSpacing.x)/2.0f);
         const auto axis=[&](int i,const char *id,const char *format) {
             float value=speed[size_t(i)];
             ImGui::SetNextItemWidth(width);
@@ -1567,7 +1567,7 @@ private:
         axis(1,"##v","V: %.3f");
         if(own) {
             ImGui::SameLine();
-            if(ImGui::SmallButton("x")) {
+            if(ImGui::SmallButton("Reset")) {
                 obj.erase(key);
                 if(packField)changedPack(key);
                 else changed(key);
@@ -1647,14 +1647,14 @@ private:
             const std::string format=std::string(label)+": %.3f";
             ImGui::PushID(field);
             ImGui::SetNextItemWidth(std::max(95.0f,
-                ImGui::GetContentRegionAvail().x-28.0f));
+                ImGui::GetContentRegionAvail().x-54.0f));
             const bool edited=ImGui::DragFloat("##value",&value,0.01f,0,0,
                                                 format.c_str());
             if(ImGui::IsItemHovered())
                 ImGui::SetTooltip("Drag to adjust, double-click to type a value.");
             const bool held=ImGui::IsItemActive();
             ImGui::SameLine();
-            const bool reset=ImGui::SmallButton("R");
+            const bool reset=ImGui::SmallButton("Reset");
             if(ImGui::IsItemHovered())
                 ImGui::SetTooltip("Reset %s to %.3f.",label,fallback);
             if((edited||reset)&&std::isfinite(value)) {
@@ -2057,7 +2057,7 @@ private:
         const bool has=root_.contains(key);
         float value=number(root_,key,fallback);
         ImGui::SetNextItemWidth(std::max(95.0f,
-            ImGui::GetContentRegionAvail().x-(has?32.0f:0.0f)));
+            ImGui::GetContentRegionAvail().x-(has?54.0f:0.0f)));
         const std::string format=std::string(label)+": %.3f";
         if(ImGui::DragFloat("##packValue",&value,0.01f,0,0,
                             format.c_str())&&std::isfinite(value)) {
@@ -2080,7 +2080,7 @@ private:
             ImGui::SetTooltip("Drag to adjust, double-click to type a value.");
         if(has) {
             ImGui::SameLine();
-            if(ImGui::SmallButton("x")){root_.erase(key);changedPack(key);}
+            if(ImGui::SmallButton("Reset")){root_.erase(key);changedPack(key);}
             if(ImGui::IsItemHovered())
                 ImGui::SetTooltip("Reset to the default by removing this pack override.");
         }
@@ -2457,7 +2457,7 @@ private:
             float factor=number(effectiveSelected(),"displacement_factor",0.0f);
             const bool overridden=selected().contains("displacement_factor");
             ImGui::SetNextItemWidth(std::max(110.0f,
-                ImGui::GetContentRegionAvail().x-(overridden?32.0f:0.0f)));
+                ImGui::GetContentRegionAvail().x-(overridden?54.0f:0.0f)));
             // The compiler accepts signed, unbounded finite values.
             // Negative factors are routinely used for relief maps.
             if(ImGui::DragFloat("##factor",&factor,0.002f,0,0,
@@ -2468,7 +2468,7 @@ private:
             }
             if(overridden) {
                 ImGui::SameLine();
-                if(ImGui::SmallButton("x")) {
+                if(ImGui::SmallButton("Reset")) {
                     selected().erase("displacement_factor");
                     changed("displacement_factor");
                 }
