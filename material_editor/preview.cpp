@@ -1,5 +1,4 @@
 #include "preview.hpp"
-#define STB_IMAGE_IMPLEMENTATION
 #include "common/stb_image.h"
 #include <algorithm>
 #include <cmath>
@@ -350,6 +349,38 @@ GLuint MaterialPreview::loadTexture(const std::string &filename,bool srgb,
     stbi_image_free(pixels);
     return t;
 }
+GLuint MaterialPreview::uploadStaged(const editor_images::Image &image,
+                                     bool srgb,PreviewImageInfo *details) {
+    if(!image.valid())return 0;
+    const int w=image.width,h=image.height,c=image.channels;
+    std::vector<std::uint8_t> flipped(image.pixels.size());
+    const std::size_t stride=std::size_t(w)*c;
+    for(int y=0;y<h;++y)
+        std::copy_n(image.pixels.data()+std::size_t(y)*stride,stride,
+                    flipped.data()+std::size_t(h-1-y)*stride);
+    const GLenum format=c==4?GL_RGBA:c==3?GL_RGB:GL_RED;
+    const GLenum internal=srgb?(c==4?GL_SRGB8_ALPHA8:GL_SRGB8):
+                           (c==4?GL_RGBA8:c==3?GL_RGB8:GL_R8);
+    GLint unpack=4;
+    glGetIntegerv(GL_UNPACK_ALIGNMENT,&unpack);
+    glPixelStorei(GL_UNPACK_ALIGNMENT,1);
+    GLuint tex=0;
+    glGenTextures(1,&tex);
+    glBindTexture(GL_TEXTURE_2D,tex);
+    glTexImage2D(GL_TEXTURE_2D,0,internal,w,h,0,format,
+                 GL_UNSIGNED_BYTE,flipped.data());
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR_MIPMAP_LINEAR);
+    glGenerateMipmap(GL_TEXTURE_2D);
+    glPixelStorei(GL_UNPACK_ALIGNMENT,unpack);
+    if(details) {
+        details->width=w;details->height=h;
+        details->channels=c;details->bytes=image.pixels.size();
+    }
+    return tex;
+}
 GLuint MaterialPreview::channelTexture(PreviewTexture slot,int channel) {
     if(channel<0||channel>3||!imageInfo_[slot].valid())return 0;
     GLuint &cached=channelTextures_[slot][size_t(channel)];
@@ -362,10 +393,15 @@ GLuint MaterialPreview::channelTexture(PreviewTexture slot,int channel) {
     const int outHeight=std::max(1,int(std::round(info.height*scale)));
     std::vector<unsigned char> pixels(size_t(outWidth)*outHeight*4);
     const bool native=slot==BaseMap&&!material_.nativeRGBA.empty();
+    const auto &staged=material_.stagedImages[slot];
     std::vector<unsigned char> bytes;
     unsigned char *decoded=nullptr;
     int w=0,h=0,ch=0;
-    if(!native) {
+    if(staged) {
+        w=staged->width;
+        h=staged->height;
+        ch=staged->channels;
+    } else if(!native) {
         const std::string file=slot==EnvironmentMap?
             (envOverride_.empty()?material_.files[slot]:envOverride_):
             material_.files[slot];
@@ -389,10 +425,13 @@ GLuint MaterialPreview::channelTexture(PreviewTexture slot,int channel) {
         const int sx=std::min(w-1,int(double(x)*w/outWidth));
         const int sy=std::min(h-1,int(double(y)*h/outHeight));
         // Native MAT RGBA comes top-left first; stb decodes bottom-first.
-        const int sourceY=native?h-1-sy:sy;
-        const auto offset=(size_t(sourceY)*w+sx)*4;
-        const auto value=native?material_.nativeRGBA[offset+channel]:
-                                decoded[offset+channel];
+        const int sourceY=(native||staged)?h-1-sy:sy;
+        const std::size_t offset=std::size_t(sourceY)*w+sx;
+        const auto value=staged?
+            (channel<ch?staged->pixels[offset*ch+channel]:
+             (channel==3?std::uint8_t(255):std::uint8_t(0))):
+            (native?material_.nativeRGBA[offset*4+channel]:
+                    decoded[offset*4+channel]);
         const auto dest=(size_t(y)*outWidth+x)*4;
         pixels[dest]=pixels[dest+1]=pixels[dest+2]=value;
         pixels[dest+3]=255;
@@ -478,12 +517,20 @@ void MaterialPreview::reloadImages() {
                 imageInfo_[i].channels=4;
                 imageInfo_[i].bytes=material_.nativeRGBA.size();
             }
-        } else
+        } else if(material_.stagedImages[i])
+            textures_[i]=uploadStaged(*material_.stagedImages[i],
+                                     srgb,&imageInfo_[i]);
+        else
             textures_[i]=loadTexture(material_.files[i],srgb,&imageInfo_[i]);
     }
     std::string envfile=envOverride_.empty()?material_.files[EnvironmentMap]:envOverride_;
-    textures_[EnvironmentMap]=loadTexture(
-        envfile,true,&imageInfo_[EnvironmentMap]);
+    if(envOverride_.empty()&&material_.stagedImages[EnvironmentMap])
+        textures_[EnvironmentMap]=uploadStaged(
+            *material_.stagedImages[EnvironmentMap],true,
+            &imageInfo_[EnvironmentMap]);
+    else
+        textures_[EnvironmentMap]=loadTexture(
+            envfile,true,&imageInfo_[EnvironmentMap]);
     loadedEnvironmentFile_=textures_[EnvironmentMap]!=0;
     const char *presetNames[]={"Studio","Outdoor","Night"};
     const char *fallbackName=presetNames[std::clamp(preset_,0,2)];
@@ -514,6 +561,7 @@ void MaterialPreview::reloadImages() {
 }
 void MaterialPreview::setMaterial(const PreviewMaterial &next) {
     bool changed=(material_.files!=next.files ||
+        material_.stagedImages!=next.stagedImages ||
         material_.nativeSourceKey!=next.nativeSourceKey ||
         material_.nativeWidth!=next.nativeWidth ||
         material_.nativeHeight!=next.nativeHeight);
