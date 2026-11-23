@@ -10,6 +10,7 @@
 #include "backends/imgui_impl_glfw.h"
 #include "backends/imgui_impl_opengl3.h"
 #include "common/json_incl.hpp"
+#include "common/stb_image.h"
 #include "preview.hpp"
 #include "source_pack.hpp"
 #include <windows.h>
@@ -18,6 +19,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cctype>
 #include <filesystem>
 #include <fstream>
 #include <limits>
@@ -59,6 +61,22 @@ std::string imageFormatLabel(const std::string &filename) {
         return static_cast<char>(std::toupper(ch));
     });
     return ext.empty()?"Image":ext.substr(1);
+}
+void validateSelectedImage(const std::string &filename) {
+    std::ifstream file(fs::u8path(filename),std::ios::binary|std::ios::ate);
+    if(!file)throw std::runtime_error("Cannot open selected image.");
+    const auto length=file.tellg();
+    if(length<=0||static_cast<std::uint64_t>(length)>256ull*1024*1024)
+        throw std::runtime_error("Image is empty or too large to import.");
+    file.seekg(0);
+    std::vector<unsigned char> bytes(static_cast<size_t>(length));
+    file.read(reinterpret_cast<char*>(bytes.data()),length);
+    if(!file)throw std::runtime_error("Could not read the image.");
+    int width=0,height=0,channels=0;
+    if(!stbi_info_from_memory(bytes.data(),int(bytes.size()),
+                              &width,&height,&channels)||
+       width<=0||height<=0||width>32768||height>32768)
+        throw std::runtime_error("Unsupported image file or dimensions.");
 }
 std::string importedImagePath(const std::string &script,const std::string &chosen) {
     const fs::path source=fs::u8path(chosen);
@@ -1062,12 +1080,138 @@ private:
         // The next TextWrapped/imageInfo item naturally starts on a full line.
         ImGui::PopID();
     }
+    static int imageSlot(const char *key) {
+        const std::array<std::pair<const char*,PreviewTexture>,11> slots{{
+            {"albedo_map",BaseMap},{"surface_map",SurfaceMap},
+            {"environment_map",EnvironmentMap},{"normal_map",NormalMap},
+            {"normal_map2",NormalMap2},{"emissive_map",EmissiveMap},
+            {"matcap_map",MatcapMap},{"matcap_surface_map",MatcapSurfaceMap},
+            {"clearcoat_surface_map",CoatSurfaceMap},
+            {"clearcoat_normal_map",CoatNormalMap},
+            {"displacement_map",DisplacementMap}
+        }};
+        for(const auto &item:slots)
+            if(std::string(key)==item.first)return int(item.second);
+        return -1;
+    }
+    void assignSourceTexture(const char *key,bool importCopy,bool packField) {
+        if(!isSource())return;
+        const std::string chosen=chooseFile(window_,true);
+        if(chosen.empty())return;
+        try {
+            validateSelectedImage(chosen);
+            const auto stored=importCopy
+                ?importedImagePath(file_,chosen)
+                :referencedImagePath(file_,chosen);
+            Document &obj=packField?root_:selected();
+            obj[key]=stored;
+            if(packField)changedPack(key);
+            else changed(key);
+            status_=importCopy
+                ?"Copied texture into the source pack; save the script to keep its reference."
+                :"Referenced texture without copying; save the script to keep its reference.";
+        } catch(const std::exception &e) {
+            status_=std::string("Texture selection failed: ")+e.what();
+            MessageBoxA(glfwGetWin32Window(window_),status_.c_str(),
+                        "Material texture",MB_ICONERROR);
+        }
+    }
+    void sourceTextureActions(const char *key,bool packField) {
+        if(!isSource())return;
+        ImGui::PushID("##sourceTextureActions");
+        if(ImGui::SmallButton("Reference..."))
+            assignSourceTexture(key,false,packField);
+        ImGui::SameLine();
+        if(ImGui::SmallButton("Import copy..."))
+            assignSourceTexture(key,true,packField);
+        Document &obj=packField?root_:selected();
+        if(obj.contains(key)) {
+            ImGui::SameLine();
+            if(ImGui::SmallButton("Remove override")) {
+                obj.erase(key);
+                if(packField)changedPack(key);
+                else changed(key);
+            }
+        }
+        ImGui::PopID();
+    }
+    void showTextureDetails(const char *key,const std::string &storedFile) {
+        const int index=imageSlot(key);
+        if(index<0)return;
+        const auto slot=static_cast<PreviewTexture>(index);
+        const auto &info=preview_->imageInfo(slot);
+        if(!info.valid()) {
+            if(!storedFile.empty()) {
+                std::error_code ec;
+                const auto full=fs::u8path(file_).parent_path()/
+                                fs::u8path(storedFile);
+                ImGui::TextColored(ImVec4(1,.65f,.35f,1),
+                    fs::exists(full,ec)?"Unsupported / unreadable image":
+                                         "Texture file missing");
+            }
+            return;
+        }
+        const GLuint image=preview_->imageTexture(slot);
+        if(!image)return;
+        const float maxThumb=58.0f;
+        const float scale=std::min(1.0f,
+            maxThumb/float(std::max(info.width,info.height)));
+        const ImVec2 size(std::max(1.0f,info.width*scale),
+                          std::max(1.0f,info.height*scale));
+        ImGui::Image(ImTextureRef((ImTextureID)image),size,
+                     ImVec2(0,1),ImVec2(1,0));
+        ImGui::SameLine();
+        ImGui::BeginGroup();
+        ImGui::Text("%d x %d",info.width,info.height);
+        ImGui::TextDisabled("%s · %d channel%s",
+            storedFile.empty()?"MAT":imageFormatLabel(storedFile).c_str(),
+            info.channels,info.channels==1?"":"s");
+        ImGui::TextDisabled("%s",readableFileSize(info.bytes).c_str());
+        if(ImGui::SmallButton("Inspect channels..."))
+            ImGui::OpenPopup("##textureChannels");
+        ImGui::EndGroup();
+        if(ImGui::BeginPopup("##textureChannels")) {
+            ImGui::TextUnformatted("Texture channels");
+            ImGui::Separator();
+            const char *labels[]={"RGBA","Red","Green","Blue","Alpha"};
+            for(int c=0;c<5;++c) {
+                if(c)ImGui::SameLine();
+                const bool alphaMissing=c==4&&info.channels!=2&&info.channels!=4;
+                if(alphaMissing)ImGui::BeginDisabled();
+                if(ImGui::RadioButton(labels[c],inspectedChannel_==c))
+                    inspectedChannel_=c;
+                if(alphaMissing)ImGui::EndDisabled();
+            }
+            if(inspectedChannel_==4&&info.channels!=2&&info.channels!=4)
+                inspectedChannel_=0;
+            GLuint channel=inspectedChannel_==0?image:
+                preview_->channelTexture(slot,inspectedChannel_-1);
+            if(channel) {
+                const float scale=std::min(1.0f,
+                    320.0f/float(std::max(info.width,info.height)));
+                ImGui::Image(ImTextureRef((ImTextureID)channel),
+                    ImVec2(std::max(1.0f,info.width*scale),
+                           std::max(1.0f,info.height*scale)),
+                    ImVec2(0,1),ImVec2(1,0));
+            }
+            if(slot==SurfaceMap)
+                ImGui::TextDisabled("Surface: R=reflection, G=roughness, B=metalness");
+            else if(slot==CoatSurfaceMap)
+                ImGui::TextDisabled("Clearcoat: R=coverage, G=roughness, B=transmission");
+            else if(slot==MatcapSurfaceMap)
+                ImGui::TextDisabled("MatCap mask: R=intensity, G=roughness");
+            else if(slot==DisplacementMap)
+                ImGui::TextDisabled("Displacement: red channel stores height");
+            ImGui::TextDisabled("Channels are displayed as grayscale data.");
+            ImGui::EndPopup();
+        }
+    }
     void imageInfo(const char *label,const char *key) {
         std::string value=stringValue(effectiveSelected(),key);
+        ImGui::PushID(key);
         if(isSource()) {
-            // Source packs store original filenames. Edits create or remove
-            // local overrides; inherited defaults stay on the pack itself.
-            ImGui::PushID(key);
+            // Reference and import are different actions. A copied file is
+            // intentionally not removed when an undo reverts its JSON path.
             ImGui::TextUnformatted(label);
             const bool inherited=editor_source::isInherited(root_,selected(),key,mode_) ||
                 (std::string(key)=="environment_map"&&
@@ -1081,22 +1225,33 @@ private:
                 else selected()[key]=value;
                 changed(key,ImGui::IsItemActive());
             }
-            if(!value.empty()) {
-                const auto absolute=fs::u8path(file_).parent_path()/fs::u8path(value);
-                std::error_code ec;
-                if(!fs::exists(absolute,ec))
-                    ImGui::TextColored(ImVec4(1,.65f,.35f,1),
-                        "Source texture missing");
+            sourceTextureActions(key,false);
+            if(value.empty()&&imageSlot(key)!=BaseMap) {
+                ImGui::PopID();
+                return;
             }
-            ImGui::PopID();
         } else {
-            if(value.empty())return;
+            if(value.empty()) {
+                ImGui::PopID();
+                return;
+            }
             ImGui::TextWrapped("%s: %s",label,value.c_str());
-            fs::path full=fs::u8path(file_).parent_path()/fs::u8path(value);
-            std::error_code ec;
-            if(!fs::exists(full,ec))
-                ImGui::TextColored(ImVec4(1,.5f,.35f,1),"[missing texture]");
         }
+        showTextureDetails(key,value);
+        ImGui::PopID();
+    }
+    void packTextureField(const char *label,const char *key) {
+        packTextField(label,key,false,true);
+        ImGui::PushID(key);
+        sourceTextureActions(key,true);
+        const auto file=stringValue(root_,key);
+        if(!file.empty()) {
+            std::error_code ec;
+            if(!fs::exists(fs::u8path(file_).parent_path()/
+                           fs::u8path(file),ec))
+                ImGui::TextDisabled("Source texture is missing.");
+        }
+        ImGui::PopID();
     }
     void packTextField(const char *label,const char *key,
                        bool multiline=false,bool optional=false) {
@@ -1123,6 +1278,11 @@ private:
         packTextField("Comment (optional)","comment",true,true);
         packTextField("Default environment map (optional)","environment_map",
                       false,true);
+        if(isSource()) {
+            ImGui::PushID("pack_environment_map");
+            sourceTextureActions("environment_map",true);
+            ImGui::PopID();
+        }
         const std::string env=stringValue(root_,"environment_map");
         if(!env.empty()) {
             std::error_code ec;
@@ -1328,7 +1488,7 @@ private:
                 {"MatCap mask","matcap_surface_map"},
                 {"Clearcoat surface","clearcoat_surface_map"},
                 {"Clearcoat normal","clearcoat_normal_map"}})
-                packTextField(entry.first,entry.second,false,true);
+                packTextureField(entry.first,entry.second);
             ImGui::TreePop();
         }
         if(ImGui::TreeNode("Colors and surface properties")) {
@@ -1650,6 +1810,7 @@ private:
     int selection_=-1,environment_=0;
     PreviewShape shape_=PreviewShape::Sphere;
     bool envFresnel_=false,orthographic_=false;
+    int inspectedChannel_=0;
     float orbitYaw_=0.35f,orbitPitch_=-0.15f,orbitDistance_=3.5f;
     std::array<float,3> orbitTarget_{0.0f,0.0f,0.0f};
     std::array<float,3> dragStartTarget_{0.0f,0.0f,0.0f};
