@@ -106,5 +106,5 @@ assert hemi.index("diag.search_ns+=") < hemi.index("bool const profile_shared=")
 assert hemi.index("auto const sky_started=") < hemi.index(
     "draw_reflection_capture_sky(shader,camera,view,frustum,")
 assert hemi.index("auto const models_started=") < hemi.index(
-    "for(auto const &inst:offscreen.nodes)draw_model(inst);")
+    "for(size_t i=0;i<capture_models.size();++i)")
 print("Reflection/opaque GPU timers and Shared capture CPU attribution contracts OK")
