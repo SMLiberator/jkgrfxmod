@@ -73,6 +73,16 @@ struct profile_sample {
   uint64_t gpu_instancing_conservative_draws=0;
   uint64_t gpu_instancing_compatible_duplicates=0;
   uint64_t gpu_instancing_compatible_groups=0;
+  uint64_t gpu_instancing_repeated_member_ranges=0;
+  uint64_t gpu_instancing_repeated_eligible_ranges=0;
+  uint64_t gpu_instancing_rejected_ranges=0;
+  uint64_t gpu_instancing_repeated_rejected_ranges=0;
+  uint64_t gpu_instancing_eligible_repeat_extras=0;
+  uint64_t gpu_instancing_state_split_extras=0;
+  // One slot per bit in the audit's 32-bit mask. The audit header names
+  // active reason slots without including heavy 3DO types here.
+  std::array<uint64_t,32> gpu_instancing_rejects_all{};
+  std::array<uint64_t,32> gpu_instancing_rejects_repeated{};
   uint64_t gpu_sprite_instanced_calls=0,gpu_sprite_instanced_quads=0;
   uint64_t gpu_sprite_instancing_eligible=0;
   uint64_t gpu_opaque_draw_calls=0,gpu_transparent_draw_calls=0;
@@ -190,6 +200,17 @@ struct profile_sample {
     gpu_instancing_conservative_draws+=o.gpu_instancing_conservative_draws;
     gpu_instancing_compatible_duplicates+=o.gpu_instancing_compatible_duplicates;
     gpu_instancing_compatible_groups+=o.gpu_instancing_compatible_groups;
+    gpu_instancing_repeated_member_ranges+=o.gpu_instancing_repeated_member_ranges;
+    gpu_instancing_repeated_eligible_ranges+=o.gpu_instancing_repeated_eligible_ranges;
+    gpu_instancing_rejected_ranges+=o.gpu_instancing_rejected_ranges;
+    gpu_instancing_repeated_rejected_ranges+=o.gpu_instancing_repeated_rejected_ranges;
+    gpu_instancing_eligible_repeat_extras+=o.gpu_instancing_eligible_repeat_extras;
+    gpu_instancing_state_split_extras+=o.gpu_instancing_state_split_extras;
+    for(size_t i=0;i<gpu_instancing_rejects_all.size();++i) {
+        gpu_instancing_rejects_all[i]+=o.gpu_instancing_rejects_all[i];
+        gpu_instancing_rejects_repeated[i]+=
+            o.gpu_instancing_rejects_repeated[i];
+    }
     gpu_sprite_instanced_calls+=o.gpu_sprite_instanced_calls;
     gpu_sprite_instanced_quads+=o.gpu_sprite_instanced_quads;
     gpu_sprite_instancing_eligible+=o.gpu_sprite_instancing_eligible;

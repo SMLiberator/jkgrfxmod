@@ -1,4 +1,5 @@
 #include "renderer/gpu_3do_instancing_audit.hpp"
+#include "renderer/frame_profile.hpp"
 #include <cassert>
 #include <limits>
 #include <memory>
@@ -16,9 +17,15 @@ static gpu_3do_instancing_audit_record record(
     r.group=reinterpret_cast<uintptr_t>(&group);
     r.material=material;
     r.instance=owner;
-    r.state_eligible=gpu_3do_instancing_conservative_candidate(
-        inst,group,gpu_3do_alpha_mode::solid,view_dependent) &&
+    bool const valid_state=
         gpu_3do_instancing_capture_state(inst,false,r.state);
+    r.state_eligible=gpu_3do_instancing_conservative_candidate(
+        inst,group,gpu_3do_alpha_mode::solid,view_dependent) && valid_state;
+    r.rejection_mask=gpu_3do_instancing_rejection_mask(
+        inst,group,gpu_3do_alpha_mode::solid,
+        view_dependent?gpu_3do_instancing_rejection_bit(
+            gpu_3do_instancing_rejection::specular):0U,valid_state);
+    assert((r.rejection_mask==0U)==r.state_eligible);
     return r;
 }
 int main() {
@@ -106,5 +113,71 @@ int main() {
         ambient,shared->groups[0],gpu_3do_alpha_mode::solid,false));
     ambient=a;ambient.ambient=(std::numeric_limits<float>::quiet_NaN)();
     assert(!gpu_3do_instancing_capture_state(ambient,false,mirrored));
+    // A single pending draw may fail several independent conditions.
+    using Reason=gpu_3do_instancing_rejection;
+    auto excluded=a;
+    excluded.num_lights=1U;
+    excluded.crossing_lighting=true;
+    excluded.thing_opacity=0.5f;
+    auto const mask=gpu_3do_instancing_rejection_mask(
+        excluded,shared->groups[0],gpu_3do_alpha_mode::mixed,
+        gpu_3do_instancing_rejection_bit(Reason::normal_map) |
+        gpu_3do_instancing_rejection_bit(Reason::environment_map),true);
+    for(auto reason:{Reason::alpha_policy,Reason::normal_map,
+                     Reason::environment_map,Reason::opacity,
+                     Reason::per_thing_lights,Reason::crossing_lighting})
+        assert((mask&gpu_3do_instancing_rejection_bit(reason))!=0U);
+    assert(gpu_3do_instancing_rejection_mask(
+        a,shared->groups[0],gpu_3do_alpha_mode::solid,0U,true)==0U);
+    assert(gpu_3do_instancing_rejection_mask(
+        a,shared->groups[0],gpu_3do_alpha_mode::solid,0U,false)
+        ==gpu_3do_instancing_rejection_bit(Reason::invalid_state));
+    auto first=record(a,shared->groups[0],0x1000U,0x11U);
+    auto second=record(excluded,shared->groups[0],0x1000U,0x22U);
+    second.rejection_mask=mask;
+    second.state_eligible=false;
+    rows={first,second};
+    metrics=audit_gpu_3do_instancing(rows);
+    assert(metrics.source_draws==2U);
+    assert(metrics.geometry_repeated_draws==1U);
+    assert(metrics.repeated_member_ranges==2U);
+    assert(metrics.repeated_eligible_member_ranges==1U);
+    assert(metrics.rejected_ranges==1U);
+    assert(metrics.repeated_rejected_ranges==1U);
+    assert(metrics.rejects_all[static_cast<size_t>(Reason::normal_map)]==1U);
+    assert(metrics.rejects_repeated[static_cast<size_t>(Reason::normal_map)]==1U);
+    assert(metrics.rejects_repeated[static_cast<size_t>(Reason::per_thing_lights)]==1U);
+    assert(metrics.eligible_repeat_extras==0U);
+    assert(metrics.state_split_extras==0U);
+
+    // Identical eligible geometry can still be split by per-Thing ambient
+    // state, while repeated ranges from the same Thing are not instances.
+    auto differing=b;
+    differing.ambient=0.5f;
+    rows={first,record(differing,shared->groups[0],0x1000U,0x22U)};
+    metrics=audit_gpu_3do_instancing(rows);
+    assert(metrics.repeated_eligible_member_ranges==2U);
+    assert(metrics.eligible_repeat_extras==1U);
+    assert(metrics.compatible_repeated_draws==0U);
+    assert(metrics.state_split_extras==1U);
+    rows={first,first};
+    metrics=audit_gpu_3do_instancing(rows);
+    assert(metrics.source_draws==2U);
+    assert(metrics.geometry_repeated_draws==0U);
+    assert(metrics.repeated_member_ranges==0U);
+
+    // Window aggregation must add histograms slot-by-slot, including
+    // both "all ranges" and the more relevant "repeat members" set.
+    profile_sample frame{},window{};
+    frame.gpu_instancing_rejected_ranges=1U;
+    frame.gpu_instancing_repeated_member_ranges=2U;
+    frame.gpu_instancing_rejects_all[static_cast<size_t>(Reason::normal_map)]=1U;
+    frame.gpu_instancing_rejects_repeated[static_cast<size_t>(Reason::normal_map)]=1U;
+    window.add(frame);
+    window.add(frame);
+    assert(window.gpu_instancing_rejected_ranges==2U);
+    assert(window.gpu_instancing_repeated_member_ranges==4U);
+    assert(window.gpu_instancing_rejects_all[static_cast<size_t>(Reason::normal_map)]==2U);
+    assert(window.gpu_instancing_rejects_repeated[static_cast<size_t>(Reason::normal_map)]==2U);
     return 0;
 }

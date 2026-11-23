@@ -42,6 +42,28 @@ for field in ("gpu_instancing_audit_samples",
     assert f"{field}+=o.{field};" in profile
 assert "identity=cache_snapshot_id+geometry+group+MAT;not_filename" in renderer
 assert "sampled_profile_only_no_instancing" in renderer
+assert "instancing_rejections_all" in renderer
+assert "instancing_rejections_repeated" in renderer
+assert "record.rejection_mask=" in audit
+assert "gpu_3do_instancing_rejection_mask(" in audit
+assert "reason(specular_view_dependent" in audit
+assert "gpu_3do_instancing_rejection_names" in header
+assert "state_split_extras" in header
+assert "result.repeated_member_ranges" in header
+assert "result.rejects_repeated[i]" in header
+assert "result.state_split_extras=" in header
+for field in ("gpu_instancing_repeated_member_ranges",
+              "gpu_instancing_repeated_eligible_ranges",
+              "gpu_instancing_rejected_ranges",
+              "gpu_instancing_repeated_rejected_ranges",
+              "gpu_instancing_eligible_repeat_extras",
+              "gpu_instancing_state_split_extras"):
+    assert f"{field}=0;" in profile
+    assert f"o.{field};" in profile
+for field in ("gpu_instancing_rejects_all",
+              "gpu_instancing_rejects_repeated"):
+    assert f"{field}{{}};" in profile
+    assert f"o.{field}[i];" in profile
 assert "GPU 3DO CloneModel-safe instancing audit" in workflow
 assert "tests\\gpu_3do_instancing_audit.cpp" in workflow
 assert "tests/gpu_3do_instancing_audit.py" in workflow

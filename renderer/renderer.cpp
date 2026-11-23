@@ -1737,8 +1737,45 @@ namespace jkgm {
                         " compatible_repeat_groups_per_sample=",
                         profile_window.gpu_instancing_compatible_groups/sample_count,
                         " NOTE=sampled_profile_only_no_instancing;identity=cache_snapshot_id+geometry+group+MAT;not_filename;range_savings_upper_bound_not_GL_calls");
+                    // Values in the histogram are raw totals over the
+                    // sample_count audits, avoiding truncated rare reasons.
+                    auto rejection_text=[&](std::array<uint64_t,32> const &counts) {
+                        std::string out;
+                        for(size_t i=0;i<gpu_3do_instancing_rejection_count;++i) {
+                            if(counts[i]==0U)continue;
+                            out+=" ";
+                            out+=gpu_3do_instancing_rejection_names[i];
+                            out+="=";
+                            out+=std::to_string(counts[i]);
+                        }
+                        return out.empty()?std::string{" none"}:out;
+                    };
+                    LOG_INFO("PERF gpu_3do instancing_rejections_all",
+                        " samples=",sample_count,
+                        " ranges_per_sample=",
+                        profile_window.gpu_instancing_source_draws/sample_count,
+                        " rejected_per_sample=",
+                        profile_window.gpu_instancing_rejected_ranges/sample_count,
+                        " reason_totals:",
+                        rejection_text(profile_window.gpu_instancing_rejects_all),
+                        " NOTE=overlapping_reasons;sampled_opaque_ranges_not_GL_calls");
+                    LOG_INFO("PERF gpu_3do instancing_rejections_repeated",
+                        " samples=",sample_count,
+                        " repeat_member_ranges_per_sample=",
+                        profile_window.gpu_instancing_repeated_member_ranges/sample_count,
+                        " eligible_repeat_members_per_sample=",
+                        profile_window.gpu_instancing_repeated_eligible_ranges/sample_count,
+                        " rejected_repeat_members_per_sample=",
+                        profile_window.gpu_instancing_repeated_rejected_ranges/sample_count,
+                        " eligible_repeat_extras_per_sample=",
+                        profile_window.gpu_instancing_eligible_repeat_extras/sample_count,
+                        " state_split_extras_per_sample=",
+                        profile_window.gpu_instancing_state_split_extras/sample_count,
+                        " reason_totals:",
+                        rejection_text(profile_window.gpu_instancing_rejects_repeated),
+                        " NOTE=overlapping_reasons;members_include_first;extras_exclude_first;not_GL_calls");
                 }
-                LOG_INFO("PERF gpu_3do batch GL_calls_avg=",
+                LOG_INFO("PERF gpu_3do batch GL_calls_avg=
                          profile_window.gpu_draw_calls/frames,
                          " source_ranges_avg=",
                          profile_window.gpu_draw_ranges/frames,
@@ -5310,15 +5347,26 @@ namespace jkgm {
                          material.has_environment2 ||
                          effective_capture_reflection_mode(
                             material.reflection_mode)>=5);
-                    // Deliberately exclude authored maps that might require
-                    // separate local-eye, reflection or pixel derivative state.
-                    bool const view_dependent=
-                        specular_view_dependent ||
-                        material.has_normal || material.has_normal2 ||
-                        material.has_surface || material.has_environment ||
-                        material.has_environment2 || material.has_matcap ||
-                        get<0>(material.clearcoat_params)>0.0f ||
-                        material.displacement_factor!=0.0f;
+                    // Classify each material blocker independently without
+                    // changing the original conservative eligibility test.
+                    using Reject=gpu_3do_instancing_rejection;
+                    uint32_t material_rejections=0U;
+                    auto reason=[&](bool active,Reject cause) {
+                        if(active)material_rejections|=
+                            gpu_3do_instancing_rejection_bit(cause);
+                    };
+                    reason(specular_view_dependent,Reject::specular);
+                    reason(material.has_normal || material.has_normal2,
+                           Reject::normal_map);
+                    reason(material.has_surface,Reject::surface_map);
+                    reason(material.has_environment || material.has_environment2,
+                           Reject::environment_map);
+                    reason(material.has_matcap,Reject::matcap);
+                    reason(get<0>(material.clearcoat_params)>0.0f,
+                           Reject::clearcoat);
+                    reason(material.displacement_factor!=0.0f,
+                           Reject::displacement);
+                    bool const view_dependent=material_rejections!=0U;
                     gpu_3do_instancing_audit_record record{};
                     record.mesh_id=inst.id;
                     record.geometry=reinterpret_cast<uintptr_t>(
@@ -5326,12 +5374,14 @@ namespace jkgm {
                     record.group=reinterpret_cast<uintptr_t>(draw.group);
                     record.material=reinterpret_cast<uintptr_t>(draw.texture);
                     record.instance=reinterpret_cast<uintptr_t>(draw.instance);
+                    bool const valid_state=gpu_3do_instancing_capture_state(
+                        inst,draw.context->reversed_winding,record.state);
+                    record.rejection_mask=gpu_3do_instancing_rejection_mask(
+                        inst,*draw.group,draw.policy,material_rejections,valid_state);
                     record.state_eligible=
                         gpu_3do_instancing_conservative_candidate(
                             inst,*draw.group,draw.policy,view_dependent) &&
-                        gpu_3do_instancing_capture_state(
-                            inst,draw.context->reversed_winding,
-                            record.state);
+                        valid_state;
                     records.push_back(record);
                 }
                 auto const audit=audit_gpu_3do_instancing(records);
@@ -5347,6 +5397,24 @@ namespace jkgm {
                     audit.compatible_repeated_draws;
                 profile_frame.gpu_instancing_compatible_groups+=
                     audit.compatible_groups;
+                profile_frame.gpu_instancing_repeated_member_ranges+=
+                    audit.repeated_member_ranges;
+                profile_frame.gpu_instancing_repeated_eligible_ranges+=
+                    audit.repeated_eligible_member_ranges;
+                profile_frame.gpu_instancing_rejected_ranges+=
+                    audit.rejected_ranges;
+                profile_frame.gpu_instancing_repeated_rejected_ranges+=
+                    audit.repeated_rejected_ranges;
+                profile_frame.gpu_instancing_eligible_repeat_extras+=
+                    audit.eligible_repeat_extras;
+                profile_frame.gpu_instancing_state_split_extras+=
+                    audit.state_split_extras;
+                for(size_t i=0;i<gpu_3do_instancing_rejection_count;++i) {
+                    profile_frame.gpu_instancing_rejects_all[i]+=
+                        audit.rejects_all[i];
+                    profile_frame.gpu_instancing_rejects_repeated[i]+=
+                        audit.rejects_repeated[i];
+                }
             }
             if(transparent && !(post_exempt &&
                                 !the_config->camera_hud_depth_sort)) {

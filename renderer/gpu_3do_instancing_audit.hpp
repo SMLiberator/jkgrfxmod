@@ -14,16 +14,48 @@
 #include <vector>
 
 namespace jkgm {
+// Profile-only multi-reason bitmask. Reasons may overlap for one pending
+// opaque range, and CloneModel filenames do not establish mesh identity.
+enum class gpu_3do_instancing_rejection : uint32_t {
+    missing_geometry, alpha_policy, cutout_face, specular, normal_map,
+    surface_map, environment_map, matcap, clearcoat, displacement,
+    shadow_only, projected_decal, sprite, transient, saber_trail,
+    camera_hud, skybox_lighting, dither, opacity, per_thing_lights,
+    crossing_lighting, nonrigid_lighting, invalid_state, count
+};
+inline constexpr size_t gpu_3do_instancing_rejection_count=
+    static_cast<size_t>(gpu_3do_instancing_rejection::count);
+static_assert(gpu_3do_instancing_rejection_count<=32U,
+    "Rejection audit uses a 32-bit bitmask");
+inline constexpr uint32_t gpu_3do_instancing_rejection_bit(
+    gpu_3do_instancing_rejection r) {
+    return 1U<<static_cast<uint32_t>(r);
+}
+inline constexpr std::array<char const *,
+    gpu_3do_instancing_rejection_count> gpu_3do_instancing_rejection_names{{
+    "missing_geometry","alpha_policy","cutout_face","specular",
+    "normal_map","surface_map","environment_map","matcap","clearcoat",
+    "displacement","shadow_only","projected_decal","sprite","transient",
+    "saber_trail","camera_hud","skybox_lighting","dither","opacity",
+    "per_thing_lights","crossing_lighting","nonrigid_lighting","invalid_state"
+}};
 struct gpu_3do_instancing_audit_record {
     uint64_t mesh_id=0;
     uintptr_t geometry=0,group=0,material=0,instance=0;
     std::array<uint32_t,11> state{};
     bool state_eligible=false;
+    uint32_t rejection_mask=0U;
 };
 struct gpu_3do_instancing_audit_stats {
     uint64_t source_draws=0,geometry_repeated_draws=0;
     uint64_t geometry_repeated_groups=0,conservative_draws=0;
     uint64_t compatible_repeated_draws=0,compatible_groups=0;
+    // Member ranges include the first distinct Thing; extras exclude it.
+    uint64_t repeated_member_ranges=0,repeated_eligible_member_ranges=0;
+    uint64_t rejected_ranges=0,repeated_rejected_ranges=0;
+    uint64_t eligible_repeat_extras=0,state_split_extras=0;
+    std::array<uint64_t,gpu_3do_instancing_rejection_count> rejects_all{};
+    std::array<uint64_t,gpu_3do_instancing_rejection_count> rejects_repeated{};
 };
 inline uint32_t gpu_3do_instancing_float_bits(float x) {
     uint32_t bits=0;
@@ -48,6 +80,36 @@ inline bool gpu_3do_instancing_conservative_candidate(
         !inst.thing_dither && inst.thing_opacity==1.0f &&
         inst.num_lights==0U && !inst.crossing_lighting &&
         !inst.nonrigid_light_transform;
+}
+// The strict eligibility predicate above is intentionally unchanged.
+// The mask mirrors every rule and distinguishes individual material features.
+// material_rejections must be computed from the resolved material.
+inline uint32_t gpu_3do_instancing_rejection_mask(
+    gpu_3do_instance const &inst,gpu_3do_group const &group,
+    gpu_3do_alpha_mode policy,uint32_t material_rejections,bool state_valid)
+{
+    using R=gpu_3do_instancing_rejection;
+    uint32_t result=material_rejections;
+    auto reject=[&](bool test,R reason) {
+        if(test)result|=gpu_3do_instancing_rejection_bit(reason);
+    };
+    reject(inst.id==0U || !inst.geometry,R::missing_geometry);
+    reject(policy!=gpu_3do_alpha_mode::solid,R::alpha_policy);
+    reject((group.face_type&0x2U)!=0U,R::cutout_face);
+    reject(inst.shadow_only,R::shadow_only);
+    reject(inst.is_projected_decal,R::projected_decal);
+    reject(inst.is_sprite_quad,R::sprite);
+    reject(inst.transient_procedural,R::transient);
+    reject(inst.saber_trail_active,R::saber_trail);
+    reject(inst.camera_hud,R::camera_hud);
+    reject(inst.skybox_vertex_lighting,R::skybox_lighting);
+    reject(inst.thing_dither,R::dither);
+    reject(inst.thing_opacity!=1.0f,R::opacity);
+    reject(inst.num_lights!=0U,R::per_thing_lights);
+    reject(inst.crossing_lighting,R::crossing_lighting);
+    reject(inst.nonrigid_light_transform,R::nonrigid_lighting);
+    reject(!state_valid,R::invalid_state);
+    return result;
 }
 inline bool gpu_3do_instancing_capture_state(
     gpu_3do_instance const &inst,bool reversed_winding,
@@ -76,6 +138,7 @@ inline gpu_3do_instancing_audit_stats audit_gpu_3do_instancing(
     using geometry_key=std::tuple<uint64_t,uintptr_t,uintptr_t,uintptr_t>;
     using compatible_key=std::tuple<geometry_key,std::array<uint32_t,11>>;
     std::map<geometry_key,std::set<uintptr_t>> geometric;
+    std::map<geometry_key,std::set<uintptr_t>> eligible;
     std::map<compatible_key,std::set<uintptr_t>> compatible;
     gpu_3do_instancing_audit_stats result{};
     for(auto const &r:records) {
@@ -85,11 +148,34 @@ inline gpu_3do_instancing_audit_stats audit_gpu_3do_instancing(
         geometry_key const identity{
             r.mesh_id,r.geometry,r.group,r.material};
         geometric[identity].insert(r.instance);
+        if(r.rejection_mask!=0U)++result.rejected_ranges;
+        for(size_t i=0;i<gpu_3do_instancing_rejection_count;++i)
+            if((r.rejection_mask&(1U<<i))!=0U)
+                ++result.rejects_all[i];
         if(r.state_eligible) {
             ++result.conservative_draws;
+            eligible[identity].insert(r.instance);
             compatible[{identity,r.state}].insert(r.instance);
         }
     }
+    // Only geometry shared by distinct Things can benefit from cross-Thing
+    // instancing. Repeated ranges from one Thing do not create candidates.
+    for(auto const &r:records) {
+        if(!r.mesh_id || !r.geometry || !r.group || !r.material ||
+           !r.instance)continue;
+        geometry_key const identity{r.mesh_id,r.geometry,r.group,r.material};
+        auto const found=geometric.find(identity);
+        if(found==geometric.end() || found->second.size()<2U)continue;
+        ++result.repeated_member_ranges;
+        if(r.state_eligible)++result.repeated_eligible_member_ranges;
+        if(r.rejection_mask!=0U)++result.repeated_rejected_ranges;
+        for(size_t i=0;i<gpu_3do_instancing_rejection_count;++i)
+            if((r.rejection_mask&(1U<<i))!=0U)
+                ++result.rejects_repeated[i];
+    }
+    for(auto const &entry:eligible)
+        if(entry.second.size()>1U)
+            result.eligible_repeat_extras+=entry.second.size()-1U;
     for(auto const &entry:geometric)
         if(entry.second.size()>1U) {
             ++result.geometry_repeated_groups;
@@ -100,6 +186,10 @@ inline gpu_3do_instancing_audit_stats audit_gpu_3do_instancing(
             ++result.compatible_groups;
             result.compatible_repeated_draws+=entry.second.size()-1U;
         }
+    // Identical eligible geometry that differs in ambient/tints/winding
+    // cannot share the current strict per-draw state.
+    result.state_split_extras=
+        result.eligible_repeat_extras-result.compatible_repeated_draws;
     return result;
 }
 } // namespace jkgm
