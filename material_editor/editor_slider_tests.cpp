@@ -66,6 +66,20 @@ void testDoubleClick(ImGuiSliderFlags flags) {
 
     io.AddInputCharactersUTF8("1.75");
     const auto typed=drawFrame(value,flags);
+    if(!typed.modified) {
+        const ImGuiContext &ctx=*GImGui;
+        std::cerr<<"Slider diagnostic: value="<<value
+                 <<" typed-temp="<<typed.tempInput
+                 <<" active-id="<<ctx.ActiveId
+                 <<" temp-id="<<ctx.TempInputId
+                 <<" text-id="<<ctx.InputTextState.ID
+                 <<" deactivated-id="<<ctx.InputTextDeactivatedState.ID
+                 <<" nav-activate="<<ctx.NavActivateId
+                 <<" want-text="<<ctx.IO.WantTextInput
+                 <<" want-keyboard="<<ctx.IO.WantCaptureKeyboard
+                 <<" queue-length="<<ctx.IO.InputQueueCharacters.Size
+                 <<" mouse-down="<<ctx.IO.MouseDown[0]<<"\\n";
+    }
     require(typed.modified,
             "Typed numeric value must be accepted by the slider");
     const float expected=flags&ImGuiSliderFlags_AlwaysClamp?1.0f:1.75f;
