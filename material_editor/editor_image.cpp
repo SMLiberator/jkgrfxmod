@@ -4,6 +4,7 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "common/stb_image_write.h"
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <fstream>
 #include <iterator>
@@ -41,6 +42,34 @@ void collect(void *context,void *data,int size) {
 }
 } // namespace
 
+std::optional<std::string> packLocalPngReference(
+        const std::filesystem::path &document,
+        const std::filesystem::path &selected) {
+    namespace fs=std::filesystem;
+    std::error_code ec;
+    if(!fs::is_regular_file(selected,ec)||ec)return std::nullopt;
+    // Compiled packs require PNG files. Source packs can also reference
+    // other formats explicitly, but automatic Load remains restricted to
+    // PNGs already stored in the pack's directory.
+    auto extension=selected.extension().u8string();
+    std::transform(extension.begin(),extension.end(),extension.begin(),
+        [](unsigned char ch){return char(std::tolower(ch));});
+    if(extension!=".png")return std::nullopt;
+    ec.clear();
+    const auto packDirectory=fs::weakly_canonical(document.parent_path(),ec);
+    if(ec)return std::nullopt;
+    ec.clear();
+    const auto actualFile=fs::canonical(selected,ec);
+    if(ec)return std::nullopt;
+    ec.clear();
+    if(!fs::equivalent(actualFile.parent_path(),packDirectory,ec)||ec)
+        return std::nullopt;
+    // Pack metadata uses a directly pack-local basename. This works for
+    // multiple materials referencing the same PNG without duplicating it.
+    const auto filename=selected.filename().u8string();
+    if(filename.empty())return std::nullopt;
+    return filename;
+}
 Image fromRGBA(const std::uint8_t *rgba,int width,int height,
                int sourceChannels,Role role,bool sourcePack) {
     if(!rgba)throw std::runtime_error("Missing decoded image pixels.");
