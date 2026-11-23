@@ -1170,7 +1170,7 @@ private:
                 if(ImGui::BeginTabItem("Materials")) {
                     ImGui::TextWrapped("Pack: %s",stringValue(root_,"name").c_str());
                     filter_.Draw("Search");
-                    if(ImGui::BeginChild("MaterialList",ImVec2(0,-88),true)) {
+                    if(ImGui::BeginChild("MaterialList",ImVec2(0,-120),true)) {
                         for(size_t i=0;i<root_["materials"].size();++i) {
                             const Document &item=root_["materials"][i];
                             std::string name=stringValue(item,"name");
@@ -1184,6 +1184,27 @@ private:
                         }
                     }
                     ImGui::EndChild();
+                    if(ImGui::Button("Add material"))addNewMaterial();
+                    ImGui::SameLine();
+                    ImGui::BeginDisabled(!validSelection());
+                    if(ImGui::Button("Remove material"))
+                        ImGui::OpenPopup("Remove selected material?");
+                    ImGui::EndDisabled();
+                    if(ImGui::BeginPopupModal("Remove selected material?",
+                                             nullptr,ImGuiWindowFlags_AlwaysAutoResize)) {
+                        ImGui::TextWrapped("Remove '%s' from this pack?",
+                            validSelection()?stringValue(selected(),"name").c_str():
+                                             "(no selection)");
+                        ImGui::TextDisabled("You can Undo this operation.");
+                        if(ImGui::Button("Remove",ImVec2(90,0))) {
+                            removeSelectedMaterial();
+                            ImGui::CloseCurrentPopup();
+                        }
+                        ImGui::SameLine();
+                        if(ImGui::Button("Cancel",ImVec2(90,0)))
+                            ImGui::CloseCurrentPopup();
+                        ImGui::EndPopup();
+                    }
                     ImGui::EndTabItem();
                 }
                 // Pack metadata belongs with the pack and its materials,
