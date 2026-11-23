@@ -559,6 +559,7 @@ namespace jkgm {
             float alpha_cutoff=0.5f;
             float opacity=1.0f;
             float fluid_thickness=0.25f;
+            float depth_bias=0.0f; // material polygon offset, native sign convention
             // 0=invalid/unresolved MAT (diagnostic magenta), 1=texture,
             // 2=intentionally no albedo map (neutral white).
             int albedo_source=0;
@@ -574,6 +575,46 @@ namespace jkgm {
             point<2,float> emissive_scroll=make_point(0.0f,0.0f);
         };
 
+    // Apply the same depth-test preference as native MATs without modifying
+    // geometry or the linear scene-depth attachment. World-cache fallback
+    // and projected SPR decals retain their existing base offsets; authored
+    // positive depth_bias draws closer, matching glPolygonOffset(-bias,-bias).
+    class gpu_cached_polygon_offset {
+        float base_factor=0.0f,base_units=0.0f;
+        float active_factor=0.0f,active_units=0.0f;
+        bool known=false;
+    public:
+        gpu_cached_polygon_offset(float factor,float units)
+            :base_factor(factor),base_units(units)
+        {
+            glDisable(GL_POLYGON_OFFSET_FILL);
+        }
+        void set(float bias)
+        {
+            if(!std::isfinite(bias))bias=0.0f;
+            float const factor=base_factor-bias;
+            float const units=base_units-bias;
+            if(known && active_factor==factor && active_units==units)return;
+            if(factor==0.0f && units==0.0f)
+                glDisable(GL_POLYGON_OFFSET_FILL);
+            else {
+                glEnable(GL_POLYGON_OFFSET_FILL);
+                glPolygonOffset(factor,units);
+            }
+            active_factor=factor;
+            active_units=units;
+            known=true;
+        }
+        void reset()
+        {
+            glDisable(GL_POLYGON_OFFSET_FILL);
+            known=false;
+        }
+        ~gpu_cached_polygon_offset()
+        {
+            glDisable(GL_POLYGON_OFFSET_FILL);
+        }
+    };
 
     class renderer_impl : public renderer {
     private:
@@ -4013,6 +4054,34 @@ namespace jkgm {
                 out.albedo_source=0;
                 return out;
             }
+            // GeoMode 3 uses a CMP solid color, but the selected MAT cel can
+            // still carry replacement-material depth bias. Resolve only the
+            // resident D3D surface; do not load the rest of its texture maps.
+            if(info.texture) {
+                native_texture tex{};
+                if(read_object(info.texture,tex)) {
+                    auto const valid=[](native_surface const &sf) {
+                        return sf.texture_loaded!=0 && sf.texture_handle>0 &&
+                               sf.width>0 && sf.height>0 &&
+                               sf.width<=8192 && sf.height<=8192;
+                    };
+                    native_surface const *chosen=nullptr;
+                    for(unsigned i=0;i<std::min(tex.header[6],4U);++i) {
+                        auto const &alpha=tex.alpha_mips[i];
+                        auto const &opaque=tex.opaque_mips[i];
+                        if((tex.header[0]&1U)!=0U && valid(alpha))chosen=&alpha;
+                        else if(valid(opaque))chosen=&opaque;
+                        else if(valid(alpha))chosen=&alpha;
+                        if(chosen)break;
+                    }
+                    if(chosen) {
+                        size_t const id=chosen->texture_handle;
+                        if(id<=vidmem_texture_surfaces.size() &&
+                           vidmem_texture_surfaces[id-1])
+                            out.depth_bias=vidmem_texture_surfaces[id-1]->depth_bias;
+                    }
+                }
+            }
             // rdTexinfoHeader::solidColor is word #1 (offset +4).
             uint32_t index=0;
             std::memcpy(&index,info.header+4,sizeof(index));
@@ -4283,6 +4352,7 @@ namespace jkgm {
             out.dithered=surface->alpha_mode==material_alpha_mode::dithered;
             out.blend=surface->blend_mode;
             out.fluid_thickness=surface->fluid_thickness;
+            out.depth_bias=surface->depth_bias;
             if(the_config->enable_parallax && surface->displacement_map &&
                surface->displacement_factor!=0.0f) {
                 out.displacement=texture_cache->get_texture_handle(
@@ -4884,16 +4954,11 @@ namespace jkgm {
             auto const &frame_camera=post_exempt
                 ? deferred_gpu_3do_camera : frame_gpu_3do_camera;
             if(!frame_camera.valid) return;
-            // An SPR is coplanar with its receiver after clipping. Small
-            // numerical differences across 3DO triangle edges can cause
-            // the ordinary depth test to expose the receiver as thin seams.
-            // Prefer decal polygons by a couple of depth-buffer units only
-            // in the decal-only pass; the shader still rejects unrelated
-            // surfaces by comparing original receiver-plane depth.
-            if(decals_only) {
-                glEnable(GL_POLYGON_OFFSET_FILL);
-                glPolygonOffset(-1.0f,-2.0f);
-            }
+            // Projected SPR decals retain their receiver-preference offset;
+            // authored per-material bias is applied in addition to it. The
+            // decal shader still checks the original receiver-plane depth.
+            gpu_cached_polygon_offset material_depth_offset(
+                decals_only?-1.0f:0.0f,decals_only?-2.0f:0.0f);
             auto const &cam=frame_camera.camera;
             auto const &native_view=frame_camera.native_view;
             float const far_plane=frame_camera.far_plane;
@@ -5786,6 +5851,8 @@ namespace jkgm {
             for(size_t draw_start=0;draw_start<draws.size();) {
                 auto const &draw=draws[draw_start];
                 auto const &material=*draw.texture;
+                // Never bias post-exempt camera HUD geometry.
+                material_depth_offset.set(post_exempt?0.0f:material.depth_bias);
                 auto const &inst=*draw.instance;
                 auto const &group=*draw.group;
                 size_t draw_end=draw_start+1;
@@ -6403,6 +6470,9 @@ namespace jkgm {
             };
             submit_draws();
             if(split_smoke && !smoke_draws.empty()) {
+                // No depth attachment in the half-res smoke target. Suspend
+                // polygon offset before switching FBOs and post composition.
+                material_depth_offset.reset();
                 // No GL depth attachment: shader checks the original opaque
                 // R16F depth in its full-resolution 2x2 pixel footprint.
                 // Stencil counts only fragments surviving shader discard.
@@ -6442,6 +6512,7 @@ namespace jkgm {
                     make_point(float(get<x>(dims)),float(get<y>(dims))));
                 prog.set_smoke_half_resolution(true);
                 submit_draws();
+                material_depth_offset.reset();
                 prog.set_smoke_half_resolution(false);
                 glDisable(GL_STENCIL_TEST);
                 draws.swap(smoke_draws);
@@ -6477,9 +6548,8 @@ namespace jkgm {
             if(gpu_profiling)
                 profile_frame.gpu_preview_submit_us[pass_index]+=
                     elapsed_profile_us(submit_begin,profile_clock::now());
-            // Preserve native/ordinary 3DO depth semantics; polygon
-            // offset is exclusively for projected decal triangles.
-            if(decals_only)glDisable(GL_POLYGON_OFFSET_FILL);
+            // Never leak material polygon offset into native draws or postFX.
+            material_depth_offset.reset();
             // The transparency pass's following JK batches assume normal
             // premultiplied alpha blending, unit 0 and disabled face culling.
             gl::disable(gl::capability::cull_face);
@@ -12073,14 +12143,13 @@ namespace jkgm {
             gl::set_front_face_raw(GL_CCW);
             gl::set_face_cull_mode(gl::face_mode::back);
             gl::enable(gl::capability::cull_face);
-            // The native opaque world batch is disabled for this isolation
-            // test, so no polygon offset is required or desirable.
-            if(isolate_native_world_batches()) {
-                glDisable(GL_POLYGON_OFFSET_FILL);
-            } else {
-                glEnable(GL_POLYGON_OFFSET_FILL);
-                glPolygonOffset(-2.0f,-2.0f);
-            }
+            // Preserve the existing -2/-2 fallback overlap preference.
+            // Material depth bias adds to it, rather than replacing it.
+            float const world_fallback_offset=
+                isolate_native_world_batches()?0.0f:-2.0f;
+            gpu_cached_polygon_offset material_depth_offset(
+                world_fallback_offset,world_fallback_offset);
+            material_depth_offset.set(0.0f);
             gl::bind_vertex_array(cache.vao);
             size_t sky_drawn=0,sky_horizon_drawn=0,sky_ceiling_drawn=0;
             world_cache_sky_info sky_info{};
@@ -12214,6 +12283,7 @@ namespace jkgm {
                     } else mat_probe_no_strength+=faces;
                 }
                 if(world_cache_draws_in_pass(policy,world_cache_pass::opaque)) {
+                    material_depth_offset.set(material.depth_bias);
                     bind_world_cache_material(shader,material,
                                               first->geometry_mode);
                     shader.set_alpha_policy(false,world_cache_alpha_mode(policy),
@@ -12488,6 +12558,7 @@ namespace jkgm {
             gl::set_front_face_raw(GL_CCW);
             gl::set_face_cull_mode(gl::face_mode::back);
             gl::enable(gl::capability::cull_face);
+            gpu_cached_polygon_offset material_depth_offset(0.0f,0.0f);
             gl::bind_vertex_array(cache.vao);
             size_t mixed=0,forced=0,fluid=0,albedo_free=0;
             size_t normal_maps=0,surface_maps=0,env_maps=0;
@@ -12499,6 +12570,7 @@ namespace jkgm {
             for(auto const &draw:draws) {
                 auto const *face=draw.face;
                 auto const &material=draw.material->texture;
+                material_depth_offset.set(material.depth_bias);
                 auto const policy=draw.policy;
                 shader.set_alpha_policy(true,world_cache_alpha_mode(policy),
                         material.alpha_cutoff,
