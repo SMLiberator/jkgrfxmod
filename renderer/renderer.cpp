@@ -1775,7 +1775,7 @@ namespace jkgm {
                         rejection_text(profile_window.gpu_instancing_rejects_repeated),
                         " NOTE=overlapping_reasons;members_include_first;extras_exclude_first;not_GL_calls");
                 }
-                LOG_INFO("PERF gpu_3do batch GL_calls_avg=
+                LOG_INFO("PERF gpu_3do batch GL_calls_avg=",
                          profile_window.gpu_draw_calls/frames,
                          " source_ranges_avg=",
                          profile_window.gpu_draw_ranges/frames,

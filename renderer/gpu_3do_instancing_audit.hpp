@@ -106,7 +106,7 @@ inline uint32_t gpu_3do_instancing_rejection_mask(
     reject(inst.thing_dither,R::dither);
     reject(inst.thing_opacity!=1.0f,R::opacity);
     reject(inst.num_lights!=0U,R::per_thing_lights);
-    reject(inst.crossing_lighting,R::crossing_lighting);
+    reject(static_cast<bool>(inst.crossing_lighting),R::crossing_lighting);
     reject(inst.nonrigid_light_transform,R::nonrigid_lighting);
     reject(!state_valid,R::invalid_state);
     return result;
