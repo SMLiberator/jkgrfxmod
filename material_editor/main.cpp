@@ -1204,7 +1204,7 @@ private:
                 }
             }
             ImGui::SameLine();
-            if(ImGui::Button("Use pack envmap")) {
+            if(ImGui::Button("Material / pack envmap")) {
                 override_.clear();preview_->setEnvironmentOverride({});
             }
 
