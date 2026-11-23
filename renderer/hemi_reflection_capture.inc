@@ -980,14 +980,57 @@
                 if(global_env_converter->convert(
                         *probe_target,*output,side,
                         {{background[0],background[1],background[2]}})) {
-                    global_env_previous=std::move(global_env_current);
-                    global_env_current=std::move(output);
-                    global_env_fade_seconds=global_request->fade_time;
-                    global_env_fade_start=now;
-                    global_env_completed_sequence=global_request->sequence;
-                    LOG_INFO("CaptureEnvMap published: source=",selected_owner,
-                             " face=",side," equirect=",side*4,"x",side*2,
-                             " fade=",global_env_fade_seconds);
+                    // A second CaptureEnvMap may finish while A->B is still
+                    // fading. Starting B->C instead would jump, because B
+                    // isn't the image currently visible to the player.
+                    // Freeze the actual A/B mixture in one HDR GPU pass,
+                    // then begin the new fade from that complete image.
+                    auto const published_at=std::chrono::steady_clock::now();
+                    float const old_blend=global_env_fade_factor(
+                        global_env_fade_seconds,
+                        std::chrono::duration<float>(
+                            published_at-global_env_fade_start).count());
+                    auto const origin=choose_global_env_fade_origin(
+                        global_env_current && global_env_current->ready(),
+                        global_env_previous && global_env_previous->ready(),
+                        global_request->fade_time,old_blend);
+                    std::unique_ptr<offscreen_capture_target> fade_from;
+                    bool rebase_ok=true;
+                    switch(origin) {
+                    case global_env_fade_origin::none:
+                        break; // initial image or zero fade: switch directly
+                    case global_env_fade_origin::previous_capture:
+                        fade_from=std::move(global_env_previous);
+                        break; // previous blend was still at zero
+                    case global_env_fade_origin::current_capture:
+                        fade_from=std::move(global_env_current);
+                        break; // prior fade already completed
+                    case global_env_fade_origin::composited_capture:
+                        fade_from=std::make_unique<offscreen_capture_target>();
+                        rebase_ok=global_env_converter->rebase(
+                            *global_env_previous,*global_env_current,
+                            *fade_from,old_blend);
+                        break;
+                    }
+                    if(!rebase_ok) {
+                        // Keep both existing images and their fade intact.
+                        // Retry publication on a later frame; NEVER publish
+                        // an uninitialized or black transition texture.
+                        LOG_WARNING("CaptureEnvMap fade rebase failed; "
+                                    "previous transition preserved");
+                    } else {
+                        global_env_previous=std::move(fade_from);
+                        global_env_current=std::move(output);
+                        global_env_fade_seconds=global_request->fade_time;
+                        global_env_fade_start=published_at;
+                        global_env_completed_sequence=global_request->sequence;
+                        LOG_INFO("CaptureEnvMap published: source=",selected_owner,
+                                 " face=",side," equirect=",side*4,"x",side*2,
+                                 " fade=",global_env_fade_seconds,
+                                 " overlap_rebased=",
+                                 origin==global_env_fade_origin::composited_capture
+                                     ?1:0);
+                    }
                 }
                 reflection_probes.erase(0U);
                 continue;

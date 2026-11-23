@@ -28,5 +28,36 @@ int main() {
     assert(!controls.snapshot());
     controls.clear();
     assert(!controls.snapshot());
+
+    using jkgm::global_env_fade_origin;
+    using jkgm::global_env_fade_factor;
+    using jkgm::choose_global_env_fade_origin;
+    // True fade progress, including the capture's first frame and a
+    // completed fade, must agree with the shader's effective blend.
+    assert(global_env_fade_factor(0.0f,0.0f)==1.0f);
+    assert(global_env_fade_factor(2.0f,0.0f)==0.0f);
+    assert(global_env_fade_factor(2.0f,0.5f)==0.25f);
+    assert(global_env_fade_factor(2.0f,1.0f)==0.5f);
+    assert(global_env_fade_factor(2.0f,4.0f)==1.0f);
+    assert(global_env_fade_factor(2.0f,-1.0f)==0.0f);
+    // An initial fade with no prior capture has no texture base, so
+    // it still blends from the inherited/default authored EnvMap.
+    assert(choose_global_env_fade_origin(false,false,1.0f,0.0f)==
+           global_env_fade_origin::none);
+    // fadeTime=0 always switches instantly, even during another fade.
+    assert(choose_global_env_fade_origin(true,true,0.0f,0.5f)==
+           global_env_fade_origin::none);
+    // A completed old fade uses its current endpoint directly.
+    assert(choose_global_env_fade_origin(true,false,1.0f,1.0f)==
+           global_env_fade_origin::current_capture);
+    assert(choose_global_env_fade_origin(true,true,1.0f,1.0f)==
+           global_env_fade_origin::current_capture);
+    // A still-starting old fade should not jump to its current endpoint.
+    assert(choose_global_env_fade_origin(true,true,1.0f,0.0f)==
+           global_env_fade_origin::previous_capture);
+    // Interrupted partial fades require a one-time HDR composition.
+    for(float old_mix: {0.01f,0.2f,0.5f,0.99f})
+        assert(choose_global_env_fade_origin(true,true,1.0f,old_mix)==
+               global_env_fade_origin::composited_capture);
     return 0;
 }

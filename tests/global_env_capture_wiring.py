@@ -21,8 +21,21 @@ assert 'get_global_env_capture_controls().clear();' in main
 assert 'global_env_capture_request' in registry
 assert 'prepare_world' in registry and 'std::mutex' in registry
 assert 'global_env_current=std::move(output);' in capture
-assert 'global_env_previous=std::move(global_env_current);' in capture
+assert 'fade_from=std::move(global_env_current);' in capture
+assert 'fade_from=std::move(global_env_previous);' in capture
+assert 'global_env_previous=std::move(fade_from);' in capture
 assert 'global_env_fade_seconds=global_request->fade_time;' in capture
+assert 'global_env_fade_start=published_at;' in capture
+assert 'choose_global_env_fade_origin(' in capture
+assert 'global_env_converter->rebase(' in capture
+assert 'if(!rebase_ok)' in capture
+assert capture.index('if(!rebase_ok)')<capture.index('global_env_previous=std::move(fade_from);')
+assert 'global_env_completed_sequence=global_request->sequence;' in capture
+assert 'global_env_fade_factor(' in renderer
+assert 'global_env_fade_factor(' in registry
+assert 'global_env_fade_origin::composited_capture' in capture
+assert 'vec4(mix(a,b,old_mix),1.0)' in converter
+assert 'glGenerateMipmap(GL_TEXTURE_2D)' in converter
 assert 'envmap_capture_face_resolution' in capture
 assert 'global_env_converter->convert(' in capture
 assert 'candidate.is_global' in capture

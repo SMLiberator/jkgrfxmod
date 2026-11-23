@@ -2,6 +2,7 @@
 // COG -> renderer on-demand global EnvMap capture requests. COG code does not
 // touch OpenGL: it stores a validated world-space position and Thing identity.
 // Replacing or clearing the request is atomic across game/render threads.
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -44,6 +45,32 @@ bool global_env_capture_static_thing(Read const &read,uint64_t owner)
        (attach_flags&(0x2U|0x4U|0x80U))!=0U)
         return false;
     return true;
+}
+
+// Seamless CaptureEnvMap replacement: when a new fade begins before the
+// previous one finishes, its starting image must be what is visible now,
+// not just the old fade's latest endpoint.
+inline float global_env_fade_factor(float seconds,float elapsed)
+{
+    if(!(std::isfinite(seconds) && seconds>0.0f))return 1.0f;
+    if(!std::isfinite(elapsed))return 0.0f;
+    return std::clamp(elapsed/seconds,0.0f,1.0f);
+}
+
+enum class global_env_fade_origin {
+    none,previous_capture,current_capture,composited_capture
+};
+
+inline global_env_fade_origin choose_global_env_fade_origin(
+    bool has_current,bool has_previous,float new_fade,float previous_mix)
+{
+    if(!has_current || !(new_fade>0.0f))
+        return global_env_fade_origin::none;
+    if(!has_previous || previous_mix>=1.0f)
+        return global_env_fade_origin::current_capture;
+    if(previous_mix<=0.0f)
+        return global_env_fade_origin::previous_capture;
+    return global_env_fade_origin::composited_capture;
 }
 
 struct global_env_capture_request {

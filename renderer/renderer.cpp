@@ -835,14 +835,11 @@ namespace jkgm {
                !global_env_completed_sequence)return out;
             if(!global_env_active_sequence)
                 return out;
-            float blend=1.0f;
-            if(global_env_fade_seconds>0.0f) {
-                blend=std::clamp(
-                    std::chrono::duration<float>(
-                        std::chrono::steady_clock::now()-
-                        global_env_fade_start).count()/global_env_fade_seconds,
-                    0.0f,1.0f);
-            }
+            float const blend=global_env_fade_factor(
+                global_env_fade_seconds,
+                std::chrono::duration<float>(
+                    std::chrono::steady_clock::now()-
+                    global_env_fade_start).count());
             out.active=true;
             if(blend>=1.0f) {
                 out.from_capture=true;

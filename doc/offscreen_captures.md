@@ -40,6 +40,14 @@ touch OpenGL or switch the active JK camera.
   `0` switches immediately. The previous texture is kept until the fade
   completes. Both world and GPU 3DO materials use the existing dual EnvMap
   samplers for interpolation.
+- Calling `CaptureEnvMap` again **during an unfinished fade** preserves the
+  currently displayed mixture. On successful publication, a one-time HDR
+  shader pass bakes the preceding two EnvMaps at their exact current blend
+  weight, then fades from that image to the newly captured environment.
+  This avoids a blank frame or a sudden jump to the prior fade endpoint.
+  No extra pass runs every frame, and the prior image pair stays intact
+  if the composition cannot be completed. A zero-duration capture retains
+  its immediate-switch behavior.
 - The new image only replaces the **global EnvMap**, not explicit MAT maps
   or per-MAT COG overrides. Material reflection strength, roughness, Fresnel
   and metalness remain unchanged. A later `SetGlobalEnvMap` or

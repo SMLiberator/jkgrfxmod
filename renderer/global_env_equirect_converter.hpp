@@ -11,9 +11,10 @@
 
 namespace jkgm {
 class global_env_equirect_converter {
-    GLuint program_=0U,vao_=0U;
+    GLuint program_=0U,vao_=0U,rebase_program_=0U;
     GLint cube_slot_=-1,face_resolution_=-1,fog_color_=-1;
-    bool failed_=false;
+    GLint rebase_from_=-1,rebase_to_=-1,rebase_mix_=-1;
+    bool failed_=false,rebase_failed_=false;
     static bool compile(GLuint shader,char const *source) {
         glShaderSource(shader,1,&source,nullptr);
         glCompileShader(shader);
@@ -31,7 +32,8 @@ public:
     void release() {
         if(vao_)glDeleteVertexArrays(1,&vao_);
         if(program_)glDeleteProgram(program_);
-        vao_=program_=0U;
+        if(rebase_program_)glDeleteProgram(rebase_program_);
+        vao_=program_=rebase_program_=0U;
     }
     bool ensure() {
         if(program_)return true;
@@ -126,6 +128,101 @@ void main() {
         glGenVertexArrays(1,&vao_);
         return vao_!=0U;
     }
+    // The ordinary dual-EnvMap shader cannot express an overlapping fade
+    // (old A->B, followed by new C) with only two samplers. Resolve the
+    // currently displayed A/B mixture ONCE to HDR, then fade that to C.
+    // This is strictly on-demand, not a per-frame reflection render pass.
+    bool ensure_rebase() {
+        if(rebase_program_)return true;
+        if(rebase_failed_ || !ensure())return false;
+        static char const *vertex=R"GLSL(#version 330 core
+out vec2 image_uv;
+void main() {
+    vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);
+    image_uv=p;
+    gl_Position=vec4(p*2.0-1.0,0.0,1.0);
+}
+)GLSL";
+        static char const *fragment=R"GLSL(#version 330 core
+in vec2 image_uv;
+out vec4 result_color;
+uniform sampler2D old_from;
+uniform sampler2D old_to;
+uniform float old_mix;
+void main() {
+    vec3 a=textureLod(old_from,image_uv,0.0).rgb;
+    vec3 b=textureLod(old_to,image_uv,0.0).rgb;
+    result_color=vec4(mix(a,b,old_mix),1.0);
+}
+)GLSL";
+        GLuint const vs=glCreateShader(GL_VERTEX_SHADER);
+        GLuint const fs=glCreateShader(GL_FRAGMENT_SHADER);
+        if(!compile(vs,vertex) || !compile(fs,fragment)) {
+            glDeleteShader(vs);glDeleteShader(fs);
+            rebase_failed_=true;return false;
+        }
+        GLuint const prog=glCreateProgram();
+        glAttachShader(prog,vs);
+        glAttachShader(prog,fs);
+        glLinkProgram(prog);
+        glDeleteShader(vs);
+        glDeleteShader(fs);
+        GLint ok=GL_FALSE;
+        glGetProgramiv(prog,GL_LINK_STATUS,&ok);
+        if(ok!=GL_TRUE) {
+            GLchar log[2048]{};
+            glGetProgramInfoLog(prog,2047,nullptr,log);
+            LOG_WARNING("CaptureEnvMap fade rebase shader: ",log);
+            glDeleteProgram(prog);
+            rebase_failed_=true;return false;
+        }
+        rebase_from_=glGetUniformLocation(prog,"old_from");
+        rebase_to_=glGetUniformLocation(prog,"old_to");
+        rebase_mix_=glGetUniformLocation(prog,"old_mix");
+        rebase_program_=prog;
+        return true;
+    }
+
+    // Preserve the displayed HDR envmap exactly when a new capture
+    // interrupts an unfinished fade. Supports changed capture resolutions.
+    bool rebase(offscreen_capture_target const &from,
+                offscreen_capture_target const &to,
+                offscreen_capture_target &destination,float blend) {
+        if(!from.ready() || !to.ready() ||
+           !std::isfinite(blend) || blend<0.0f || blend>1.0f ||
+           !destination.ensure(to.width(),to.height()) ||
+           !ensure_rebase())return false;
+        offscreen_capture_gl_scope restore;
+        glBindFramebuffer(GL_FRAMEBUFFER,destination.framebuffer());
+        glViewport(0,0,destination.width(),destination.height());
+        glDisable(GL_DEPTH_TEST);
+        glDisable(GL_BLEND);
+        glDisable(GL_SCISSOR_TEST);
+        glDisable(GL_CULL_FACE);
+        glDisable(GL_STENCIL_TEST);
+        glDisable(GL_FRAMEBUFFER_SRGB);
+        glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);
+        glUseProgram(rebase_program_);
+        glUniform1i(rebase_from_,0);
+        glUniform1i(rebase_to_,1);
+        glUniform1f(rebase_mix_,blend);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D,from.color_texture());
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D,to.color_texture());
+        glBindVertexArray(vao_);
+        glDrawArrays(GL_TRIANGLES,0,3);
+        glActiveTexture(GL_TEXTURE0);
+        GLint prior_2d=0;
+        glGetIntegerv(GL_TEXTURE_BINDING_2D,&prior_2d);
+        glBindTexture(GL_TEXTURE_2D,destination.color_texture());
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
+        glGenerateMipmap(GL_TEXTURE_2D);
+        glBindTexture(GL_TEXTURE_2D,GLuint(prior_2d));
+        return glGetError()==GL_NO_ERROR;
+    }
+
     bool convert(reflection_probe_capture_target const &source,
                  offscreen_capture_target &destination,int side,
                  std::array<float,3> const &empty_color) {
