@@ -260,6 +260,12 @@ jobs:
       run: python3 tests/matcap_layer_wiring.py
     - name: Shared camera-centered realtime cube and matcap-mode removal
       run: python3 tests/shared_reflection_wiring.py
+    - name: GPU 3DO parallel visibility A/B
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\gpu_3do_parallel_visibility.cpp /Fe:gpu_3do_parallel_visibility_test.exe || exit /b 1
+        gpu_3do_parallel_visibility_test.exe || exit /b 1
+        python3 tests/gpu_3do_parallel_visibility.py || exit /b 1
     - name: GPU 3DO submission CPU reuse regression
       run: python3 tests/gpu_3do_submission_cpu_reuse.py
     - name: Reflection and opaque GPU profiling source regression

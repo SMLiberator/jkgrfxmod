@@ -6,6 +6,8 @@
 #include "gpu_3do_preview.hpp"
 #include "gpu_3do_index_coalescing.hpp"
 #include "gpu_3do_instancing_audit.hpp"
+#include "gpu_3do_parallel_visibility.hpp"
+#include "cpu_render_workers.hpp"
 #include "gpu_3do_packed_vertex.hpp"
 #include "gpu_3do_auto_lod.hpp"
 #include "planar_reflection_things.hpp"
@@ -1361,6 +1363,15 @@ namespace jkgm {
                      " saved_draw_calls_avg=",
                      (profile_window.gpu_sprite_instanced_quads-
                       profile_window.gpu_sprite_instanced_calls)/frames);
+            LOG_INFO("PERF gpu_3do multithreading enabled=",
+                     the_config->experimental_multithreading?1:0,
+                     " worker_threads=2",
+                     " dispatches=",profile_window.gpu_parallel_visibility_calls,
+                     " instances_avg=",profile_window.gpu_parallel_visibility_instances/frames,
+                     " groups_avg=",profile_window.gpu_parallel_visibility_groups/frames,
+                     " wall_us_avg=",profile_window.gpu_parallel_visibility_wall_us/frames,
+                     " failures=",profile_window.gpu_parallel_visibility_failures,
+                     " NOTE=main_camera_CPU_group_cull_prepass;included_in_collect_cpu;serial_below_threshold");
             LOG_INFO("PERF gpu_3do_instancing enabled=",
                       the_config->enable_gpu_3do_instancing?1:0,
                       " calls_avg=",
@@ -5007,6 +5018,60 @@ namespace jkgm {
             }
             auto const collect_begin=gpu_profiling
                 ?profile_clock::now():profile_clock::time_point{};
+            // First experimental CPU-only workload: immutable 3DO group
+            // visibility. Complete the worker barrier before the serial
+            // material/occlusion/GL collector touches any results. The
+            // cached camera and mesh snapshots are the ONLY worker inputs.
+            // HUD, sprites, projected decals and native engine state remain
+            // entirely on the original serial route.
+            static thread_local std::vector<gpu_3do_parallel_visibility>
+                prepared_visibility;
+            static thread_local std::vector<size_t> prepared_indices;
+            bool prepared_parallel=false;
+            if(prepare_both && the_config->experimental_multithreading) {
+                prepared_indices.clear();
+                size_t group_work=0U;
+                for(size_t i=0;i<instances.size();++i) {
+                    auto const &candidate=instances[i];
+                    if(!candidate.geometry || candidate.shadow_only ||
+                       candidate.camera_hud || candidate.is_sprite_quad ||
+                       candidate.is_projected_decal ||
+                       candidate.transient_procedural ||
+                       candidate.thing_opacity<=0.0f)continue;
+                    prepared_indices.push_back(i);
+                    group_work+=candidate.geometry->groups.size();
+                }
+                // Thread wakeup/barrier costs outweigh small workloads.
+                if(prepared_indices.size()>=48U && group_work>=256U) {
+                    static cpu_render_workers workers;
+                    if(workers.available()) {
+                        prepared_visibility.resize(instances.size());
+                        for(auto &entry:prepared_visibility)entry.ready=false;
+                        auto const work_begin=gpu_profiling
+                            ?profile_clock::now():profile_clock::time_point{};
+                        prepared_parallel=workers.execute([&](unsigned lane) {
+                            for(size_t k=lane;k<prepared_indices.size();
+                                k+=cpu_render_workers::lanes) {
+                                size_t const index=prepared_indices[k];
+                                prepare_gpu_3do_parallel_visibility(
+                                    instances[index],native_view,native_frustum,
+                                    have_perspective_frustum,
+                                    prepared_visibility[index]);
+                            }
+                        });
+                        if(gpu_profiling) {
+                            ++profile_frame.gpu_parallel_visibility_calls;
+                            profile_frame.gpu_parallel_visibility_instances+=
+                                prepared_indices.size();
+                            profile_frame.gpu_parallel_visibility_groups+=group_work;
+                            profile_frame.gpu_parallel_visibility_wall_us+=
+                                elapsed_profile_us(work_begin,profile_clock::now());
+                            if(!prepared_parallel)
+                                ++profile_frame.gpu_parallel_visibility_failures;
+                        }
+                    }
+                }
+            }
             if(!reuse_alpha) for(auto const &inst:instances) {
                 if(!inst.geometry || inst.shadow_only ||
                    (!inst.is_sprite_quad && !inst.is_projected_decal &&
@@ -5055,13 +5120,21 @@ namespace jkgm {
                     }
                     if(occluded)continue;
                 }
-                auto const modelview=gpu_3do_native_modelview(
-                    native_view,inst.transform);
+                // Most Things still follow the original serial path. Only
+                // a successfully completed, stamped worker result may
+                // replace these CPU-only calculations.
+                auto const instance_index=size_t(&inst-instances.data());
+                auto const *parallel=prepared_parallel &&
+                    prepared_visibility[instance_index].ready
+                    ? &prepared_visibility[instance_index]:nullptr;
+                auto const modelview=parallel ?parallel->modelview:
+                    gpu_3do_native_modelview(native_view,inst.transform);
                 std::array<float,3> mesh_min{},mesh_max{};
-                if(have_perspective_frustum &&
-                   inst.geometry->cached_group_bounds(mesh_min,mesh_max) &&
-                   gpu_3do_batch_outside_frustum(
-                       native_frustum,modelview,mesh_min,mesh_max)) {
+                if((parallel && parallel->mesh_outside) ||
+                   (!parallel && have_perspective_frustum &&
+                    inst.geometry->cached_group_bounds(mesh_min,mesh_max) &&
+                    gpu_3do_batch_outside_frustum(
+                        native_frustum,modelview,mesh_min,mesh_max))) {
                     // The entire immutable mesh is offscreen. Preserve the
                     // existing group profiling totals without walking every
                     // material range. No GPU uploads or uniforms are needed.
@@ -5075,10 +5148,16 @@ namespace jkgm {
                 }
                 auto &context=contexts.emplace_back();
                 context.modelview=modelview;
-                context.has_local_eye=gpu_3do_local_eye(
-                    context.modelview,context.local_eye);
-                context.reversed_winding=
-                    gpu_3do_reversed_winding(inst.transform);
+                if(parallel) {
+                    context.has_local_eye=parallel->has_local_eye;
+                    context.local_eye=parallel->local_eye;
+                    context.reversed_winding=parallel->reversed_winding;
+                } else {
+                    context.has_local_eye=gpu_3do_local_eye(
+                        context.modelview,context.local_eye);
+                    context.reversed_winding=
+                        gpu_3do_reversed_winding(inst.transform);
+                }
                 bool const can_cpu_cull=context.has_local_eye;
                 auto const &local_eye=context.local_eye;
                 // Opaque grouping is identical across instances of this
@@ -5098,11 +5177,24 @@ namespace jkgm {
                     auto const &meta=submission[group_index];
                     if(the_config->profile_renderer)
                         ++profile_frame.gpu_groups_considered;
+                    // The parallel path stores the EXACT same frustum and
+                    // backface result by original group index. Never let
+                    // workers resolve materials, mutate sort order or call GL.
+                    if(parallel && parallel->groups[group_index]!=
+                           gpu_3do_cull_reason::visible) {
+                        if(the_config->profile_renderer) {
+                            if(parallel->groups[group_index]==
+                               gpu_3do_cull_reason::frustum)
+                                ++profile_frame.gpu_groups_frustum_culled;
+                            else ++profile_frame.gpu_groups_backface_culled;
+                        }
+                        continue;
+                    }
                     // Native JK clips individual faces; test the bounds of
                     // whole cached draw ranges to avoid GL state work for
                     // entirely offscreen geometry. This is conservative:
                     // partially visible groups still reach OpenGL.
-                    if(have_perspective_frustum &&
+                    if(!parallel && have_perspective_frustum &&
                        gpu_3do_batch_outside_frustum(
                            native_frustum,context.modelview,
                            group.bounds_min,group.bounds_max)) {
@@ -5114,7 +5206,7 @@ namespace jkgm {
                     // unless it is double-sided. Since opaque faces are batched
                     // by MAT, only skip a group when ALL its faces face away.
                     // This saves CPU-side GL draw calls, not just GPU fragments.
-                    if(can_cpu_cull && !(group.face_type&0x1U) &&
+                    if(!parallel && can_cpu_cull && !(group.face_type&0x1U) &&
                        group.plane_count>0 &&
                        group.plane_start+group.plane_count<=
                            inst.geometry->face_planes.size()) {
