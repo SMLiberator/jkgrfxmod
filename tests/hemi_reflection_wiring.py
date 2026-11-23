@@ -132,7 +132,7 @@ assert "reflection_probe_bounds_outside_range(" in capture
 assert "float const far_plane=reflection_capture_scene_far(focus);" in capture
 # The Thing radius must never enter world-surface culling or projection.
 world_capture=capture.split(
-    "for(auto const &bucket:reflection_world_buckets.buckets())",1)[1].split(
+    "for(auto const &bucket:reflection_world_buckets.buckets()) {",1)[1].split(
     "auto draw_model=[&]",1)[0]
 assert "probe_distance_limit" not in world_capture
 assert "reflection_probe_bounds_outside_range(" not in world_capture
@@ -152,7 +152,7 @@ assert "multi_draw_batches=" in capture
 assert "groups_bounds_culled=" in capture
 # Off-disk nodes must exit before GPU cache lookup and state submissions.
 model_capture=capture.split("auto draw_model=[&]",1)[1].split(
-    "for(auto const &inst:offscreen.nodes)draw_model(inst);",1)[0]
+    "for(size_t i=0;i<capture_models.size();++i)",1)[0]
 assert model_capture.index("if(model_group_scratch.empty())return;") < model_capture.index(
     "gpu_3do_gl_cache.find(inst.id)")
 assert "thing_range_culled=" in capture
