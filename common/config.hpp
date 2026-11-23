@@ -75,6 +75,7 @@ namespace jkgm {
         bool experimental_planar_thing_discovery = false; // read-only 120-frame native 3DO diagnostics
         bool enable_reflection_capture = true; // realtime shared/cube/hemi/planar; EnvMaps and COG capture independent
         bool enable_reflection_probes = false; // specialized cube/hemi/planar; false uses shared
+        bool experimental_shared_hemi = false; // optional two-disk Shared captures
         int reflection_capture_resolution = 128; // cube face/short planar dimension; hemi doubles this
         float reflection_capture_update_interval = 0.0f; // all realtime capture types; 0=every frame
         int envmap_capture_face_resolution = 128; // on-demand CaptureEnvMap: 128x128 faces -> 512x256 equirect

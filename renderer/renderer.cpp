@@ -1204,6 +1204,10 @@ namespace jkgm {
             opaque_geometry_gpu_ns{};
         uint64_t opaque_geometry_gpu_samples=0,opaque_geometry_gpu_skipped=0;
         presentation_gpu_profile capture_gpu_queries;
+        basic_presentation_gpu_profile<1> shared_capture_gpu_queries;
+        uint64_t shared_capture_gpu_ns_window=0U;
+        uint64_t shared_capture_gpu_samples_window=0U;
+        uint64_t shared_capture_gpu_busy_window=0U;
         std::array<uint64_t,presentation_gpu_profile::num_stages>
             capture_gpu_ns{};
         uint64_t capture_gpu_samples=0,capture_gpu_skipped=0;
@@ -1549,6 +1553,18 @@ namespace jkgm {
                          " rejected_3do_groups=",s.eligibility_3do_rejected,
                          " rejected_world_faces=",s.eligibility_world_rejected,
                          " NOTE=main_camera_conservative_frustum_only;no_GPU_readback");
+                LOG_INFO("PERF shared_capture_gpu_us mode=",
+                         the_config->experimental_shared_hemi?"hemi":"cube",
+                         " capture_per_sample=",
+                         shared_capture_gpu_samples_window
+                           ?(shared_capture_gpu_ns_window/1000U)/
+                              shared_capture_gpu_samples_window:0U,
+                         " samples=",shared_capture_gpu_samples_window,
+                         " ring_busy_skips=",shared_capture_gpu_busy_window,
+                         " NOTE=GPU_sky_world_models_mips;async_8_slot_ring");
+                shared_capture_gpu_ns_window=0U;
+                shared_capture_gpu_samples_window=0U;
+                shared_capture_gpu_busy_window=0U;
                 LOG_INFO("PERF shared_capture_cpu_us search_per_frame=",
                          (s.search_ns/1000U)/frames,
                          " search_frames=",s.search_frames,
@@ -1993,6 +2009,7 @@ namespace jkgm {
                 opaque_detail_gpu_queries.release();
                 opaque_geometry_gpu_queries.release();
                 capture_gpu_queries.release();
+                shared_capture_gpu_queries.release();
                 sun_gpu_queries.release();
             }
         }
@@ -5986,6 +6003,12 @@ namespace jkgm {
                 }
                 auto const &capture_camera=active_probe
                     ?active_probe->camera:frame_camera.camera;
+                // Sample the ready texture's real projection, not the live
+                // experiment flag (which can differ during reconfiguration).
+                int const capture_projection=hemi_active
+                    ?(reflection_mode==7 &&
+                      active_probe->target->layers()==2?5:reflection_mode)
+                    :0;
                 prog.set_hemi_reflection(hemi_active,
                     make_point(capture_camera.right[0],
                                capture_camera.right[1],
@@ -5996,7 +6019,7 @@ namespace jkgm {
                     make_point(capture_camera.up[0],
                                capture_camera.up[1],
                                capture_camera.up[2]),
-                    1.0f,1.0f,hemi_active?reflection_mode:0);
+                    1.0f,1.0f,capture_projection);
                 bool const coat_active=clearcoat_available() &&
                     the_config->enable_reflections &&
                     get<0>(material.clearcoat_params)>0.0f &&
@@ -11224,9 +11247,12 @@ namespace jkgm {
             bool const ready=the_config->enable_reflections &&
                 the_config->enable_reflection_capture &&
                 shared_reflection_ready_this_frame();
-            shader.set_shared_reflection(ready);
-            if(!ready)return;
+            if(!ready) {
+                shader.set_shared_reflection(false,false);
+                return;
+            }
             auto const it=reflection_probes.find(shared_reflection_owner_key);
+            shader.set_shared_reflection(true,it->second.target->layers()==2);
             gl::set_active_texture_unit(23);
             gl::bind_texture_raw(GL_TEXTURE_2D_ARRAY,
                           it->second.target->color_texture());

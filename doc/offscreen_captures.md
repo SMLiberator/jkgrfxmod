@@ -80,7 +80,7 @@ the camera-centered `shared` projection, even when no material explicitly
 selects `shared`. The existing `enable_reflections` remains the master switch.
 
 
-`"reflection_mode":"shared"` is a lazy, camera-centered six-face cubemap
+`"reflection_mode":"shared"` is a lazy, camera-centered six-face cubemap by default (or Hemi with `experimental_shared_hemi=true`)
 (mode 7) for GPU-cached world and 3DO materials. When no visible material
 uses this mode or falls back from a specialized mode, no shared probe is captured. The probe is refreshed using
 `reflection_capture_update_interval` and `reflection_capture_resolution`;
@@ -96,6 +96,12 @@ separate `matcap_map` artist layer when that layer's shader support lands.
 
 `reflection_capture_resolution` is the fixed square per-cube-face
 resolution (default 128), and the short edge of the planar target.
+For Shared A/B, Cube renders six N×N faces (6N² pixels), while Hemi
+renders two 2N×2N disks (8N² pixels). Hemi saves four camera passes but
+shades 33% more target pixels and uses a subdivision geometry shader.
+Compare `PERF shared_capture_cpu_us`, the isolated asynchronous
+`PERF shared_capture_gpu_us` and total frame timings while holding
+the scene, resolution, update interval and threading option constant.
 Captures no longer impose the former 96-unit far projection. Depth
 range comes from the native camera and cached world bounds; dedicated
 Hemi/Cube probes independently use a configurable Thing-only distance

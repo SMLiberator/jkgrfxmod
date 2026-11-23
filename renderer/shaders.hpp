@@ -132,7 +132,7 @@ namespace jkgm {
             void set_reflection(point<4,float> material,point<4,float> normals,
                                 point<2,float> scroll,point<2,float> scroll2,
                                 bool from,bool to,float weight,int mode);
-            void set_shared_reflection(bool ready);
+            void set_shared_reflection(bool ready,bool hemisphere);
             void set_matcap(bool enabled,point<4,float> params,bool has_surface);
             void set_clearcoat(bool enabled,point<4,float> params,
                                bool has_surface,bool has_normal);

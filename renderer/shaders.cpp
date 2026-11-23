@@ -550,10 +550,13 @@ void jkgm::shaders::world_cache_preview_shader::set_matcap(
     gl::set_uniform_integer(matcap_has_surface,has_surface?1:0);
     if(enabled)gl::set_uniform_vector(matcap_params,params);
 }
-void jkgm::shaders::world_cache_preview_shader::set_shared_reflection(bool ready)
+void jkgm::shaders::world_cache_preview_shader::set_shared_reflection(
+    bool ready,bool hemisphere)
 {
     gl::set_uniform_integer(shared_reflection_sampler,23);
-    gl::set_uniform_integer(shared_reflection_ready,ready?1:0);
+    // 0=absent, 1=Cube (six layers), 2=Hemi (two disks).
+    gl::set_uniform_integer(shared_reflection_ready,
+                            ready?(hemisphere?2:1):0);
 }
 void jkgm::shaders::world_cache_preview_shader::set_reflection_camera(
     std::array<float,3> const &position,

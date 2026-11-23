@@ -259,7 +259,9 @@ jobs:
     - name: Independent GPU MatCap render, upload and compiler integration
       run: python3 tests/matcap_layer_wiring.py
     - name: Shared camera-centered realtime cube and matcap-mode removal
-      run: python3 tests/shared_reflection_wiring.py
+      run: |
+        python3 tests/shared_reflection_wiring.py
+        python3 tests/experimental_shared_hemi.py
     - name: GPU 3DO parallel visibility A/B
       shell: cmd
       run: |

@@ -238,7 +238,7 @@
             } else if(realtime_supported &&
                       reflection_probes.count(shared_reflection_owner_key)) {
                 // Visibility can change across consecutive frames. Reuse the
-                // already allocated 6-face target the next time a receiver
+                // already allocated target the next time a receiver
                 // enters view instead of reallocating textures/FBOs. No draw
                 // occurs while dormant; seen_frame prevents stale sampling.
                 // World changes and disabled captures still clear this cache.
@@ -339,7 +339,9 @@
                     static_capture_owners.emplace(owner,eligible);
                     return eligible;
                 };
-                bool const paraboloid_mode=selected_mode==5;
+                // Shared keeps authored mode 7 for material sampling.
+                bool const paraboloid_mode=selected_mode==5 ||
+                    (candidate.is_shared && the_config->experimental_shared_hemi);
                 int const face_count=paraboloid_mode?2:6;
                 if(paraboloid_mode && !paraboloid_capture_program)
                     paraboloid_capture_program=
@@ -648,6 +650,20 @@
                 engine_camera first_camera{};
                 bool all_faces_ready=true;
                 {
+                // Isolated, nonblocking GPU timestamp pair for Shared only.
+                basic_presentation_gpu_profile<1>::completed_sample
+                    shared_gpu_completed{};
+                bool const shared_gpu_timing=profile_shared &&
+                    shared_capture_gpu_queries.begin(shared_gpu_completed);
+                if(shared_gpu_completed.ready) {
+                    shared_capture_gpu_ns_window+=
+                        shared_gpu_completed.nanoseconds[0];
+                    ++shared_capture_gpu_samples_window;
+                }
+                if(shared_gpu_completed.skipped)
+                    ++shared_capture_gpu_busy_window;
+                if(shared_gpu_timing)
+                    shared_capture_gpu_queries.timestamp(0U,true);
                 // A single GL snapshot for the full probe, not each face.
                 // Per-face framebuffer/shader/depth initialization is kept.
                 offscreen_capture_gl_scope restore;
@@ -1084,6 +1100,10 @@
                           probe_target->color_texture());
             glGenerateMipmap(GL_TEXTURE_2D_ARRAY);
             gl::bind_texture_raw(GL_TEXTURE_2D_ARRAY,GLuint(previous_array));
+            if(shared_gpu_timing) {
+                shared_capture_gpu_queries.timestamp(0U,false);
+                shared_capture_gpu_queries.end();
+            }
             if(profile_shared) {
                 auto &diag=shared_capture_profile_window;
                 diag.cpu_ns[5]+=elapsed_profile_ns(
@@ -1178,8 +1198,11 @@
                 continue;
             }
             if(the_config->profile_renderer && gpu_3do_present_serial%120U==0U)
-                LOG_INFO(candidate.is_shared?"SHARED cube owner=":
-                         (paraboloid_mode?"HEMI paraboloid owner=":"CUBE capture owner="),
+                LOG_INFO(candidate.is_shared
+                             ?(paraboloid_mode?"SHARED hemi owner=":
+                                                "SHARED cube owner=")
+                             :(paraboloid_mode?"HEMI paraboloid owner=":
+                                                "CUBE capture owner="),
                          selected_owner,
                          " capture_side=",capture_side,
                          " distance_limit=",probe_distance_limit,

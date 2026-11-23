@@ -422,7 +422,8 @@ vec3 gpu_environment_reflection(vec3 base_color,vec2 uv,out float metalness,
     bool has_hemi=false;
 #ifdef JKGM_REFLECTION_PROBE
     has_hemi=(mode==5 || mode==6 || mode==7) && hemi_capture_info.z>0.5 &&
-             abs(hemi_capture_info.w-float(mode))<0.5;
+             (abs(hemi_capture_info.w-float(mode))<0.5 ||
+              (mode==7 && abs(hemi_capture_info.w-5.0)<0.5));
 #endif
     if((environment_info.x<0.5 && environment_info.z<0.5 && !has_hemi) ||
        (coating?coat_strength<=0.0:specular_params.x<=0.0))
@@ -475,7 +476,7 @@ vec3 gpu_environment_reflection(vec3 base_color,vec2 uv,out float metalness,
         float softness=1.0;
         int layer=0;
         bool covered=false;
-        if(mode==5) {
+        if(mode==5 || (mode==7 && hemi_capture_info.w<5.5)) {
             // Fixed +Z/-Z dual paraboloid. Each disk covers 95 degrees from
             // its pole; smoothly blend in the +/-5 degree horizon overlap.
             vec3 d=normalize(world_dir);
