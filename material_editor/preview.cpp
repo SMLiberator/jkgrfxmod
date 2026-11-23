@@ -1,5 +1,8 @@
 #include "preview.hpp"
 #include "common/stb_image.h"
+#if defined(_WIN32)
+#include <windows.h>
+#endif
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
@@ -470,27 +473,92 @@ GLuint MaterialPreview::channelTexture(PreviewTexture slot,int channel) {
     glBindTexture(GL_TEXTURE_2D,0);
     return cached;
 }
-GLuint MaterialPreview::createPreset() {
-    const int w=512,h=256;
-    std::vector<unsigned char> pixels(size_t(w*h*4));
-    for(int y=0;y<h;y++)for(int x=0;x<w;x++) {
-        float u=float(x)/w,v=float(y)/h;
-        float r,g,b;
-        if(preset_==1) {r=v<.5f?.40f:.18f;g=v<.5f?.60f:.20f;b=v<.5f?.83f:.15f;}
-        else if(preset_==2){r=.045f;g=.038f;b=v<.5f?.095f:.032f;}
-        else {r=v<.52f?.32f:.16f;g=v<.52f?.35f:.17f;b=v<.52f?.39f:.19f;}
-        if(u>.14f&&u<.24f&&v>.13f&&v<.42f)r+=.60f,g+=.60f,b+=.60f;
-        if(u>.72f&&u<.85f&&v>.15f&&v<.40f)r+=.42f,g+=.42f,b+=.42f;
-        // OpenGL bottom row corresponds to the south pole in this equirect map.
-        size_t ix=size_t((y*w+x)*4);
-        pixels[ix]=(unsigned char)(std::min(1.f,r)*255.f);
-        pixels[ix+1]=(unsigned char)(std::min(1.f,g)*255.f);
-        pixels[ix+2]=(unsigned char)(std::min(1.f,b)*255.f);
-        pixels[ix+3]=255;
+// The three photographic Poly Haven 1K HDR panoramas are embedded as
+// Windows RCDATA, not installed next to the portable EXE. Tone-map once on
+// loading: the preview's shader already expects sRGB LDR environment images.
+// Retain a generated offline fallback when assets were not bundled.
+namespace {
+bool loadBundledPreset(int preset,int &width,int &height,
+                       std::vector<unsigned char> &out) {
+#if defined(_WIN32)
+    if(preset<0||preset>2)return false;
+    const HMODULE module=GetModuleHandleW(nullptr);
+    const HRSRC info=module?FindResourceW(
+        module,MAKEINTRESOURCEW(401+preset),RT_RCDATA):nullptr;
+    if(!info)return false;
+    const HGLOBAL handle=LoadResource(module,info);
+    const void *bytes=handle?LockResource(handle):nullptr;
+    const DWORD length=SizeofResource(module,info);
+    if(!bytes||length==0||length>INT_MAX)return false;
+    int w=0,h=0,channels=0;
+    float *decoded=stbi_loadf_from_memory(
+        static_cast<const stbi_uc *>(bytes),static_cast<int>(length),
+        &w,&h,&channels,3);
+    if(!decoded)return false;
+    const bool valid=w>0&&h>0&&w<=4096&&h<=2048&&
+                     std::uint64_t(w)*h<=8388608ULL;
+    if(!valid) {
+        stbi_image_free(decoded);
+        return false;
     }
-    GLuint t=0;glGenTextures(1,&t);glBindTexture(GL_TEXTURE_2D,t);
-    glTexImage2D(GL_TEXTURE_2D,0,GL_SRGB8_ALPHA8,w,h,0,
-                 GL_RGBA,GL_UNSIGNED_BYTE,pixels.data());
+    width=w;height=h;
+    out.resize(std::size_t(w)*h*3);
+    const float exposure=preset==0?0.65f:preset==1?0.40f:1.65f;
+    for(int y=0;y<h;++y)for(int x=0;x<w;++x) {
+        // HDR files store north at the top; GL_TEXTURE_2D expects south
+        // at the first row for the shader's equirectangular lookup.
+        const std::size_t src=(std::size_t(h-1-y)*w+x)*3;
+        const std::size_t dst=(std::size_t(y)*w+x)*3;
+        for(int channel=0;channel<3;++channel) {
+            const float value=decoded[src+channel];
+            const float linear=std::isfinite(value)
+                ?1.0f-std::exp(-std::max(value,0.0f)*exposure):0.0f;
+            const float encoded=linear<=0.0031308f?12.92f*linear:
+                1.055f*std::pow(linear,1.0f/2.4f)-0.055f;
+            out[dst+channel]=static_cast<unsigned char>(
+                std::lround(std::clamp(encoded,0.0f,1.0f)*255.0f));
+        }
+    }
+    stbi_image_free(decoded);
+    return true;
+#else
+    (void)preset;(void)width;(void)height;(void)out;
+    return false;
+#endif
+}
+} // namespace
+
+GLuint MaterialPreview::createPreset() {
+    int w=512,h=256;
+    std::vector<unsigned char> pixels;
+    const bool photographic=loadBundledPreset(preset_,w,h,pixels);
+    if(!photographic) {
+        pixels.resize(std::size_t(w)*h*4);
+        for(int y=0;y<h;++y)for(int x=0;x<w;++x) {
+            float u=float(x)/w,v=float(y)/h;
+            float r,g,b;
+            if(preset_==1) {r=v<.5f?.40f:.18f;g=v<.5f?.60f:.20f;b=v<.5f?.83f:.15f;}
+            else if(preset_==2){r=.045f;g=.038f;b=v<.5f?.095f:.032f;}
+            else {r=v<.52f?.32f:.16f;g=v<.52f?.35f:.17f;b=v<.52f?.39f:.19f;}
+            if(u>.14f&&u<.24f&&v>.13f&&v<.42f)r+=.60f,g+=.60f,b+=.60f;
+            if(u>.72f&&u<.85f&&v>.15f&&v<.40f)r+=.42f,g+=.42f,b+=.42f;
+            const std::size_t ix=(std::size_t(y)*w+x)*4;
+            pixels[ix]=static_cast<unsigned char>(std::min(1.f,r)*255.f);
+            pixels[ix+1]=static_cast<unsigned char>(std::min(1.f,g)*255.f);
+            pixels[ix+2]=static_cast<unsigned char>(std::min(1.f,b)*255.f);
+            pixels[ix+3]=255;
+        }
+    }
+    GLuint t=0;
+    glGenTextures(1,&t);
+    glBindTexture(GL_TEXTURE_2D,t);
+    GLint unpack=4;
+    glGetIntegerv(GL_UNPACK_ALIGNMENT,&unpack);
+    glPixelStorei(GL_UNPACK_ALIGNMENT,1);
+    glTexImage2D(GL_TEXTURE_2D,0,photographic?GL_SRGB8:GL_SRGB8_ALPHA8,
+                 w,h,0,photographic?GL_RGB:GL_RGBA,GL_UNSIGNED_BYTE,
+                 pixels.data());
+    glPixelStorei(GL_UNPACK_ALIGNMENT,unpack);
     glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_REPEAT);
     glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
