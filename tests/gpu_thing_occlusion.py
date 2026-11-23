@@ -168,17 +168,27 @@ assert "gpu_thing_occlusion_math.hpp" in read("renderer/renderer.vcxproj.filters
 # material group traversal. Query only AFTER opaque scene 3DO depth is ready.
 draw=renderer.split("void draw_gpu_3do_preview(",1)[1].split(
     "void draw_game_opaque_into_gbuffer(",1)[0]
-# Whole-mesh culling now computes a local modelview before allocating a
-# context. The occlusion check must still precede the transform, bounds
-# rejection, context allocation, and per-group work.
+# The serial path still checks Thing occlusion BEFORE computing
+# model-view, bounds, allocating a context, or visiting groups. With the
+# experimental multithreading switch on, a CPU-only visibility prepass can
+# calculate transforms earlier for selected immutable mesh snapshots; that
+# work is separate from live Thing occlusion, GL queries, and draw submission.
 occlusion=draw.index("thing_occlusion_queries->hidden(")
-transform=draw.index("auto const modelview=gpu_3do_native_modelview(")
+transform=draw.index("auto const modelview=parallel ?parallel->modelview:")
 mesh_bounds=draw.index("inst.geometry->cached_group_bounds(mesh_min,mesh_max)")
 context=draw.index("auto &context=contexts.emplace_back()")
 group_walk=draw.index("for(size_t group_visit=0;group_visit<groups.size();++group_visit)")
 assert occlusion < transform < mesh_bounds < context < group_walk
 assert draw.index("if(occluded)continue;") < transform
-assert draw.index("context.modelview=modelview;") > context
+assert "gpu_3do_native_modelview(native_view,inst.transform);" in draw
+assert "if(!parallel && have_perspective_frustum" in draw
+assert "context.modelview=modelview;" in draw[context:group_walk]
+prepass=draw.index("if(prepare_both && the_config->experimental_multithreading)")
+dispatch=draw.index("prepared_parallel=workers.execute(")
+collector=draw.index("if(!reuse_alpha) for(auto const &inst:instances)")
+assert prepass < dispatch < collector < occlusion
+assert "prepare_gpu_3do_parallel_visibility(" in draw[dispatch:collector]
+assert "prepared_parallel &&" in draw[occlusion:transform]
 opaque=renderer.split("void draw_game_opaque_into_gbuffer(",1)[1].split(
     "void query_gpu_thing_occlusion()",1)[0]
 assert opaque.index("draw_gpu_3do_preview(false);")<opaque.index(
