@@ -336,6 +336,10 @@ public:
         if(ImGui::BeginMainMenuBar()) {
             if(ImGui::BeginMenu("File")) {
                 if(ImGui::MenuItem("Open material pack...","Ctrl+O"))open();
+                if(ImGui::BeginMenu("Open Recent",!settings_.recentPacks.empty())) {
+                    renderRecentMenu();
+                    ImGui::EndMenu();
+                }
                 if(ImGui::MenuItem(isSource()?"Save source pack":"Save metadata",
                                    "Ctrl+S",false,loaded_))save();
                 if(ImGui::MenuItem("Save As...","Ctrl+Shift+S",false,loaded_))
@@ -450,6 +454,45 @@ public:
         ImGui::SaveIniSettingsToDisk(ImGui::GetIO().IniFilename);
         status_="Game asset settings saved to portable imgui.ini.";
     }
+    void persistRecent() {
+        settings_.hasIniSection=true;
+        // The portable imgui.ini already includes our game-asset settings,
+        // window layout and docking information.
+        ImGui::MarkIniSettingsDirty();
+        ImGui::SaveIniSettingsToDisk(ImGui::GetIO().IniFilename);
+    }
+    void rememberOpenedPack(const std::string &path) {
+        editor_ini::rememberRecent(settings_,path);
+        persistRecent();
+    }
+    void renderRecentMenu() {
+        bool anyMissing=false;
+        // Copy the path when clicked: opening a pack reorders this list.
+        for(size_t i=0;i<settings_.recentPacks.size();++i) {
+            const std::string path=settings_.recentPacks[i];
+            const fs::path filename=fs::u8path(path);
+            std::error_code ec;
+            const bool available=fs::is_regular_file(filename,ec)&&!ec;
+            if(!available)anyMissing=true;
+            const std::string label=filename.filename().u8string()+
+                "  ("+filename.parent_path().filename().u8string()+")##recent"+
+                std::to_string(i);
+            if(ImGui::MenuItem(label.c_str(),nullptr,false,available))
+                openRecent(path);
+            if(ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+                ImGui::SetTooltip("%s%s",path.c_str(),
+                    available?"":"\nFile missing or unavailable");
+        }
+        ImGui::Separator();
+        if(ImGui::MenuItem("Remove missing entries",nullptr,false,anyMissing)) {
+            editor_ini::removeMissingRecent(settings_);
+            persistRecent();
+        }
+        if(ImGui::MenuItem("Clear Recent")) {
+            settings_.recentPacks.clear();
+            persistRecent();
+        }
+    }
     void chooseGameAssetsFolder() {
         const std::string directory=chooseDirectory(window_);
         if(directory.empty())return;
@@ -548,7 +591,9 @@ private:
             exitApproved_=true;
             glfwSetWindowShouldClose(window_,GLFW_TRUE);
         } else if(action==PendingAction::Open) {
-            openFile();
+            const std::string path=std::move(pendingOpenPath_);
+            pendingOpenPath_.clear();
+            openFile(path);
         }
     }
     void renderRevertDialog() {
@@ -608,6 +653,7 @@ private:
         if(ImGui::Button("Cancel",ImVec2(86,0))||
            ImGui::IsKeyPressed(ImGuiKey_Escape)) {
             pendingAction_=PendingAction::None;
+            pendingOpenPath_.clear();
             ImGui::CloseCurrentPopup();
         }
         ImGui::EndPopup();
@@ -1003,19 +1049,28 @@ private:
         syncPreview();
     }
     void open() {
+        requestOpen({});
+    }
+    void openRecent(const std::string &path) {
+        requestOpen(path);
+    }
+    void requestOpen(const std::string &path) {
         if(dirty_) {
+            pendingOpenPath_=path;
             pendingAction_=PendingAction::Open;
             openUnsavedDialog_=true;
             return;
         }
-        openFile();
+        openFile(path);
     }
-    void openFile() {
-        const std::string path=chooseFile(window_,false);
+    void openFile(const std::string &requestedPath={}) {
+        const std::string path=requestedPath.empty()
+            ?chooseFile(window_,false):requestedPath;
         if(path.empty())return;
         try {
             Document doc=editor_source::readPack(fs::u8path(path));
             activatePack(std::move(doc),path);
+            rememberOpenedPack(path);
             status_=std::string(isSource()?"Opened source script.json: ":
                                  "Opened compiled metadata.json: ")+
                     std::to_string(root_["materials"].size())+" materials.";
@@ -1164,6 +1219,9 @@ private:
             savedRoot_=root_;
             updateDirty();
             syncPreview();
+            // Save As adopts a new document path. Add it to Open Recent
+            // only after its JSON and staged images were committed.
+            if(switchToCopy)rememberOpenedPack(path);
             status_=switchToCopy
                 ?"Saved copy: "+fs::u8path(path).filename().u8string()
                 :isSource()?"Saved script.json (source; compile to generate signatures)."
@@ -2590,7 +2648,7 @@ private:
     Document effectiveEntry_=Document::object();
     editor_source::Kind mode_=editor_source::Kind::Compiled;
     std::vector<Edit> undo_,redo_;
-    std::string file_,status_,override_;
+    std::string file_,status_,override_,pendingOpenPath_;
     // Drafts survive Undo/Redo until a pack is closed or reverted. An
     // unreferenced draft is never written to disk during Save.
     std::map<std::string,std::shared_ptr<const editor_images::Image>>
