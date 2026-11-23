@@ -480,6 +480,25 @@ Displaced UVs are used by albedo, normal, emissive, surface, clearcoat and
 other texture layers; an absent map or a factor of zero disables the effect.
 This change remains editor-only, with no new material metadata keys.
 
+## Open Recent
+
+**File > Open Recent** lists the ten most recently opened material packs
+(`script.json` or `metadata.json`), newest first. Each entry shows its
+filename and parent directory; hover to see its full path. Selecting an
+entry opens it directly without another file picker and preserves the normal
+unsaved-changes confirmation (**Save As / Open without saving / Cancel**).
+Failed or cancelled opens do not reorder the list. A successful **Save As**
+also adds the newly adopted document path. Paths are deduplicated and stored
+in the existing portable `imgui.ini` beside the executable, so the list
+survives a restart (including when the app starts in another working
+directory). Recent files underneath the executable folder are stored using
+relative paths, to keep portable copies together.
+
+Missing or inaccessible files appear disabled. Use **Remove missing entries**
+or **Clear Recent** at the bottom of the menu to maintain the list. These
+commands affect only the recent-file history, not the material pack files
+themselves.
+
 ## Unsaved changes and Save As
 
 The File menu includes Save As (Ctrl+Shift+S). Exiting through the window
