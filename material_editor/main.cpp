@@ -1333,8 +1333,10 @@ private:
                 ImGui::GetContentRegionAvail().x-53.0f));
             ImGui::SliderFloat("##lightingIntensity",&lightingIntensity_,
                                0.0f,2.0f,"Intensity: %.2fx");
+            if(ImGui::IsItemClicked(ImGuiMouseButton_Right))
+                lightingIntensity_=1.0f;
             if(ImGui::IsItemHovered())
-                ImGui::SetTooltip("Double-click to enter a value. Preview lighting only; emissive and EnvMap reflections stay unchanged.");
+                ImGui::SetTooltip("Left drag: adjust | Double-click: enter | Right-click: reset to 1.00x. Emissive and reflections stay unchanged.");
             ImGui::SameLine();
             if(ImGui::SmallButton("Reset##lightIntensity"))
                 lightingIntensity_=1.0f;
@@ -1438,10 +1440,9 @@ private:
         // Double-click a native ImGui slider to type a precise value.
         // The separate numeric box remains only for properties that can
         // legitimately exceed the displayed slider's upper bound.
-        const float actionWidth=hasOverride?54.0f:0.0f;
         const float manualWidth=allowAboveSlider?83.0f:0.0f;
         ImGui::SetNextItemWidth(std::max(100.0f,
-            available-actionWidth-manualWidth));
+            available-manualWidth));
         float position=std::clamp(v,low,high);
         bool modified=false;
         const std::string format=std::string(label)+": %.3f";
@@ -1449,8 +1450,13 @@ private:
                               ImGuiSliderFlags_AlwaysClamp)) {
             obj[key]=position;changed(key,ImGui::IsItemActive());modified=true;
         }
+        if(ImGui::IsItemClicked(ImGuiMouseButton_Right)&&hasOverride) {
+            // Reset removes the local override, restoring a source pack's
+            // inherited value or a compiled material's default.
+            obj.erase(key);changed(key);modified=true;
+        }
         if(ImGui::IsItemHovered())
-            ImGui::SetTooltip("Drag to adjust, double-click to type a value.");
+            ImGui::SetTooltip("Left drag to adjust; double-click to type; right-click to reset.");
         if(allowAboveSlider) {
             ImGui::SameLine();
             ImGui::SetNextItemWidth(75.0f);
@@ -1464,16 +1470,6 @@ private:
             }
             if(ImGui::IsItemHovered()&&v>high)
                 ImGui::SetTooltip("Values above the slider maximum are valid.");
-        }
-        if(hasOverride) {
-            ImGui::SameLine();
-            if(ImGui::SmallButton("Reset")) {
-                // Source: revert to inherited pack defaults. Compiled:
-                // revert to the shader/compiler fallback value.
-                obj.erase(key);changed(key);modified=true;
-            }
-            if(ImGui::IsItemHovered())
-                ImGui::SetTooltip("Remove this override; restore its default value.");
         }
         ImGui::PopID();
         return modified;
@@ -1506,17 +1502,16 @@ private:
     }
     // Three independent color-channel drags. Each channel has its own
     // caption inside the control, not clipped beyond a DragFloat3 widget.
-    // Single-click Reset removes an override (including source inheritance).
+    // Right-click a channel to reset the whole RGB factor to its default.
     void rgbDragField(const char *label,const char *key,
                       std::array<float,3> &values,float speed,
                       float low,float high) {
         ImGui::PushID(key);
         ImGui::TextUnformatted(label);
-        const bool hasOverride=selected().contains(key);
         const float spacing=ImGui::GetStyle().ItemSpacing.x;
         const float available=ImGui::GetContentRegionAvail().x;
         const float width=std::max(48.0f,
-            (available-(hasOverride?54.0f:0.0f)-2.0f*spacing)/3.0f);
+            (available-2.0f*spacing)/3.0f);
         const char *ids[]={"##r","##g","##b"};
         const char *formats[]={"R: %.2f","G: %.2f","B: %.2f"};
         for(int i=0;i<3;++i) {
@@ -1527,17 +1522,13 @@ private:
                 setArray(selected(),key,values.data(),3);
                 changed(key,ImGui::IsItemActive());
             }
-            if(ImGui::IsItemHovered())
-                ImGui::SetTooltip("Drag to adjust, double-click to type a value.");
-        }
-        if(hasOverride) {
-            ImGui::SameLine();
-            if(ImGui::SmallButton("Reset")) {
+            if(ImGui::IsItemClicked(ImGuiMouseButton_Right)&&
+               selected().contains(key)) {
                 selected().erase(key);
                 changed(key);
             }
             if(ImGui::IsItemHovered())
-                ImGui::SetTooltip("Restore the inherited or default RGB factor.");
+                ImGui::SetTooltip("Left drag: adjust; double-click: type; right-click: reset RGB.");
         }
         ImGui::PopID();
     }
@@ -1548,12 +1539,11 @@ private:
         Document &obj=packField?root_:selected();
         const Document &resolved=packField?root_:effectiveSelected();
         auto speed=scrollSpeed(resolved,key);
-        const bool own=obj.contains(key);
         ImGui::PushID(key);
         ImGui::TextUnformatted(label);
         const float available=ImGui::GetContentRegionAvail().x;
         const float width=std::max(55.0f,
-            (available-(own?54.0f:0.0f)-ImGui::GetStyle().ItemSpacing.x)/2.0f);
+            (available-ImGui::GetStyle().ItemSpacing.x)/2.0f);
         const auto axis=[&](int i,const char *id,const char *format) {
             float value=speed[size_t(i)];
             ImGui::SetNextItemWidth(width);
@@ -1564,22 +1554,18 @@ private:
                 if(packField)changedPack(key,ImGui::IsItemActive());
                 else changed(key,ImGui::IsItemActive());
             }
-            if(ImGui::IsItemHovered())
-                ImGui::SetTooltip("Drag to adjust, double-click to type a signed speed.");
-        };
-        axis(0,"##u","U: %.3f");
-        ImGui::SameLine();
-        axis(1,"##v","V: %.3f");
-        if(own) {
-            ImGui::SameLine();
-            if(ImGui::SmallButton("Reset")) {
+            if(ImGui::IsItemClicked(ImGuiMouseButton_Right)&&
+               obj.contains(key)) {
                 obj.erase(key);
                 if(packField)changedPack(key);
                 else changed(key);
             }
             if(ImGui::IsItemHovered())
-                ImGui::SetTooltip("Remove local scroll speed, restoring defaults.");
-        }
+                ImGui::SetTooltip("Left drag: adjust; double-click: type; right-click: reset U/V.");
+        };
+        axis(0,"##u","U: %.3f");
+        ImGui::SameLine();
+        axis(1,"##v","V: %.3f");
         ImGui::PopID();
     }
     void pulseField(bool packField=false) {
@@ -1642,26 +1628,21 @@ private:
             }
             ImGui::EndCombo();
         }
-        // The labels are rendered inside the drag controls rather than
-        // beyond their right edges. Double-click allows numeric entry,
-        // and the adjacent left-click R button restores that parameter's
-        // canonical compiler default without resetting the other fields.
+        // Labels remain inside the drag controls. Double-click enters
+        // a precise number; right-click restores this parameter's default
+        // without changing the other pulse settings.
         const auto editNumber=[&](const char *label,const char *field,
                                   float fallback) {
             float value=number(pulse,field,fallback);
             const std::string format=std::string(label)+": %.3f";
             ImGui::PushID(field);
-            ImGui::SetNextItemWidth(std::max(95.0f,
-                ImGui::GetContentRegionAvail().x-54.0f));
+            ImGui::SetNextItemWidth(-1.0f);
             const bool edited=ImGui::DragFloat("##value",&value,0.01f,0,0,
                                                 format.c_str());
-            if(ImGui::IsItemHovered())
-                ImGui::SetTooltip("Drag to adjust, double-click to type a value.");
             const bool held=ImGui::IsItemActive();
-            ImGui::SameLine();
-            const bool reset=ImGui::SmallButton("Reset");
+            const bool reset=ImGui::IsItemClicked(ImGuiMouseButton_Right);
             if(ImGui::IsItemHovered())
-                ImGui::SetTooltip("Reset %s to %.3f.",label,fallback);
+                ImGui::SetTooltip("Left drag: adjust; double-click: type; right-click: reset to %.3f.",fallback);
             if((edited||reset)&&std::isfinite(value)) {
                 if(reset)value=fallback;
                 const std::string name(field);
@@ -2078,8 +2059,7 @@ private:
         ImGui::PushID(key);
         const bool has=root_.contains(key);
         float value=number(root_,key,fallback);
-        ImGui::SetNextItemWidth(std::max(95.0f,
-            ImGui::GetContentRegionAvail().x-(has?54.0f:0.0f)));
+        ImGui::SetNextItemWidth(-1.0f);
         const std::string format=std::string(label)+": %.3f";
         if(ImGui::DragFloat("##packValue",&value,0.01f,0,0,
                             format.c_str())&&std::isfinite(value)) {
@@ -2098,14 +2078,11 @@ private:
             root_[key]=value;
             changedPack(key,ImGui::IsItemActive());
         }
-        if(ImGui::IsItemHovered())
-            ImGui::SetTooltip("Drag to adjust, double-click to type a value.");
-        if(has) {
-            ImGui::SameLine();
-            if(ImGui::SmallButton("Reset")){root_.erase(key);changedPack(key);}
-            if(ImGui::IsItemHovered())
-                ImGui::SetTooltip("Reset to the default by removing this pack override.");
+        if(ImGui::IsItemClicked(ImGuiMouseButton_Right)&&has) {
+            root_.erase(key);changedPack(key);
         }
+        if(ImGui::IsItemHovered())
+            ImGui::SetTooltip("Left drag: adjust; double-click: type; right-click: reset.");
         ImGui::PopID();
     }
     void packDefaultColor(const char *label,const char *key,int count) {
@@ -2478,8 +2455,7 @@ private:
             ImGui::PushID("displacement_factor");
             float factor=number(effectiveSelected(),"displacement_factor",0.0f);
             const bool overridden=selected().contains("displacement_factor");
-            ImGui::SetNextItemWidth(std::max(110.0f,
-                ImGui::GetContentRegionAvail().x-(overridden?54.0f:0.0f)));
+            ImGui::SetNextItemWidth(-1.0f);
             // The compiler accepts signed, unbounded finite values.
             // Negative factors are routinely used for relief maps.
             if(ImGui::DragFloat("##factor",&factor,0.002f,0,0,
@@ -2488,13 +2464,12 @@ private:
                 selected()["displacement_factor"]=factor;
                 changed("displacement_factor",ImGui::IsItemActive());
             }
-            if(overridden) {
-                ImGui::SameLine();
-                if(ImGui::SmallButton("Reset")) {
-                    selected().erase("displacement_factor");
-                    changed("displacement_factor");
-                }
+            if(ImGui::IsItemClicked(ImGuiMouseButton_Right)&&overridden) {
+                selected().erase("displacement_factor");
+                changed("displacement_factor");
             }
+            if(ImGui::IsItemHovered())
+                ImGui::SetTooltip("Left drag: adjust; double-click: type; right-click: reset.");
             ImGui::PopID();
             if(!effectiveSelected().contains("displacement_map"))
                 ImGui::TextDisabled("A displacement texture is required.");
