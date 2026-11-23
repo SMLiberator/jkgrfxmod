@@ -1499,6 +1499,43 @@ private:
         // The next TextWrapped/imageInfo item naturally starts on a full line.
         ImGui::PopID();
     }
+    // Three independent color-channel drags. Each channel has its own
+    // caption inside the control, not clipped beyond a DragFloat3 widget.
+    // Single-click Reset removes an override (including source inheritance).
+    void rgbDragField(const char *label,const char *key,
+                      std::array<float,3> &values,float speed,
+                      float low,float high) {
+        ImGui::PushID(key);
+        ImGui::TextUnformatted(label);
+        const bool hasOverride=selected().contains(key);
+        const float spacing=ImGui::GetStyle().ItemSpacing.x;
+        const float available=ImGui::GetContentRegionAvail().x;
+        const float width=std::max(48.0f,
+            (available-(hasOverride?54.0f:0.0f)-2.0f*spacing)/3.0f);
+        const char *ids[]={"##r","##g","##b"};
+        const char *formats[]={"R: %.2f","G: %.2f","B: %.2f"};
+        for(int i=0;i<3;++i) {
+            if(i>0)ImGui::SameLine();
+            ImGui::SetNextItemWidth(width);
+            if(ImGui::DragFloat(ids[i],&values[size_t(i)],speed,low,high,
+                                formats[i])&&std::isfinite(values[size_t(i)])) {
+                setArray(selected(),key,values.data(),3);
+                changed(key,ImGui::IsItemActive());
+            }
+            if(ImGui::IsItemHovered())
+                ImGui::SetTooltip("Drag to adjust, double-click to type a value.");
+        }
+        if(hasOverride) {
+            ImGui::SameLine();
+            if(ImGui::SmallButton("Reset")) {
+                selected().erase(key);
+                changed(key);
+            }
+            if(ImGui::IsItemHovered())
+                ImGui::SetTooltip("Restore the inherited or default RGB factor.");
+        }
+        ImGui::PopID();
+    }
     // Independent U/V drags keep the field names readable even when
     // the material inspector is narrow. Each native DragFloat supports
     // double-click direct numeric entry (including negative speeds).
@@ -2018,12 +2055,12 @@ private:
     void packDefaultFloat(const char *label,const char *key,float fallback) {
         ImGui::PushID(key);
         const bool has=root_.contains(key);
-        ImGui::TextUnformatted(label);
         float value=number(root_,key,fallback);
-        ImGui::SetNextItemWidth(std::max(90.0f,
-            ImGui::GetContentRegionAvail().x-(has?27.0f:0.0f)));
-        if(ImGui::DragFloat("##packValue",&value,0.01f,0,0,"%.3f")&&
-           std::isfinite(value)) {
+        ImGui::SetNextItemWidth(std::max(95.0f,
+            ImGui::GetContentRegionAvail().x-(has?32.0f:0.0f)));
+        const std::string format=std::string(label)+": %.3f";
+        if(ImGui::DragFloat("##packValue",&value,0.01f,0,0,
+                            format.c_str())&&std::isfinite(value)) {
             // Respect the same numeric domains as the material compiler.
             const std::string field(key);
             if(field=="normal_strength"||field=="normal_strength2")
@@ -2039,9 +2076,13 @@ private:
             root_[key]=value;
             changedPack(key,ImGui::IsItemActive());
         }
+        if(ImGui::IsItemHovered())
+            ImGui::SetTooltip("Drag to adjust, double-click to type a value.");
         if(has) {
             ImGui::SameLine();
             if(ImGui::SmallButton("x")){root_.erase(key);changedPack(key);}
+            if(ImGui::IsItemHovered())
+                ImGui::SetTooltip("Reset to the default by removing this pack override.");
         }
         ImGui::PopID();
     }
@@ -2382,10 +2423,7 @@ private:
         }
         if(materialSection("Emissive",1,emits)) {
             auto v=rgb(effectiveSelected(),"emissive_factor",{0,0,0});
-            if(ImGui::DragFloat3("Emissive RGB",v.data(),.05f,0,32,"%.2f")) {
-                setArray(selected(),"emissive_factor",v.data(),3);
-                changed("emissive_factor",ImGui::IsItemActive());
-            }
+            rgbDragField("Emissive RGB","emissive_factor",v,.05f,0,32);
             imageInfo("Emissive map","emissive_map");
             scrollField("Scroll (U,V) / sec","emissive_scroll");
             pulseField(false);
@@ -2415,7 +2453,6 @@ private:
         }
         if(materialSection("Parallax mapping",4,parallax)) {
             imageInfo("Displacement map","displacement_map");
-            ImGui::TextUnformatted("Displacement factor");
             ImGui::PushID("displacement_factor");
             float factor=number(effectiveSelected(),"displacement_factor",0.0f);
             const bool overridden=selected().contains("displacement_factor");
@@ -2423,7 +2460,8 @@ private:
                 ImGui::GetContentRegionAvail().x-(overridden?32.0f:0.0f)));
             // The compiler accepts signed, unbounded finite values.
             // Negative factors are routinely used for relief maps.
-            if(ImGui::DragFloat("##factor",&factor,0.002f,0,0,"%.4f") &&
+            if(ImGui::DragFloat("##factor",&factor,0.002f,0,0,
+                                "Displacement: %.4f") &&
                std::isfinite(factor)) {
                 selected()["displacement_factor"]=factor;
                 changed("displacement_factor",ImGui::IsItemActive());
@@ -2450,10 +2488,7 @@ private:
         if(materialSection("MatCap",6,matcap)) {
             floatField("MatCap roughness","matcap_roughness",0,0,1);
             auto v=rgb(effectiveSelected(),"matcap_factor",{1,1,1});
-            if(ImGui::DragFloat3("MatCap RGB factor",v.data(),.02f,0,4,"%.2f")) {
-                setArray(selected(),"matcap_factor",v.data(),3);
-                changed("matcap_factor",ImGui::IsItemActive());
-            }
+            rgbDragField("MatCap RGB factor","matcap_factor",v,.02f,0,4);
             imageInfo("MatCap","matcap_map");
             imageInfo("MatCap mask","matcap_surface_map");
         }
