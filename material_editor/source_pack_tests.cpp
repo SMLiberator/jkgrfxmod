@@ -95,6 +95,89 @@ void testCompiledAndValidation() {
     editor_source::validate(source,Kind::Source);
     check(Document::parse(source.dump(4))==source,"unknown fields survive");
 }
+void testMatReplacementEditing() {
+    using editor_source::MatReplacement;
+    const auto source=editor_source::Kind::Source;
+    const auto compiled=editor_source::Kind::Compiled;
+    MatReplacement repl;
+    check(editor_source::readMatReplacement("mat/door.mat",source,repl),
+          "plain source MAT path is readable");
+    check(repl.name=="mat/door.mat"&&repl.cel==0&&!repl.specificCel,
+          "plain MAT uses cel zero without changing serialized form");
+    repl.name="mat/newdoor.mat";
+    check(editor_source::writeSourceMatReplacement(repl)=="mat/newdoor.mat",
+          "editing a plain MAT path keeps its short syntax");
+    const Document tuple=Document::array({"mat/door.mat",3});
+    check(editor_source::readMatReplacement(tuple,source,repl),
+          "source MAT tuple is readable");
+    check(repl.name=="mat/door.mat"&&repl.cel==3&&repl.specificCel,
+          "source MAT tuple retains cel index");
+    repl.name="mat/animated.mat";repl.cel=0;
+    check(editor_source::writeSourceMatReplacement(repl)==
+          Document::array({"mat/animated.mat",0}),
+          "explicit cel stays a tuple when changed to zero");
+    const Document object={{"name","mat/door.mat"},{"cel",4}};
+    check(editor_source::readMatReplacement(object,compiled,repl)&&
+          repl.name=="mat/door.mat"&&repl.cel==4,
+          "compiled MAT mapping can be inspected read-only");
+    check(!editor_source::readMatReplacement(object,source,repl),
+          "compiled object cannot silently be serialized as source syntax");
+    check(!editor_source::readMatReplacement(
+          Document::array({"mat/bad.mat",-1}),source,repl),
+          "negative MAT cel must be rejected");
+    check(!editor_source::readMatReplacement(
+          Document::array({"mat/bad.mat",2147483648LL}),source,repl),
+          "out-of-range MAT cel must be rejected");
+}
+void testExclusiveAlbedoSource() {
+    Document root={
+        {"name","Pack"},{"description","Material sample"},
+        {"keep_albedo",true},
+        {"materials",Document::array({{
+            {"name","body"},
+            {"replaces",Document::array({"mat/body.mat"})}
+        }})}
+    };
+    auto &material=root["materials"][0];
+    editor_source::chooseAlbedoImage(material,"paint.png");
+    check(material["albedo_map"]=="paint.png"&&material["keep_albedo"]==false,
+          "loading PNG overrides inherited original MAT policy");
+    auto imageEffective=editor_source::effectiveMaterial(
+        root,material,editor_source::Kind::Source);
+    check(imageEffective["keep_albedo"]==false&&
+          imageEffective["albedo_map"]=="paint.png",
+          "replacement albedo wins over pack default keep");
+    editor_source::chooseOriginalMatAlbedo(material,true);
+    check(material["keep_albedo"]==true&&!material.contains("albedo_map"),
+          "choosing original MAT removes conflicting local albedo map");
+    auto nativeEffective=editor_source::effectiveMaterial(
+        root,material,editor_source::Kind::Source);
+    check(nativeEffective["keep_albedo"]==true&&
+          !nativeEffective.contains("albedo_map"),
+          "original MAT policy resolves without imported texture");
+    editor_source::chooseAlbedoImage(root,"pack-albedo.png");
+    check(root["keep_albedo"]==false&&
+          root["albedo_map"]=="pack-albedo.png",
+          "pack default image selection disables pack original albedo");
+    editor_source::chooseOriginalMatAlbedo(material,true);
+    check(!editor_source::effectiveMaterial(
+         root,material,editor_source::Kind::Source).contains("albedo_map"),
+         "material original MAT suppresses inherited pack PNG");
+    material.erase("keep_albedo");
+    auto inherited=editor_source::effectiveMaterial(
+        root,material,editor_source::Kind::Source);
+    check(inherited["albedo_map"]=="pack-albedo.png"&&
+          inherited["keep_albedo"]==false,
+          "removing MAT override restores image pack defaults");
+    material["use_original_albedo"]=true;
+    editor_source::chooseAlbedoImage(material,"second.png");
+    check(!material.contains("use_original_albedo")&&
+          material["keep_albedo"]==false,
+          "choosing image removes legacy keep alias");
+    editor_source::validate(root,editor_source::Kind::Source);
+    check(root["materials"][0]["replaces"][0]=="mat/body.mat",
+          "albedo selection leaves MAT replacement targets untouched");
+}
 void testAnimationInheritance() {
     Document source={
         {"name","Animated"},{"description","Animation defaults"},
@@ -213,6 +296,7 @@ int main(){
     try {
         testSourceInheritance();testPackAlbedoAndAlphaOverrides();
         testAnimationInheritance();
+        testMatReplacementEditing();testExclusiveAlbedoSource();
         testCompiledAndValidation();testRepositorySourcePack();
         testRevertMaterialAndPack();
         std::cout<<"Source pack tests passed\n";
