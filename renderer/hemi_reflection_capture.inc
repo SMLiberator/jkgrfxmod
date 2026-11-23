@@ -526,6 +526,96 @@
                 auto &cache=*world_cache_target;
                 reflection_world_buckets.refresh(
                     cache.loaded_world,cache.revision,cache.mesh.surfaces);
+
+                // Native scans, poses, materials and GL remain on the render
+                // thread; only immutable face and model visibility is shared.
+                std::vector<gpu_3do_instance const *> capture_models;
+                capture_models.reserve(capture_offscreen.nodes.size()+
+                                       frame_gpu_3do_instances.size());
+                for(auto const &inst:capture_offscreen.nodes)
+                    capture_models.push_back(&inst);
+                for(auto const &inst:frame_gpu_3do_instances)
+                    if(!inst.shadow_owner||!acquired.count(inst.shadow_owner))
+                        capture_models.push_back(&inst);
+                std::vector<reflection_capture_parallel_visibility> capture_model_visibility;
+                std::vector<reflection_capture_cull> capture_world_visibility;
+                bool capture_parallel=false;
+                if(the_config->experimental_multithreading) {
+                    std::vector<size_t> world_indices;
+                    for(auto const &bucket:reflection_world_buckets.buckets())
+                        world_indices.insert(world_indices.end(),
+                            bucket.surfaces.begin(),bucket.surfaces.end());
+                    size_t group_work=0;
+                    for(auto const *inst:capture_models)
+                        if(inst->geometry)group_work+=inst->geometry->groups.size();
+                    if(size_t(face_count)*(group_work+world_indices.size())>=512U) {
+                        std::array<gpu_3do_matrix34,6> capture_views{};
+                        std::array<gpu_3do_native_frustum,6> capture_frusta{};
+                        bool views_ready=true;
+                        for(int f=0;f<face_count;++f) {
+                            auto const c=paraboloid_mode
+                                ?make_dual_paraboloid_camera(focus,unsigned(f))
+                                :make_cube_reflection_camera(focus,unsigned(f));
+                            if(!c.valid) {views_ready=false;break;}
+                            auto const projection=make_offscreen_capture_projection(
+                                capture_side,capture_side,c.fov,0.0f,far_plane);
+                            if(!projection.valid) {views_ready=false;break;}
+                            capture_views[size_t(f)]=planar_camera_native_view(c);
+                            auto &fr=capture_frusta[size_t(f)];
+                            fr=frame_world_cache_camera.frustum;
+                            fr.clip_far=0;
+                            fr.near_plane=0.01f;
+                            fr.far_plane=far_plane;
+                            fr.far_left=-projection.half_horizontal;
+                            fr.right=projection.half_horizontal;
+                            fr.far_top=projection.half_horizontal;
+                            fr.bottom=-projection.half_horizontal;
+                        }
+                        if(views_ready) {
+                            if(!cpu_visibility_workers)
+                                cpu_visibility_workers=
+                                    std::make_unique<cpu_render_workers>();
+                            auto &workers=*cpu_visibility_workers;
+                            if(workers.available()) {
+                                auto const count=capture_models.size();
+                                auto const world_count=world_indices.size();
+                                auto const surface_count=cache.mesh.surfaces.size();
+                                capture_model_visibility.resize(size_t(face_count)*count);
+                                capture_world_visibility.resize(
+                                    size_t(face_count)*surface_count,
+                                    reflection_capture_cull::visible);
+                                capture_parallel=workers.execute([&](unsigned lane) {
+                                    for(size_t job=lane;job<size_t(face_count)*count;
+                                        job+=cpu_render_workers::lanes) {
+                                        size_t const f=job/count;
+                                        prepare_reflection_capture_parallel_visibility(
+                                            *capture_models[job%count],
+                                            capture_views[f],capture_frusta[f],
+                                            paraboloid_mode,probe_distance_limit,
+                                            capture_model_visibility[job]);
+                                    }
+                                    for(size_t job=lane;job<size_t(face_count)*world_count;
+                                        job+=cpu_render_workers::lanes) {
+                                        size_t const f=job/world_count;
+                                        size_t const index=world_indices[job%world_count];
+                                        auto const &surface=cache.mesh.surfaces[index];
+                                        auto const &portal=paraboloid_mode
+                                            ?all_directions_visibility:cube_visibility[f];
+                                        auto &reason=capture_world_visibility[f*surface_count+index];
+                                        if(portal.valid &&
+                                           (surface.surface_index>=portal.surfaces.size() ||
+                                            !portal.surfaces[surface.surface_index])) {
+                                            reason=reflection_capture_cull::portal;
+                                        } else reason=reflection_capture_bounds_reason(
+                                            capture_views[f],capture_frusta[f],
+                                            paraboloid_mode,0.0f,
+                                            surface.bounds_min,surface.bounds_max);
+                                    }
+                                });
+                            }
+                        }
+                    }
+                }
                 // Keep scratch allocation capacity across all 2/6 faces.
                 std::vector<GLsizei> counts;
                 std::vector<void const *> offsets;
@@ -696,6 +786,15 @@
                 counts.clear();offsets.clear();
                 for(size_t const index:bucket.surfaces) {
                     auto const &surface=cache.mesh.surfaces[index];
+                    if(capture_parallel) {
+                        auto const reason=capture_world_visibility[
+                            size_t(face)*cache.mesh.surfaces.size()+index];
+                        if(reason!=reflection_capture_cull::visible) {
+                            if(reason==reflection_capture_cull::hemisphere)
+                                ++total_world_bounds_culled;
+                            continue;
+                        }
+                    } else {
                     if(surface_mask &&
                        (surface.surface_index>=surface_mask->size() ||
                         !(*surface_mask)[surface.surface_index]))continue;
@@ -708,6 +807,7 @@
                        gpu_3do_batch_outside_frustum(
                            frustum,view,surface.bounds_min,surface.bounds_max))
                         continue;
+                    }
                     counts.push_back(GLsizei(surface.count));
                     offsets.push_back(reinterpret_cast<void const *>(
                         uintptr_t(surface.first_index)*sizeof(uint32_t)));
@@ -726,7 +826,7 @@
             }
             if(profile_shared)shared_capture_profile_window.cpu_ns[3]+=
                 elapsed_profile_ns(world_started,profile_clock::now());
-            auto draw_model=[&](gpu_3do_instance const &inst) {
+            auto draw_model=[&](gpu_3do_instance const &inst,size_t model_index) {
                 if(reflection_excluded_owners.count(inst.shadow_owner)!=0U ||
                    inst.shadow_only || inst.camera_hud ||
                    inst.is_sprite_quad || inst.is_projected_decal ||
@@ -750,11 +850,26 @@
                            source_sector,*thing_sector_mask))
                         return;
                 }
-                auto const modelview=gpu_3do_native_modelview(
-                    view,inst.transform);
+                auto const *parallel=capture_parallel &&
+                    capture_model_visibility[
+                        size_t(face)*capture_models.size()+model_index].ready
+                    ?&capture_model_visibility[
+                        size_t(face)*capture_models.size()+model_index]
+                    :nullptr;
+                auto const modelview=parallel?parallel->modelview:
+                    gpu_3do_native_modelview(view,inst.transform);
                 if(!gpu_3do_matrix_finite(modelview))return;
+                if(parallel && parallel->mesh!=reflection_capture_cull::visible) {
+                    total_model_groups_culled+=inst.geometry->groups.size();
+                    if(profile_shared) {
+                        auto &diag=shared_capture_profile_window;
+                        ++diag.whole_mesh_rejections;
+                        diag.group_walks_avoided+=inst.geometry->groups.size();
+                    }
+                    return;
+                }
                 std::array<float,3> mesh_min{},mesh_max{};
-                if(inst.geometry->cached_group_bounds(mesh_min,mesh_max)) {
+                if(!parallel && inst.geometry->cached_group_bounds(mesh_min,mesh_max)) {
                     bool const outside=paraboloid_mode
                         ?dual_paraboloid_bounds_outside(
                             modelview,mesh_min,mesh_max,probe_distance_limit)
@@ -789,6 +904,15 @@
                     auto const &group=inst.geometry->groups[entry.group_index];
                     if(profile_shared)
                         ++shared_capture_profile_window.groups_checked;
+                    if(parallel) {
+                        auto const reason=parallel->groups[entry.group_index];
+                        if(reason!=reflection_capture_cull::visible) {
+                            if(reason==reflection_capture_cull::hemisphere ||
+                               reason==reflection_capture_cull::range)
+                                ++total_model_groups_culled;
+                            continue;
+                        }
+                    } else {
                     if(paraboloid_mode &&
                        dual_paraboloid_bounds_outside(
                            modelview,group.bounds_min,group.bounds_max,
@@ -806,6 +930,7 @@
                        gpu_3do_batch_outside_frustum(
                            frustum,modelview,
                            group.bounds_min,group.bounds_max))continue;
+                    }
                     model_group_scratch.push_back(&entry);
                     if(profile_shared)
                         ++shared_capture_profile_window.groups_selected;
@@ -931,10 +1056,8 @@
             };
             auto const models_started=profile_shared
                 ?profile_clock::now():profile_clock::time_point{};
-            for(auto const &inst:offscreen.nodes)draw_model(inst);
-            for(auto const &inst:frame_gpu_3do_instances)
-                if(!inst.shadow_owner||!acquired.count(inst.shadow_owner))
-                    draw_model(inst);
+            for(size_t i=0;i<capture_models.size();++i)
+                draw_model(*capture_models[i],i);
             if(profile_shared)shared_capture_profile_window.cpu_ns[4]+=
                 elapsed_profile_ns(models_started,profile_clock::now());
             total_world_drawn+=world_drawn;
