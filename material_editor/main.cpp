@@ -7,6 +7,7 @@
 #include "imgui_internal.h"
 #include "misc/cpp/imgui_stdlib.h"
 #include "native_mat.hpp"
+#include "material_signatures.hpp"
 #include "backends/imgui_impl_glfw.h"
 #include "backends/imgui_impl_opengl3.h"
 #include "common/json_incl.hpp"
@@ -659,9 +660,10 @@ private:
         return target;
     }
     struct Edit {
-        int materialIndex=-1; // -1: pack, otherwise material index
+        int materialIndex=-1; // -2: material list, -1: pack, otherwise index
         std::string key;
         Document before, after;
+        int selectionBefore=-1,selectionAfter=-1;
     };
     static constexpr size_t maxHistory=128;
     static Document packSnapshot(const Document &doc) {
@@ -735,7 +737,12 @@ private:
         if(undo_.empty()||!loaded_)return;
         Edit step=std::move(undo_.back());
         undo_.pop_back();
-        if(step.materialIndex<0) {
+        if(step.materialIndex==-2) {
+            root_["materials"]=step.before;
+            observedRoot_["materials"]=step.before;
+            selection_=step.selectionBefore;
+            sectionSelection_=-2;
+        } else if(step.materialIndex==-1) {
             restorePackSnapshot(root_,step.before);
             restorePackSnapshot(observedRoot_,step.before);
         } else {
@@ -753,7 +760,12 @@ private:
         if(redo_.empty()||!loaded_)return;
         Edit step=std::move(redo_.back());
         redo_.pop_back();
-        if(step.materialIndex<0) {
+        if(step.materialIndex==-2) {
+            root_["materials"]=step.after;
+            observedRoot_["materials"]=step.after;
+            selection_=step.selectionAfter;
+            sectionSelection_=-2;
+        } else if(step.materialIndex==-1) {
             restorePackSnapshot(root_,step.after);
             restorePackSnapshot(observedRoot_,step.after);
         } else {
@@ -781,7 +793,12 @@ private:
                size_t(selection_)<root_["materials"].size();
     }
     bool canRevertMaterial() const {
-        return validSelection()&&savedRoot_.contains("materials")&&
+        // A list edit can shift indices, making index-based Revert Material
+        // target the wrong saved entry. File > Revert remains available.
+        const bool structurePending=std::any_of(undo_.begin(),undo_.end(),
+            [](const Edit &step){return step.materialIndex==-2;});
+        return !structurePending&&validSelection()&&
+               savedRoot_.contains("materials")&&
                savedRoot_["materials"].is_array()&&
                size_t(selection_)<savedRoot_["materials"].size()&&
                selected()!=savedRoot_["materials"][size_t(selection_)];
@@ -814,6 +831,35 @@ private:
         updateDirty();
         syncPreview();
         status_="Unsaved material changes (Ctrl+S)";
+    }
+    void changedMaterials(const char *key,int priorSelection) {
+        if(!loaded_)return;
+        const Document previous=observedRoot_["materials"];
+        const Document current=root_["materials"];
+        if(previous==current)return;
+        if(undo_.size()>=maxHistory)undo_.erase(undo_.begin());
+        undo_.push_back({-2,key,previous,current,priorSelection,selection_});
+        observedRoot_["materials"]=current;
+        redo_.clear();
+        groupActive_=false;
+        sectionSelection_=-2;
+        updateDirty();
+        syncPreview();
+        status_=std::string("Unsaved material list change: ")+key;
+    }
+    void addNewMaterial() {
+        if(!loaded_)return;
+        const int oldSelection=selection_;
+        selection_=static_cast<int>(editor_source::addMaterial(root_,mode_));
+        changedMaterials("Add material",oldSelection);
+    }
+    void removeSelectedMaterial() {
+        if(!validSelection())return;
+        const int oldSelection=selection_;
+        if(!editor_source::removeMaterial(root_,size_t(selection_)))return;
+        selection_=root_["materials"].empty()?-1:
+            std::min(selection_,int(root_["materials"].size())-1);
+        changedMaterials("Remove material",oldSelection);
     }
     void changedPack(const char *key,bool continuous=false) {
         if(!loaded_)return;
