@@ -64,6 +64,15 @@ struct profile_sample {
   // batches count as one subdraw and are excluded from merge savings.
   uint64_t gpu_index_subdraws=0,gpu_index_coalesced_ranges=0;
   uint64_t gpu_index_coalesced_singles=0;
+  // Profile-only, sampled candidate counts for cross-Thing 3DO instancing.
+  // Conservative candidates are a subset of repeated live GPU identities.
+  uint64_t gpu_instancing_audit_samples=0;
+  uint64_t gpu_instancing_source_draws=0;
+  uint64_t gpu_instancing_geometry_duplicates=0;
+  uint64_t gpu_instancing_geometry_groups=0;
+  uint64_t gpu_instancing_conservative_draws=0;
+  uint64_t gpu_instancing_compatible_duplicates=0;
+  uint64_t gpu_instancing_compatible_groups=0;
   uint64_t gpu_sprite_instanced_calls=0,gpu_sprite_instanced_quads=0;
   uint64_t gpu_sprite_instancing_eligible=0;
   uint64_t gpu_opaque_draw_calls=0,gpu_transparent_draw_calls=0;
@@ -174,6 +183,13 @@ struct profile_sample {
     gpu_index_subdraws+=o.gpu_index_subdraws;
     gpu_index_coalesced_ranges+=o.gpu_index_coalesced_ranges;
     gpu_index_coalesced_singles+=o.gpu_index_coalesced_singles;
+    gpu_instancing_audit_samples+=o.gpu_instancing_audit_samples;
+    gpu_instancing_source_draws+=o.gpu_instancing_source_draws;
+    gpu_instancing_geometry_duplicates+=o.gpu_instancing_geometry_duplicates;
+    gpu_instancing_geometry_groups+=o.gpu_instancing_geometry_groups;
+    gpu_instancing_conservative_draws+=o.gpu_instancing_conservative_draws;
+    gpu_instancing_compatible_duplicates+=o.gpu_instancing_compatible_duplicates;
+    gpu_instancing_compatible_groups+=o.gpu_instancing_compatible_groups;
     gpu_sprite_instanced_calls+=o.gpu_sprite_instanced_calls;
     gpu_sprite_instanced_quads+=o.gpu_sprite_instanced_quads;
     gpu_sprite_instancing_eligible+=o.gpu_sprite_instancing_eligible;

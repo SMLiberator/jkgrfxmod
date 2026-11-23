@@ -284,6 +284,12 @@ jobs:
         cl.exe /nologo /EHsc /std:c++17 /I. tests\gpu_3do_index_coalescing.cpp /Fe:gpu_3do_index_coalescing_test.exe || exit /b 1
         gpu_3do_index_coalescing_test.exe || exit /b 1
         python3 tests/gpu_3do_index_coalescing.py || exit /b 1
+    - name: GPU 3DO CloneModel-safe instancing audit
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\gpu_3do_instancing_audit.cpp /Fe:gpu_3do_instancing_audit_test.exe || exit /b 1
+        gpu_3do_instancing_audit_test.exe || exit /b 1
+        python3 tests/gpu_3do_instancing_audit.py || exit /b 1
 
     - name: GPU 3DO native model-view precision tests
       shell: cmd

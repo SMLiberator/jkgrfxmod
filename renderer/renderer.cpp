@@ -5,6 +5,7 @@
 #include "native_3do_profile.hpp"
 #include "gpu_3do_preview.hpp"
 #include "gpu_3do_index_coalescing.hpp"
+#include "gpu_3do_instancing_audit.hpp"
 #include "gpu_3do_packed_vertex.hpp"
 #include "gpu_3do_auto_lod.hpp"
 #include "planar_reflection_things.hpp"
@@ -1718,6 +1719,25 @@ namespace jkgm {
                          " avoided_glTexParameter_calls_avg=",
                          (profile_window.gpu_filter_state_skips*3U)/frames,
                          " NOTE=albedo_emission_and_transition_textures_only");
+                if(profile_window.gpu_instancing_audit_samples>0U) {
+                    auto const sample_count=
+                        profile_window.gpu_instancing_audit_samples;
+                    LOG_INFO("PERF gpu_3do instancing_feasibility samples=",
+                        sample_count,
+                        " opaque_ranges_per_sample=",
+                        profile_window.gpu_instancing_source_draws/sample_count,
+                        " exact_mesh_repeat_ranges_per_sample=",
+                        profile_window.gpu_instancing_geometry_duplicates/sample_count,
+                        " exact_mesh_repeat_groups_per_sample=",
+                        profile_window.gpu_instancing_geometry_groups/sample_count,
+                        " conservative_eligible_ranges_per_sample=",
+                        profile_window.gpu_instancing_conservative_draws/sample_count,
+                        " compatible_repeat_ranges_per_sample=",
+                        profile_window.gpu_instancing_compatible_duplicates/sample_count,
+                        " compatible_repeat_groups_per_sample=",
+                        profile_window.gpu_instancing_compatible_groups/sample_count,
+                        " NOTE=sampled_profile_only_no_instancing;identity=cache_snapshot_id+geometry+group+MAT;not_filename;range_savings_upper_bound_not_GL_calls");
+                }
                 LOG_INFO("PERF gpu_3do batch GL_calls_avg=",
                          profile_window.gpu_draw_calls/frames,
                          " source_ranges_avg=",
@@ -5259,6 +5279,74 @@ namespace jkgm {
                         std::make_move_iterator(draws.end()));
                     draws.swap(merged_draws);
                 }
+            }
+            // Assess cross-Thing instancing without modifying draw order,
+            // GL calls or shaders. CloneModel copies the filename; native
+            // material and snapshot revision can diverge, so compare the
+            // ACTUAL cached geometry ID and exact geometry/group pointers.
+            // Sampling every 30 frames avoids taxing normal profiling.
+            if(gpu_profiling && prepare_both &&
+               gpu_3do_present_serial%30U==0U) {
+                static thread_local
+                    std::vector<gpu_3do_instancing_audit_record> records;
+                records.clear();
+                records.reserve(draws.size());
+                for(auto const &draw:draws) {
+                    auto const &inst=*draw.instance;
+                    auto const &material=*draw.texture;
+                    bool const default_spec_eligible=
+                        !inst.camera_hud && !inst.is_projected_decal &&
+                        !inst.is_sprite_quad && !inst.world_lighting_exempt &&
+                        !material.solid_fullbright &&
+                        !material.emissive_only &&
+                        material.albedo_source!=0 &&
+                        material.blend!=material_blend_mode::additive &&
+                        material.blend!=material_blend_mode::multiply;
+                    bool const specular_view_dependent=
+                        the_config->enable_reflections &&
+                        gpu_specular_parameters(material,
+                            default_spec_eligible).first>0.0f &&
+                        (sun_active || material.has_environment ||
+                         material.has_environment2 ||
+                         effective_capture_reflection_mode(
+                            material.reflection_mode)>=5);
+                    // Deliberately exclude authored maps that might require
+                    // separate local-eye, reflection or pixel derivative state.
+                    bool const view_dependent=
+                        specular_view_dependent ||
+                        material.has_normal || material.has_normal2 ||
+                        material.has_surface || material.has_environment ||
+                        material.has_environment2 || material.has_matcap ||
+                        get<0>(material.clearcoat_params)>0.0f ||
+                        material.displacement_factor!=0.0f;
+                    gpu_3do_instancing_audit_record record{};
+                    record.mesh_id=inst.id;
+                    record.geometry=reinterpret_cast<uintptr_t>(
+                        inst.geometry.get());
+                    record.group=reinterpret_cast<uintptr_t>(draw.group);
+                    record.material=reinterpret_cast<uintptr_t>(draw.texture);
+                    record.instance=reinterpret_cast<uintptr_t>(draw.instance);
+                    record.state_eligible=
+                        gpu_3do_instancing_conservative_candidate(
+                            inst,*draw.group,draw.policy,view_dependent) &&
+                        gpu_3do_instancing_capture_state(
+                            inst,draw.context->reversed_winding,
+                            record.state);
+                    records.push_back(record);
+                }
+                auto const audit=audit_gpu_3do_instancing(records);
+                ++profile_frame.gpu_instancing_audit_samples;
+                profile_frame.gpu_instancing_source_draws+=audit.source_draws;
+                profile_frame.gpu_instancing_geometry_duplicates+=
+                    audit.geometry_repeated_draws;
+                profile_frame.gpu_instancing_geometry_groups+=
+                    audit.geometry_repeated_groups;
+                profile_frame.gpu_instancing_conservative_draws+=
+                    audit.conservative_draws;
+                profile_frame.gpu_instancing_compatible_duplicates+=
+                    audit.compatible_repeated_draws;
+                profile_frame.gpu_instancing_compatible_groups+=
+                    audit.compatible_groups;
             }
             if(transparent && !(post_exempt &&
                                 !the_config->camera_hud_depth_sort)) {
