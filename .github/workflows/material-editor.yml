@@ -26,7 +26,7 @@ jobs:
       - name: Build only the editor
         shell: pwsh
         run: |
-          cmake --build build/material-editor --config Release --target jkgm-material-editor editor-source-pack-tests editor-settings-tests editor-image-tests editor-animation-tests --parallel
+          cmake --build build/material-editor --config Release --target jkgm-material-editor editor-source-pack-tests editor-settings-tests editor-image-tests editor-animation-tests editor-environment-tests --parallel
 
       - name: Verify source-pack inheritance and serialization
         shell: pwsh
@@ -51,6 +51,12 @@ jobs:
         run: |
           & "build/material-editor/Release/editor-animation-tests.exe"
           if ($LASTEXITCODE -ne 0) { throw "Animation regression tests failed" }
+
+      - name: Verify explicit preview EnvMap source choices
+        shell: pwsh
+        run: |
+          & "build/material-editor/Release/editor-environment-tests.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Environment source tests failed" }
 
       - name: Verify portable EXE and dynamic library imports
         shell: pwsh
