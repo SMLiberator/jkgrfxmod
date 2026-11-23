@@ -851,8 +851,11 @@
                 make_point(effect.add[0]/255.0f,effect.add[1]/255.0f,
                     effect.add[2]/255.0f,effect.fade),
                 authored_light_limit(the_config->enable_baked_overbright));
-            // The sky pass has already completed. Reuse a material binding
-            // only while the shader and sampler state stay unchanged.
+            // Keep MAT depth preference in Hemi/Cube/Shared/EnvMap
+            // captures; reuse the state while adjacent buckets share bias.
+            gpu_cached_polygon_offset capture_depth_offset(0.0f,0.0f);
+            // Reuse a material binding only while the shader and sampler
+            // state stay unchanged.
             std::optional<std::pair<reflection_capture_material_key,bool>>
                 last_submitted_material;
             auto submit_material=[&](gpu_3do_texture const &mat,bool solid,
@@ -868,6 +871,7 @@
                 bool const textured=!solid && mat.albedo_source==1 &&
                                      mat.has_image;
                 if(!textured && !(solid || mat.albedo_source==2))return false;
+                capture_depth_offset.set(mat.depth_bias);
                 auto const binding=std::make_pair(key,model);
                 if(last_submitted_material &&
                    *last_submitted_material==binding)return true;
