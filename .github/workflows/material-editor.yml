@@ -21,7 +21,7 @@ jobs:
       - name: Configure standalone static editor
         shell: pwsh
         run: |
-          cmake -S material_editor -B build/material-editor -G "Visual Studio 17 2022" -A x64
+          cmake -S material_editor -B build/material-editor -G "Visual Studio 17 2022" -A x64 -DJKGM_REQUIRE_PRESET_HDRI=ON
 
       - name: Build only the editor
         shell: pwsh
