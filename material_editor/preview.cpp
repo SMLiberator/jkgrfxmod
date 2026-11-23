@@ -633,33 +633,32 @@ void MaterialPreview::reloadImages() {
             glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_REPEAT);
         }
     }
-    const bool presetOnly=
-        environmentSource_==PreviewEnvironmentSource::Preset;
+    const auto choice=choosePreviewEnvironment(environmentSource_,
+        material_.files[EnvironmentMap],envOverride_,
+        bool(material_.stagedImages[EnvironmentMap]));
     const bool custom=
         environmentSource_==PreviewEnvironmentSource::Custom;
-    const std::string envfile=custom?envOverride_:
-        material_.files[EnvironmentMap];
-    if(!presetOnly) {
-        if(!custom&&material_.stagedImages[EnvironmentMap])
+    if(!choice.preset) {
+        if(choice.stagedMaterial)
             textures_[EnvironmentMap]=uploadStaged(
                 *material_.stagedImages[EnvironmentMap],true,
                 &imageInfo_[EnvironmentMap]);
         else
             textures_[EnvironmentMap]=loadTexture(
-                envfile,true,&imageInfo_[EnvironmentMap]);
+                choice.filename,true,&imageInfo_[EnvironmentMap]);
     }
     loadedEnvironmentFile_=textures_[EnvironmentMap]!=0;
     const char *presetNames[]={"Studio","Outdoor","Night"};
     const char *fallbackName=presetNames[std::clamp(preset_,0,2)];
     if(loadedEnvironmentFile_) {
         envDescription_=std::string(custom?"Custom EnvMap: ":
-                                     "Material / pack EnvMap: ")+envfile;
+                                     "Material / pack EnvMap: ")+choice.filename;
     } else {
-        envDescription_=presetOnly
+        envDescription_=choice.preset
             ?std::string("Preset EnvMap: ")+fallbackName
-            :envfile.empty()
-                ?std::string("No material EnvMap; using ")+fallbackName+" preset"
-                :std::string("EnvMap unavailable: ")+envfile+
+            :choice.filename.empty()
+                ?std::string("No EnvMap assigned; using ")+fallbackName+" preset"
+                :std::string("EnvMap unavailable: ")+choice.filename+
                     ". Using "+fallbackName+" preset";
         textures_[EnvironmentMap]=createPreset();
     }
