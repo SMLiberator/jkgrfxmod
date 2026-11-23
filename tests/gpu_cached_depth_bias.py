@@ -39,7 +39,7 @@ planar = section(renderer, "void render_planar_reflection_capture(",
                                 '#include "hemi_reflection_capture.inc"')
 
 # Preserve the native sign convention and every caller's optional base offset.
-assert "float depth_bias=0.0f;" in compact(cached_mat)
+assert "floatdepth_bias=0.0f;" in compact(cached_mat)
 assert "out.depth_bias=surface->depth_bias;" in compact(textured)
 assert "out.depth_bias=vidmem_texture_surfaces[id-1]->depth_bias;" in compact(solid)
 h = compact(helper)
