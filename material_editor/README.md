@@ -123,7 +123,8 @@ atomically. All asset roots and colormap files need to correspond to the
 same game resources the original pack compiler would use.
 
 The **Materials** tab has **Add**, **Duplicate**, and **Remove** actions
-(with deletion confirmation). **Duplicate** makes an independent copy
+(with deletion confirmation). **Duplicate** (also **Edit > Duplicate Material**
+or **Ctrl+D**) makes an independent copy
 of the selected material's settings, image references, and MAT targets
 (including existing compiled signatures), assigns a unique `(copy)` name,
 and selects the copy. Change its MAT replacements when making a new
