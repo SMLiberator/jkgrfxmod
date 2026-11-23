@@ -188,3 +188,12 @@ target_include_directories(editor-environment-tests PRIVATE
 if(MSVC)
   target_compile_options(editor-environment-tests PRIVATE /W3 /EHsc /utf-8)
 endif()
+
+# Pure numeric semantics: signed steps, precision wheel fractions and bounds.
+add_executable(editor-wheel-tests
+  editor_wheel_tests.cpp editor_wheel.hpp)
+target_include_directories(editor-wheel-tests PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/..)
+if(MSVC)
+  target_compile_options(editor-wheel-tests PRIVATE /W3 /EHsc /utf-8)
+endif()
