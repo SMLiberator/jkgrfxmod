@@ -17,6 +17,7 @@ namespace jkgm {
         uintptr_t thing=0;
         uint32_t index=0,signature=0;
         uint32_t model=0,sector=0;
+        uint32_t thing_flags=0; // SithThing.flags; 0x8 = LEVELGEO
         // Native rdThing.curGeoMode, read independently of the primary camera.
         // In JK's hardware renderer modes 0..2 do not emit filled meshes.
         uint32_t current_geometry_mode=4;
@@ -182,6 +183,7 @@ namespace jkgm {
                     current_geo>4 ? 4U : uint32_t(current_geo);
                 item.thing=current;
                 item.index=index;
+                item.thing_flags=flags;
                 item.sector=sector;
                 item.model=model;
                 if(!read32(uintptr_t(current)+0x74U,item.signature) ||

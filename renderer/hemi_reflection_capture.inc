@@ -514,11 +514,15 @@
                             if(reflection_excluded_owners.count(owner)!=0U ||
                                (candidate.is_global &&
                                 !capture_static_owner(owner)))return true;
-                            // A shared full-sphere snapshot may only use
-                            // radial culling, not an individual face frustum.
-                            if(probe_distance_limit>0.0f &&
+                            // Apply the same policy before native poses.
+                            // Shared exempts LEVELGEO from the range limit.
+                            float const thing_limit=
+                                reflection_probe_thing_distance_limit(
+                                    probe_distance_limit,candidate.is_shared,
+                                    true,thing.thing_flags);
+                            if(thing_limit>0.0f &&
                                planar_reflection_thing_outside_probe_range(
-                                   read,thing,focus,probe_distance_limit)) {
+                                   read,thing,focus,thing_limit)) {
                                 ++total_thing_range_culled;
                                 return true;
                             }
@@ -573,6 +577,37 @@
                 for(auto const &inst:frame_gpu_3do_instances)
                     if(!inst.shadow_owner||!acquired.count(inst.shadow_owner))
                         capture_models.push_back(&inst);
+                // Fallback main-view nodes must obey the same policy.
+                // Resolve owner flags once on the render thread, before
+                // CPU workers read the immutable distance-limit array.
+                std::unordered_map<uint64_t,float> owner_distance_limits;
+                std::vector<float> capture_model_distance_limits;
+                capture_model_distance_limits.reserve(capture_models.size());
+                size_t shared_range_exempt_nodes=0U;
+                for(auto const *inst:capture_models) {
+                    float limit=probe_distance_limit;
+                    if(candidate.is_shared && limit>0.0f) {
+                        auto found=owner_distance_limits.find(inst->shadow_owner);
+                        if(found==owner_distance_limits.end()) {
+                            uintptr_t const thing=uintptr_t(uint32_t(
+                                inst->shadow_owner>>32U));
+                            uint32_t flags=0U,signature=0U;
+                            bool const known=inst->shadow_owner!=0U &&
+                                planar_reflection_valid_native_pointer(thing) &&
+                                read_portals(thing,&flags,sizeof(flags)) &&
+                                read_portals(thing+0x74U,&signature,
+                                             sizeof(signature)) &&
+                                signature==uint32_t(inst->shadow_owner);
+                            limit=reflection_probe_thing_distance_limit(
+                                probe_distance_limit,true,known,flags);
+                            found=owner_distance_limits.emplace(
+                                inst->shadow_owner,limit).first;
+                        }
+                        limit=found->second;
+                        if(limit==0.0f)++shared_range_exempt_nodes;
+                    }
+                    capture_model_distance_limits.push_back(limit);
+                }
                 std::vector<reflection_capture_parallel_visibility> capture_model_visibility;
                 std::vector<reflection_capture_cull> capture_world_visibility;
                 bool capture_parallel=false;
@@ -632,7 +667,8 @@
                                         prepare_reflection_capture_parallel_visibility(
                                             *capture_models[job%count],
                                             capture_views[f],capture_frusta[f],
-                                            paraboloid_mode,probe_distance_limit,
+                                            paraboloid_mode,
+                                            capture_model_distance_limits[job%count],
                                             capture_model_visibility[job]);
                                     }
                                     for(size_t job=lane;job<size_t(face_count)*world_count;
@@ -916,6 +952,8 @@
                 auto const modelview=parallel?parallel->modelview:
                     gpu_3do_native_modelview(view,inst.transform);
                 if(!gpu_3do_matrix_finite(modelview))return;
+                float const model_distance_limit=
+                    capture_model_distance_limits[model_index];
                 if(parallel && parallel->mesh!=reflection_capture_cull::visible) {
                     total_model_groups_culled+=inst.geometry->groups.size();
                     if(profile_shared) {
@@ -929,11 +967,11 @@
                 if(!parallel && inst.geometry->cached_group_bounds(mesh_min,mesh_max)) {
                     bool const outside=paraboloid_mode
                         ?dual_paraboloid_bounds_outside(
-                            modelview,mesh_min,mesh_max,probe_distance_limit)
-                        :((probe_distance_limit>0.0f &&
+                            modelview,mesh_min,mesh_max,model_distance_limit)
+                        :((model_distance_limit>0.0f &&
                             reflection_probe_bounds_outside_range(
                                 modelview,mesh_min,mesh_max,
-                                probe_distance_limit)) ||
+                                model_distance_limit)) ||
                            gpu_3do_batch_outside_frustum(
                                frustum,modelview,mesh_min,mesh_max));
                     if(outside) {
@@ -980,14 +1018,14 @@
                     if(paraboloid_mode &&
                        dual_paraboloid_bounds_outside(
                            modelview,group.bounds_min,group.bounds_max,
-                           probe_distance_limit)) {
+                           model_distance_limit)) {
                         ++total_model_groups_culled;continue;
                     }
                     if(!paraboloid_mode &&
-                       probe_distance_limit>0.0f &&
+                       model_distance_limit>0.0f &&
                        reflection_probe_bounds_outside_range(
                            modelview,group.bounds_min,group.bounds_max,
-                           probe_distance_limit)) {
+                           model_distance_limit)) {
                         ++total_model_groups_culled;continue;
                     }
                     if(!paraboloid_mode &&
@@ -1305,6 +1343,7 @@
                          " groups_backface_culled=",total_model_backface_culled,
                          " world_bounds_culled=",total_world_bounds_culled,
                          " thing_range_culled=",total_thing_range_culled,
+                         " shared_range_exempt_nodes=",shared_range_exempt_nodes,
                          " scene_preparations=",capture_scene_preps,
                          " acquired_nodes=",total_acquired_nodes,
                          " cached_owners=",reflection_probes.size());

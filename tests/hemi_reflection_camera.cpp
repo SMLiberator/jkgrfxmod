@@ -113,14 +113,22 @@ int main() {
         {{200.0f,0.0f,0.0f}},1.0f,origin,100.0f));
     assert(!jkgm::dual_paraboloid_sphere_outside_distance(
         {{100.0f,0.0f,0.0f}},2.0f,origin,100.0f));
-    // Dedicated HEMI/CUBE distance limits never leak to general-purpose
-    // shared, planar or one-time COG environment captures.
+    // Shared ranges only non-LEVELGEO Things. Dedicated Cube/Hemi
+    // still range all Things; Planar and one-shot EnvMap remain unlimited.
     assert(jkgm::reflection_probe_capture_distance_limit(
         5,false,false,64.0f)==64.0f);
     assert(jkgm::reflection_probe_capture_distance_limit(
         6,false,false,128.0f)==128.0f);
     assert(jkgm::reflection_probe_capture_distance_limit(
-        7,false,true,64.0f)==0.0f);
+        7,false,true,64.0f)==64.0f);
+    assert(jkgm::reflection_probe_thing_distance_limit(
+        4.0f,true,true,0x8U)==0.0f);
+    assert(jkgm::reflection_probe_thing_distance_limit(
+        4.0f,true,true,0U)==4.0f);
+    assert(jkgm::reflection_probe_thing_distance_limit(
+        4.0f,true,false,0U)==0.0f);
+    assert(jkgm::reflection_probe_thing_distance_limit(
+        4.0f,false,true,0x8U)==4.0f);
     assert(jkgm::reflection_probe_capture_distance_limit(
         6,true,false,64.0f)==0.0f);
     assert(jkgm::reflection_probe_capture_distance_limit(
@@ -139,8 +147,8 @@ int main() {
     assert(!jkgm::dual_paraboloid_bounds_outside(
         up_view,{{200.0f,0.0f,-0.5f}},
         {{205.0f,1.0f,0.5f}},0.0f));
-    // Cube range culling uses radial transformed bounds too, and is disabled
-    // entirely for shared/global environments (radius=0).
+    // Range culling uses radial bounds and is disabled only for global
+    // captures, exempt Shared owners and explicit unlimited modes.
     assert(jkgm::reflection_probe_bounds_outside_range(
         up_view,{{200.0f,0.0f,0.0f}},{{202.0f,1.0f,1.0f}},64.0f));
     assert(!jkgm::reflection_probe_bounds_outside_range(

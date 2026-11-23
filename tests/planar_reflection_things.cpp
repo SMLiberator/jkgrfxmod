@@ -58,6 +58,7 @@ int main()
     assert(scan.sectors==2 && scan.linked_things==3);
     assert(scan.excluded_flags==1 && scan.models.size()==2);
     assert(scan.models[0].thing==a && scan.models[1].thing==c);
+    assert(scan.models[0].thing_flags==0U);
     assert(scan.models[1].index==3 && scan.models[1].signature==103);
     assert(scan.models[1].position[0]==3.0f);
     assert(scan.models[0].current_geometry_mode==4U);
@@ -113,6 +114,7 @@ int main()
     put(a+0x00U,uint32_t(0x8U));
     assert(collect_planar_reflection_things(get,world,scan));
     assert(scan.models.size()==2 && scan.excluded_flags==1U);
+    assert(scan.models[0].thing_flags==0x8U);
     put(a+0x00U,uint32_t(0));
 
     // A cycle must fail closed and clear all partial output.

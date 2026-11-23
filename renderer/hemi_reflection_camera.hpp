@@ -6,18 +6,28 @@
 #include "dual_paraboloid_projection.hpp"
 #include <array>
 #include <cmath>
+#include <cstdint>
 
 namespace jkgm {
-// Distance is an optional quality/performance policy only for independently
-// captured per-Thing probes. Shared, planar, and explicit CaptureEnvMap
-// should never acquire an arbitrary local-probe distance cutoff.
+// Dedicated Cube/Hemi range all native Things. Shared ranges only ordinary
+// Things; LEVELGEO (0x8), world surfaces and sky stay unrestricted.
 inline float reflection_probe_capture_distance_limit(
     int mode,bool global_capture,bool shared_capture,float configured)
 {
-    if(global_capture || shared_capture || (mode!=5 && mode!=6) ||
+    if(global_capture ||
+       (mode!=5 && mode!=6 && !(shared_capture && mode==7)) ||
        !std::isfinite(configured) || configured<=0.0f)
         return 0.0f;
     return configured;
+}
+// Invalid native identities fail open. LEVELGEO is a Thing flag (0x8),
+// not a Thing type or hide flag.
+inline float reflection_probe_thing_distance_limit(
+    float configured_limit,bool shared_capture,
+    bool flags_known,uint32_t flags)
+{
+    return shared_capture &&
+        (!flags_known || (flags&0x8U)!=0U) ?0.0f:configured_limit;
 }
 // Fixed world-axis cubemap orientation. Each square 90-degree perspective
 // view captures one layer of a single GL_TEXTURE_2D_ARRAY. Unlike the hemi
