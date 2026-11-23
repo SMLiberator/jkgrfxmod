@@ -381,6 +381,18 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             j.at("experimental_shared_hemi").get_to(
                 rv->experimental_shared_hemi);
         }
+        if(j.contains("debug_reflection_mode")) {
+            auto const &v=j.at("debug_reflection_mode");
+            if(!v.is_string())throw std::runtime_error(
+                "debug_reflection_mode must be off, cube, hemi, or shared");
+            rv->debug_reflection_mode=v.get<std::string>();
+            if(rv->debug_reflection_mode!="off" &&
+               rv->debug_reflection_mode!="cube" &&
+               rv->debug_reflection_mode!="hemi" &&
+               rv->debug_reflection_mode!="shared")
+                throw std::runtime_error(
+                    "debug_reflection_mode must be off, cube, hemi, or shared");
+        }
         if(j.contains("reflection_capture_resolution")) {
             auto const &v=j.at("reflection_capture_resolution");
             if(!v.is_number_integer())

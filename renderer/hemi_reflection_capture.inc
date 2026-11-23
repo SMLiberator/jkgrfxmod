@@ -44,7 +44,11 @@
             // on ordinary GL 3.3 hardware with fewer fragment texture units.
             bool const realtime_supported=fragment_units>23 &&
                 the_config->enable_reflection_capture;
-            if(!realtime_supported && !capture_global) {
+            // Debug capture needs only the base material samplers, and works
+            // without a visible reflective MAT or the realtime-probe switch.
+            bool const debug_supported=fragment_units>=2 &&
+                the_config->debug_reflection_mode!="off";
+            if(!realtime_supported && !debug_supported && !capture_global) {
                 reflection_probes.clear();
                 return;
             }
@@ -57,6 +61,7 @@
                 uint64_t exclude_owner=0U;
                 bool is_global=false;
                 bool is_shared=false;
+                bool is_debug=false;
             };
             auto const shared_search_started=the_config->profile_renderer
                 ?profile_clock::now():profile_clock::time_point{};
@@ -227,6 +232,8 @@
                     else if(shared_material_seen)++diag.eligibility_culled_frames;
                 }
             }
+            if(the_config->debug_reflection_mode=="shared" && debug_supported)
+                shared_requested=true;
             if(shared_requested) {
                 candidate shared{};
                 shared.owner=shared_reflection_owner_key;
@@ -243,6 +250,20 @@
                 // occurs while dormant; seen_frame prevents stale sampling.
                 // World changes and disabled captures still clear this cache.
                 active_owners.insert(shared_reflection_owner_key);
+            }
+            // The projected diagnostic view follows the camera position, not
+            // a real owner. It is independent of material visibility and the
+            // normal per-Thing probe count/distance limit.
+            if(debug_supported &&
+               (the_config->debug_reflection_mode=="cube" ||
+                the_config->debug_reflection_mode=="hemi")) {
+                candidate debug{};
+                debug.owner=debug_reflection_owner_key;
+                debug.mode=the_config->debug_reflection_mode=="hemi"?5:6;
+                debug.position=viewer.position;
+                debug.is_debug=true;
+                candidates.push_back(debug);
+                active_owners.insert(debug.owner);
             }
             // Free targets belonging to missing/non-selected owners, including
             // destroyed Things; the cached images cannot leak across worlds.
@@ -351,7 +372,7 @@
                     ?*paraboloid_capture_program:*hemi_capture_program;
                 // Project the full scene. The dedicated Hemi/Cube distance
                 // budget applies only to Things, not to world geometry.
-                float const probe_distance_limit=
+                float const probe_distance_limit=candidate.is_debug?0.0f:
                     reflection_probe_capture_distance_limit(
                         selected_mode,candidate.is_global,candidate.is_shared,
                         the_config->reflection_probe_max_distance);
@@ -371,8 +392,9 @@
                     !entry.target || !entry.target->ready() ||
                     entry.target->width()!=output_side ||
                     entry.target->layers()!=output_layers;
-                float const interval=candidate.is_global?0.0f:
-                    the_config->reflection_capture_update_interval;
+                float const interval=(candidate.is_global || candidate.is_debug ||
+                    (candidate.is_shared && the_config->debug_reflection_mode=="shared"))
+                    ?0.0f:the_config->reflection_capture_update_interval;
                 if(entry.ready && !needs_reconfigure && interval>0.0f &&
                    std::chrono::duration<float>(
                        now-entry.last_refresh).count()<interval)

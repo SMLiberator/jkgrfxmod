@@ -118,6 +118,7 @@ not all options appear in the minimal sample `assets/jkgm.json`.
 
 | Setting | Effect | Default |
 | --- | --- | --- |
+| `debug_reflection_mode` | Project the real camera-centered capture onto the entire gameplay viewport by world ray direction: `off`, `cube` (six fixed-axis faces), `hemi` (two fixed +Z/-Z paraboloid disks), or `shared` (the current Shared projection, including `experimental_shared_hemi`). Debug Cube/Hemi captures ignore per-Thing distance and ownership limits, refresh each frame, and work without a reflective MAT in view; Shared is forced active. The viewer displays unroughened mip-zero radiance, not a material\u2019s Fresnel/specular response; magenta means missing capture coverage. Menus remain unchanged, and the final screenshot contains this debug view. Requires GPU world cache and enabled master reflections. Culling/unculling comparisons are not yet part of this option. | `off` |
 | `enable_post` | Master switch for renderer post-processing effects. | `true` |
 | `enable_sun` | Enable additional COG-controlled directional sunlight; independent of `enable_sun_shadows`. | `true` |
 | `experimental_sun_caustics` | Experimental sunlight transmission through Fluid world and 3DO faces, excluding sprites. One generated procedural texture with mipmaps; the existing Fluid `fluid_thickness` controls distance-dependent attenuation and softness. Requires `enable_sun` and `enable_sun_shadows`; no new material keys. | `false` |

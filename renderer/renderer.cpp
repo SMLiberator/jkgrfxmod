@@ -23,6 +23,7 @@
 #include "offscreen_capture_target.hpp"
 #include "offscreen_capture_projection.hpp"
 #include "planar_reflection_capture_shader.hpp"
+#include "reflection_debug_view_shader.hpp"
 #include "planar_receiver_visibility.hpp"
 #include "gpu_thing_occlusion.hpp"
 #include "sprite_flare_projection.hpp"
@@ -741,6 +742,8 @@ namespace jkgm {
         std::map<uint64_t,reflection_probe_entry> reflection_probes;
         // Singleton reserved owner for the camera-centered shared probe.
         static constexpr uint64_t shared_reflection_owner_key=~uint64_t(0);
+        static constexpr uint64_t debug_reflection_owner_key=~uint64_t(1);
+        std::unique_ptr<reflection_debug_view_shader> reflection_debug_view_program;
         // Authored metadata stays unchanged; only sampling/capture changes.
         // Explicit CaptureEnvMap remains an independent COG operation.
         int effective_capture_reflection_mode(int mode) const {
@@ -1970,6 +1973,7 @@ namespace jkgm {
                 planar_capture_target.reset();
                 camera_to_mat_targets.clear();
                 reflection_probes.clear();
+                reflection_debug_view_program.reset();
                 reflection_world_buckets.invalidate();
                 reflection_sky_candidates.clear();
                 reflection_sky_frame=~uint64_t(0);
@@ -2822,6 +2826,53 @@ namespace jkgm {
             }
         }
 
+        // Display the captured environment in the actual gameplay camera
+        // orientation. This is an output-only pass; JK camera/simulation, and
+        // the fixed-world orientation of the reflection capture, are untouched.
+        void draw_reflection_debug_view()
+        {
+            auto const &debug=the_config->debug_reflection_mode;
+            if(debug=="off" || mode!=renderer_mode::ingame || !ogs ||
+               !frame_world_cache_camera.valid ||
+               !frame_world_cache_camera.camera.valid)return;
+            uint64_t const owner=debug=="shared"
+                ?shared_reflection_owner_key:debug_reflection_owner_key;
+            auto const it=reflection_probes.find(owner);
+            if(it==reflection_probes.end() || !it->second.ready ||
+               it->second.seen_frame!=gpu_3do_present_serial ||
+               !it->second.target || !it->second.target->ready())return;
+            bool const hemi=it->second.target->layers()==2;
+            if(!hemi && it->second.target->layers()!=6)return;
+            if(!reflection_debug_view_program)
+                reflection_debug_view_program=
+                    std::make_unique<reflection_debug_view_shader>(
+                        the_config->data_path);
+            auto &shader=*reflection_debug_view_program;
+            gl::bind_framebuffer(gl::framebuffer_bind_target::any,
+                                 gl::default_framebuffer);
+            gl::set_viewport(make_box(make_point(0,0),conf_scr_res));
+            glDisable(GL_SCISSOR_TEST);
+            glDisable(GL_STENCIL_TEST);
+            gl::disable(gl::capability::blend);
+            gl::disable(gl::capability::depth_test);
+            gl::disable(gl::capability::cull_face);
+            gl::enable(gl::capability::framebuffer_srgb);
+            gl::set_depth_mask(false);
+            shader.use_program();
+            shader.set_sampler(0);
+            shader.set_projection(hemi);
+            shader.set_camera(frame_world_cache_camera.camera,
+                get<x>(conf_scr_res),get<y>(conf_scr_res));
+            gl::set_active_texture_unit(0);
+            gl::bind_texture_raw(GL_TEXTURE_2D_ARRAY,
+                                 it->second.target->color_texture());
+            gl::bind_vertex_array(ogs->postmdl.vao);
+            gl::draw_elements(gl::element_type::triangles,
+                ogs->postmdl.num_indices,gl::index_type::uint32);
+            gl::set_depth_mask(true);
+            gl::invalidate_cached_state();
+        }
+
         void end_frame()
         {
             bool const presenting_menu = menu_frame_pending ||
@@ -3036,6 +3087,9 @@ namespace jkgm {
                 // Never quantize menus (their independent presentation path
                 // returned earlier). Exactly one final LUT pass in gameplay.
                 present_retro_after_hud();
+                // Debug view replaces the final gameplay image, including HUD.
+                // Screenshot hotkeys therefore capture the projected probe.
+                draw_reflection_debug_view();
                 if(gpu_timing)present_gpu_queries.timestamp(2U,false);
             }
             if(gpu_timing)present_gpu_queries.end();

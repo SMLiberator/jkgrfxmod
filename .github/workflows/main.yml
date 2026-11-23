@@ -262,6 +262,7 @@ jobs:
       run: |
         python3 tests/shared_reflection_wiring.py
         python3 tests/experimental_shared_hemi.py
+        python3 tests/reflection_debug_view.py
     - name: GPU 3DO parallel visibility A/B
       shell: cmd
       run: |
