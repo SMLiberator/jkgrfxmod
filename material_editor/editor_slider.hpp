@@ -15,8 +15,9 @@ inline bool sliderFloat(const char *label,float *value,float min,float max,
         ImGuiContext &context=*GImGui;
         const ImGuiID id=window->GetID(label);
         const ImVec2 topLeft=window->DC.CursorPos;
-        const ImVec2 bottomRight=topLeft+ImVec2(
-            ImGui::CalcItemWidth(),ImGui::GetFrameHeight());
+        const ImVec2 bottomRight(
+            topLeft.x+ImGui::CalcItemWidth(),
+            topLeft.y+ImGui::GetFrameHeight());
         if(context.IO.MouseClickedCount[ImGuiMouseButton_Left]==2&&
            ImGui::IsMouseHoveringRect(topLeft,bottomRight)&&
            ImGui::TestKeyOwner(ImGuiKey_MouseLeft,id)) {
