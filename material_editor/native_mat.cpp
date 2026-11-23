@@ -60,34 +60,55 @@ std::uint8_t scale6(unsigned value) {
 }
 
 void NativeMatSource::setRoot(const std::string &directory) {
-    root_=directory;files_.clear();
-    if(root_.empty())return;
-    fs::path base=fs::u8path(root_);
-    std::error_code ec;
-    if(!fs::is_directory(base,ec))return;
-    // GOB and GOO files use the same MAT resource naming as the compiler's VFS.
-    for(fs::recursive_directory_iterator it(base,fs::directory_options::skip_permission_denied,ec),end;
-        it!=end && !ec;it.increment(ec)) {
-        if(!it->is_regular_file(ec))continue;
-        std::string ext=normalize(it->path().extension().u8string());
-        if(ext==".gob"||ext==".goo")indexArchive(it->path());
+    setRoots(directory.empty()?std::vector<std::string>{}:
+             std::vector<std::string>{directory});
+}
+void NativeMatSource::setRoots(const std::vector<std::string> &directories) {
+    roots_.clear();
+    files_.clear();
+    // Normalize and de-duplicate roots before scanning. Do not index the
+    // same folder twice, but preserve the priority order chosen by the user.
+    for(const auto &name:directories) {
+        if(name.empty())continue;
+        const auto full=fs::absolute(fs::u8path(name)).lexically_normal().u8string();
+        if(std::find(roots_.begin(),roots_.end(),full)==roots_.end())
+            roots_.push_back(full);
     }
-    ec.clear();
-    // Loose files take priority over resources packed inside archives.
-    for(fs::recursive_directory_iterator it(base,fs::directory_options::skip_permission_denied,ec),end;
-        it!=end && !ec;it.increment(ec)) {
-        if(!it->is_regular_file(ec))continue;
-        std::string ext=normalize(it->path().extension().u8string());
-        if(ext!=".mat"&&ext!=".cmp")continue;
-        auto relative=fs::relative(it->path(),base,ec);
-        if(ec)break;
-        std::string key=normalize(relative.generic_u8string());
-        if(key.find("..")!=std::string::npos)continue;
-        files_[key]={it->path(),0,0,false};
-        // Game assets often live in a subdirectory below the selected root.
-        // Keep a basename-only alias when no direct resource matches.
-        files_.emplace(normalize(it->path().filename().u8string()),
-                       Entry{it->path(),0,0,false});
+    // Build from lowest to highest priority. For each root use an isolated
+    // map so local loose files win over local GOB/GOO entries, then merge
+    // only names not available in the higher-priority root.
+    for(auto folder=roots_.rbegin();folder!=roots_.rend();++folder) {
+        auto lowerPriority=std::move(files_);
+        files_.clear();
+        const fs::path base=fs::u8path(*folder);
+        std::error_code ec;
+        if(fs::is_directory(base,ec)) {
+            for(fs::recursive_directory_iterator it(
+                    base,fs::directory_options::skip_permission_denied,ec),end;
+                it!=end&&!ec;it.increment(ec)) {
+                if(!it->is_regular_file(ec))continue;
+                const std::string ext=normalize(it->path().extension().u8string());
+                if(ext==".gob"||ext==".goo")indexArchive(it->path());
+            }
+            ec.clear();
+            // Loose MAT/CMP files override this folder's archives.
+            for(fs::recursive_directory_iterator it(
+                    base,fs::directory_options::skip_permission_denied,ec),end;
+                it!=end&&!ec;it.increment(ec)) {
+                if(!it->is_regular_file(ec))continue;
+                const std::string ext=normalize(it->path().extension().u8string());
+                if(ext!=".mat"&&ext!=".cmp")continue;
+                const auto relative=fs::relative(it->path(),base,ec);
+                if(ec)break;
+                const std::string key=normalize(relative.generic_u8string());
+                if(key.find("..")!=std::string::npos)continue;
+                files_[key]={it->path(),0,0,false};
+                files_.emplace(normalize(it->path().filename().u8string()),
+                               Entry{it->path(),0,0,false});
+            }
+        }
+        for(const auto &entry:lowerPriority)
+            files_.emplace(entry.first,entry.second);
     }
 }
 void NativeMatSource::setPalette(const std::string &file) {
@@ -173,15 +194,15 @@ bool NativeMatSource::readAsset(const std::string &name,
 bool NativeMatSource::load(const std::string &matName,int cel,
                            NativeMatImage &out,std::string &error) const {
     out={};
-    if(root_.empty()) {
-        error="Choose a JK/MotS assets folder to locate the original MAT.";
+    if(roots_.empty()) {
+        error="Add a JK/MotS assets folder under File to locate the original MAT.";
         return false;
     }
     try {
         std::vector<std::uint8_t> bytes;
         std::string source;
         if(!readAsset(matName,bytes,source)) {
-            error="MAT not found in selected assets folder: "+matName;
+            error="MAT not found in configured assets folders: "+matName;
             return false;
         }
         if(bytes.size()<76||std::memcmp(bytes.data(),"MAT ",4)!=0)
