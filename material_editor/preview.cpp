@@ -287,6 +287,8 @@ MaterialPreview::MaterialPreview() {
     reloadImages();
 }
 MaterialPreview::~MaterialPreview() {
+    for(auto &channels:channelTextures_)
+        glDeleteTextures(GLsizei(channels.size()),channels.data());
     glDeleteTextures(GLsizei(textures_.size()),textures_.data());
     if(output_)glDeleteTextures(1,&output_);
     if(depth_)glDeleteRenderbuffers(1,&depth_);
@@ -310,7 +312,8 @@ GLuint MaterialPreview::compileShader(GLenum type,const char *source) {
     }
     return sh;
 }
-GLuint MaterialPreview::loadTexture(const std::string &filename,bool srgb) {
+GLuint MaterialPreview::loadTexture(const std::string &filename,bool srgb,
+                                    PreviewImageInfo *details) {
     if(filename.empty())return 0;
     int w=0,h=0,channels=0;
     // Native Windows paths may contain non-ASCII characters. Decode the
@@ -338,8 +341,73 @@ GLuint MaterialPreview::loadTexture(const std::string &filename,bool srgb) {
     glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR_MIPMAP_LINEAR);
     glGenerateMipmap(GL_TEXTURE_2D);
+    if(details) {
+        details->width=w;
+        details->height=h;
+        details->channels=channels;
+        details->bytes=bytes.size();
+    }
     stbi_image_free(pixels);
     return t;
+}
+GLuint MaterialPreview::channelTexture(PreviewTexture slot,int channel) {
+    if(channel<0||channel>3||!imageInfo_[slot].valid())return 0;
+    GLuint &cached=channelTextures_[slot][size_t(channel)];
+    if(cached)return cached;
+    const PreviewImageInfo &info=imageInfo_[slot];
+    const int maxDimension=256;
+    const double scale=std::min(1.0,
+        double(maxDimension)/double(std::max(info.width,info.height)));
+    const int outWidth=std::max(1,int(std::round(info.width*scale)));
+    const int outHeight=std::max(1,int(std::round(info.height*scale)));
+    std::vector<unsigned char> pixels(size_t(outWidth)*outHeight*4);
+    const bool native=slot==BaseMap&&!material_.nativeRGBA.empty();
+    std::vector<unsigned char> bytes;
+    unsigned char *decoded=nullptr;
+    int w=0,h=0,ch=0;
+    if(!native) {
+        const std::string file=slot==EnvironmentMap?
+            (envOverride_.empty()?material_.files[slot]:envOverride_):
+            material_.files[slot];
+        std::ifstream source(std::filesystem::u8path(file),std::ios::binary);
+        if(!source)return 0;
+        bytes.assign(std::istreambuf_iterator<char>(source),
+                     std::istreambuf_iterator<char>());
+        if(bytes.empty()||
+           bytes.size()>static_cast<size_t>(std::numeric_limits<int>::max()))
+            return 0;
+        stbi_set_flip_vertically_on_load(1);
+        decoded=stbi_load_from_memory(
+            bytes.data(),int(bytes.size()),&w,&h,&ch,4);
+        if(!decoded)return 0;
+    } else {
+        w=material_.nativeWidth;
+        h=material_.nativeHeight;
+        if(material_.nativeRGBA.size()!=size_t(w)*h*4)return 0;
+    }
+    for(int y=0;y<outHeight;++y)for(int x=0;x<outWidth;++x) {
+        const int sx=std::min(w-1,int(double(x)*w/outWidth));
+        const int sy=std::min(h-1,int(double(y)*h/outHeight));
+        // Native MAT RGBA comes top-left first; stb decodes bottom-first.
+        const int sourceY=native?h-1-sy:sy;
+        const auto offset=(size_t(sourceY)*w+sx)*4;
+        const auto value=native?material_.nativeRGBA[offset+channel]:
+                                decoded[offset+channel];
+        const auto dest=(size_t(y)*outWidth+x)*4;
+        pixels[dest]=pixels[dest+1]=pixels[dest+2]=value;
+        pixels[dest+3]=255;
+    }
+    if(decoded)stbi_image_free(decoded);
+    glGenTextures(1,&cached);
+    glBindTexture(GL_TEXTURE_2D,cached);
+    glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA8,outWidth,outHeight,0,
+                 GL_RGBA,GL_UNSIGNED_BYTE,pixels.data());
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
+    glBindTexture(GL_TEXTURE_2D,0);
+    return cached;
 }
 GLuint MaterialPreview::createPreset() {
     const int w=512,h=256;
@@ -392,18 +460,30 @@ GLuint MaterialPreview::uploadNativeAlbedo() {
     return tex;
 }
 void MaterialPreview::reloadImages() {
+    for(auto &channels:channelTextures_) {
+        glDeleteTextures(GLsizei(channels.size()),channels.data());
+        channels.fill(0);
+    }
     glDeleteTextures(GLsizei(textures_.size()),textures_.data());
     textures_.fill(0);
+    imageInfo_.fill({});
     for(size_t i=0;i<textures_.size();++i) {
         if(i==EnvironmentMap)continue;
         const bool srgb=(i==BaseMap||i==EmissiveMap||i==MatcapMap);
-        if(i==BaseMap&&!material_.nativeRGBA.empty())
+        if(i==BaseMap&&!material_.nativeRGBA.empty()) {
             textures_[i]=uploadNativeAlbedo();
-        else
-            textures_[i]=loadTexture(material_.files[i],srgb);
+            if(textures_[i]) {
+                imageInfo_[i].width=material_.nativeWidth;
+                imageInfo_[i].height=material_.nativeHeight;
+                imageInfo_[i].channels=4;
+                imageInfo_[i].bytes=material_.nativeRGBA.size();
+            }
+        } else
+            textures_[i]=loadTexture(material_.files[i],srgb,&imageInfo_[i]);
     }
     std::string envfile=envOverride_.empty()?material_.files[EnvironmentMap]:envOverride_;
-    textures_[EnvironmentMap]=loadTexture(envfile,true);
+    textures_[EnvironmentMap]=loadTexture(
+        envfile,true,&imageInfo_[EnvironmentMap]);
     loadedEnvironmentFile_=textures_[EnvironmentMap]!=0;
     const char *presetNames[]={"Studio","Outdoor","Night"};
     const char *fallbackName=presetNames[std::clamp(preset_,0,2)];
