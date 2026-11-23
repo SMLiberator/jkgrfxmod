@@ -140,6 +140,7 @@
     <ClInclude Include="gpu_3do_index_coalescing.hpp" />
     <ClInclude Include="gpu_3do_instancing_audit.hpp" />
     <ClInclude Include="gpu_3do_parallel_visibility.hpp" />
+    <ClInclude Include="reflection_capture_parallel_visibility.hpp" />
     <ClInclude Include="cpu_render_workers.hpp" />
     <ClInclude Include="gpu_3do_packed_vertex.hpp" />
     <ClInclude Include="gpu_3do_auto_lod.hpp" />
