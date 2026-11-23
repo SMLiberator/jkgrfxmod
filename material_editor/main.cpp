@@ -857,6 +857,14 @@ private:
         filter_.Clear(); // Ensure a newly created material is visible.
         changedMaterials("Add material",oldSelection);
     }
+    void duplicateSelectedMaterial() {
+        if(!validSelection())return;
+        const int oldSelection=selection_;
+        selection_=static_cast<int>(editor_source::duplicateMaterial(
+            root_,size_t(selection_)));
+        filter_.Clear(); // A search must not hide the newly selected copy.
+        changedMaterials("Duplicate material",oldSelection);
+    }
     void removeSelectedMaterial() {
         if(!validSelection())return;
         const int oldSelection=selection_;
@@ -1200,10 +1208,16 @@ private:
                         }
                     }
                     ImGui::EndChild();
-                    if(ImGui::Button("Add material"))addNewMaterial();
+                    if(ImGui::Button("Add"))addNewMaterial();
+                    if(ImGui::IsItemHovered())
+                        ImGui::SetTooltip("Create a new, empty material.");
                     ImGui::SameLine();
                     ImGui::BeginDisabled(!validSelection());
-                    if(ImGui::Button("Remove material"))
+                    if(ImGui::Button("Duplicate"))duplicateSelectedMaterial();
+                    if(ImGui::IsItemHovered())
+                        ImGui::SetTooltip("Duplicate the selected material with its maps, MAT targets, and settings.");
+                    ImGui::SameLine();
+                    if(ImGui::Button("Remove"))
                         ImGui::OpenPopup("Remove selected material?");
                     ImGui::EndDisabled();
                     if(ImGui::BeginPopupModal("Remove selected material?",
@@ -1310,11 +1324,17 @@ private:
 
             ImGui::TableNextColumn();
             ImGui::TextDisabled("LIGHTING");
-            ImGui::SetNextItemWidth(-1.0f);
+            ImGui::SetNextItemWidth(std::max(100.0f,
+                ImGui::GetContentRegionAvail().x-53.0f));
             ImGui::SliderFloat("##lightingIntensity",&lightingIntensity_,
                                0.0f,2.0f,"Intensity: %.2fx");
             if(ImGui::IsItemHovered())
-                ImGui::SetTooltip("Preview lighting only. Emissive maps and EnvMap reflections remain unchanged.");
+                ImGui::SetTooltip("Double-click to enter a value. Preview lighting only; emissive and EnvMap reflections stay unchanged.");
+            ImGui::SameLine();
+            if(ImGui::SmallButton("Reset##lightIntensity"))
+                lightingIntensity_=1.0f;
+            if(ImGui::IsItemHovered())
+                ImGui::SetTooltip("Restore the default preview lighting (1.00x).");
             ImGui::TableNextColumn();
             ImGui::TextDisabled("ANIMATION & VIEW");
             ImGui::Checkbox("Animate",&animationPlaying_);
