@@ -69,6 +69,84 @@ void testPortableIni(const fs::path &base) {
           "INI save after load dropped a root");
     ImGui::DestroyContext();
 }
+void testRecentPacks(const fs::path &base) {
+    const auto exe=base/"portable"/"editor";
+    const auto packs=exe/"packs";
+    fs::create_directories(packs);
+    const auto first=packs/"script.json";
+    const auto second=base/"external"/"metadata.json";
+    fs::create_directories(second.parent_path());
+    for(const auto &path:{first,second}) {
+        std::ofstream stream(path,std::ios::binary);
+        stream<<"{}";
+    }
+    editor_ini::Settings original;
+    original.exeDirectory=exe;
+    editor_ini::rememberRecent(original,first.u8string());
+    editor_ini::rememberRecent(original,second.u8string());
+    editor_ini::rememberRecent(original,first.u8string());
+    check(original.recentPacks.size()==2,
+          "Repeated opens must not create duplicate entries");
+    check(original.recentPacks.front()==first.u8string(),
+          "Reopening a pack must move it to the top");
+    check(original.recentPacks.back()==second.u8string(),
+          "Other recent packs must retain their relative order");
+    // Normalized spelling, including Windows ASCII case insensitivity.
+    const auto dotted=(packs/"sub"/".."/"script.json").u8string();
+    editor_ini::rememberRecent(original,dotted);
+    check(original.recentPacks.size()==2&&
+          original.recentPacks.front()==first.u8string(),
+          "Equivalent lexical paths must not create duplicates");
+    check(editor_ini::sameRecentPath("C:/Packs/SCRIPT.JSON",
+                                    "c:/packs/script.json"),
+          "Windows paths must be de-duplicated case insensitively");
+    // The history cap should evict the oldest, without creating empty slots.
+    for(int i=0;i<12;++i) {
+        const auto path=packs/("extra_"+std::to_string(i)+".json");
+        std::ofstream file(path);
+        file<<"{}";
+        editor_ini::rememberRecent(original,path.u8string());
+    }
+    check(original.recentPacks.size()==editor_ini::maxRecentPacks,
+          "Recent history must be bounded to ten files");
+    check(original.recentPacks.front()==
+          (packs/"extra_11.json").u8string(),
+          "Most recently opened pack must be first");
+    check(original.recentPacks.back()==
+          (packs/"extra_2.json").u8string(),
+          "Least recent entry should be evicted first");
+
+    ImGui::CreateContext();
+    editor_ini::install(original);
+    const std::string ini=ImGui::SaveIniSettingsToMemory();
+    check(ini.find("Recent=relative:packs/extra_11.json")!=std::string::npos,
+          "Portable recent pack should be saved relative to EXE");
+    check(ini.find("Recent=relative:packs/extra_2.json")!=std::string::npos,
+          "History should retain the tenth item");
+    ImGui::DestroyContext();
+
+    editor_ini::Settings loaded;
+    loaded.exeDirectory=exe;
+    ImGui::CreateContext();
+    editor_ini::install(loaded);
+    ImGui::LoadIniSettingsFromMemory(ini.c_str(),ini.size());
+    check(loaded.hasIniSection&&
+          loaded.recentPacks==original.recentPacks,
+          "Recent pack ordering and paths must survive INI round-trip");
+    ImGui::DestroyContext();
+
+    fs::remove(packs/"extra_11.json");
+    check(editor_ini::removeMissingRecent(loaded)==1,
+          "Missing-file cleanup must remove only unavailable paths");
+    check(loaded.recentPacks.size()==9 &&
+          loaded.recentPacks.front()==(packs/"extra_10.json").u8string(),
+          "Missing-file cleanup must preserve remaining ordering");
+    check(editor_ini::removeMissingRecent(loaded)==0,
+          "Repeated missing-file cleanup should be a no-op");
+    loaded.recentPacks.clear();
+    check(loaded.recentPacks.empty(),
+          "Clear Recent should leave an empty history");
+}
 void writeColorMat(const fs::path &path) {
     // Small valid 16-bit MAT: type-0 solid cel (no image records).
     // It can be decoded without a CMP, making search precedence testable.
@@ -235,6 +313,7 @@ int main() {
     try {
         Sandbox temp;
         testPortableIni(temp.base);
+        testRecentPacks(temp.base);
         testRootPriority(temp.base);
         testCompiledMatSignatures(temp.base);
         std::cout<<"Portable INI and multi-root MAT tests passed\n";
