@@ -2140,63 +2140,68 @@ private:
             const bool valid=editor_source::readMatReplacement(
                 entries[i],mode_,replacement);
             if(!valid)ImGui::TextDisabled("Unsupported replacement record");
-            if(isSource()) {
-                // Preserve the author's short-string vs [path,cel] form
-                // unless explicitly selecting a nonzero cel.
-                std::string path=replacement.name;
-                ImGui::TextDisabled("MAT %zu",i+1);
-                ImGui::SameLine();
-                ImGui::SetNextItemWidth(-1.0f);
-                if(ImGui::InputTextWithHint("##matPath","mat/example.mat",&path)) {
-                    replacement.name=path;
+            std::string path=replacement.name;
+            ImGui::TextDisabled("MAT %zu",i+1);
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth(-1.0f);
+            if(ImGui::InputTextWithHint("##matPath","mat/example.mat",&path)) {
+                replacement.name=path;
+                if(isSource())
                     selected()["replaces"][i]=
                         editor_source::writeSourceMatReplacement(replacement);
-                    changed("replaces",ImGui::IsItemActive());
+                else {
+                    Document &entry=selected()["replaces"][i];
+                    if(!entry.is_object())entry=Document::object();
+                    entry["name"]=path;
+                    entry["cel"]=replacement.cel;
                 }
-                int cel=replacement.cel;
-                ImGui::SetNextItemWidth(120.0f);
-                if(ImGui::InputInt("Cel",&cel)) {
-                    if(cel>=0) {
-                        replacement.cel=cel;
-                        replacement.specificCel|=cel!=0;
-                        selected()["replaces"][i]=
-                            editor_source::writeSourceMatReplacement(replacement);
-                        changed("replaces",ImGui::IsItemActive());
-                    }
-                }
-                if(ImGui::IsItemHovered())
-                    ImGui::SetTooltip("Cel 0 is used for plain MAT filenames.");
-                ImGui::SameLine();
-                ImGui::BeginDisabled(entries.size()<=1);
-                if(ImGui::SmallButton("Remove")&&entries.size()>1) {
-                    selected()["replaces"].erase(i);
-                    changed("replaces");
-                    ImGui::EndDisabled();
-                    ImGui::PopID();
-                    break;
-                }
-                ImGui::EndDisabled();
-                if(path.empty())
-                    ImGui::TextColored(ImVec4(1.0f,.65f,.35f,1.0f),
-                                       "Enter a MAT filename before saving.");
-            } else {
-                if(valid)
-                    ImGui::TextWrapped("%zu. %s  (cel %d)",
-                        i+1,replacement.name.c_str(),replacement.cel);
+                changed("replaces",ImGui::IsItemActive());
             }
+            int cel=replacement.cel;
+            ImGui::SetNextItemWidth(120.0f);
+            if(ImGui::InputInt("Cel",&cel) && cel>=0) {
+                replacement.cel=cel;
+                replacement.specificCel|=cel!=0;
+                if(isSource())
+                    selected()["replaces"][i]=
+                        editor_source::writeSourceMatReplacement(replacement);
+                else {
+                    Document &entry=selected()["replaces"][i];
+                    if(!entry.is_object())entry=Document::object();
+                    entry["name"]=replacement.name;
+                    entry["cel"]=cel;
+                }
+                changed("replaces",ImGui::IsItemActive());
+            }
+            if(ImGui::IsItemHovered())
+                ImGui::SetTooltip("Cel 0 is used for MAT filenames without a cel index.");
+            ImGui::SameLine();
+            ImGui::BeginDisabled(entries.size()<=1);
+            const bool removed=ImGui::SmallButton("Remove")&&entries.size()>1;
+            ImGui::EndDisabled();
+            if(removed) {
+                selected()["replaces"].erase(i);
+                changed("replaces");
+                ImGui::PopID();
+                break;
+            }
+            if(path.empty())
+                ImGui::TextColored(ImVec4(1.0f,.65f,.35f,1.0f),
+                                   "Specify a MAT filename before saving.");
             ImGui::PopID();
             if(i+1<entries.size())ImGui::Separator();
         }
-        if(isSource()) {
-            if(ImGui::Button("Add MAT replacement")) {
-                // Empty until authored; source validation prevents saving an
-                // unfinished entry instead of fabricating a real MAT path.
-                selected()["replaces"].push_back("");
-                changed("replaces");
-            }
-        } else {
-            ImGui::TextDisabled("Read-only: edit script.json and recompile to update MAT signatures.");
+        if(ImGui::Button("Add MAT replacement")) {
+            // Empty until authored. Save rejects incomplete mappings.
+            if(isSource())selected()["replaces"].push_back("");
+            else selected()["replaces"].push_back(
+                {{"name",""},{"cel",0}});
+            changed("replaces");
         }
+        if(!isSource()&&!editor_signatures::matchesSavedReplacement(
+                selected(),savedRoot_))
+            ImGui::TextDisabled(
+                "MAT signatures will be regenerated on Save using game assets.");
     }
     void renderMaterialProperties() {
         if(!validSelection()) {
@@ -2227,16 +2232,11 @@ private:
             usesMap("clearcoat_normal_map")||
             number(effective,"clearcoat_strength",0.0f)>0.00001f;
         const bool matcap=usesMap("matcap_map");
-        const std::string name=stringValue(selected(),"name");
-        if(isSource()) {
-            std::string updated=name;
-            ImGui::TextUnformatted("Material name");
-            if(ImGui::InputText("##materialName",&updated)) {
-                selected()["name"]=updated;
-                changed("name",ImGui::IsItemActive());
-            }
-        } else {
-            ImGui::TextWrapped("Material: %s",name.c_str());
+        std::string updated=stringValue(selected(),"name");
+        ImGui::TextUnformatted("Material name");
+        if(ImGui::InputText("##materialName",&updated)) {
+            selected()["name"]=updated;
+            changed("name",ImGui::IsItemActive());
         }
         renderMatReplacements();
         if(materialSection("Albedo",0,true)) {
