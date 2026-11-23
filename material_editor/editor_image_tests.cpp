@@ -1,6 +1,7 @@
 #include "editor_image.hpp"
 #include "common/stb_image.h"
 #include <array>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -79,9 +80,59 @@ void testPngChannels() {
         stbi_image_free(decoded);
     }
 }
+void testPackLocalReuse() {
+    namespace fs=std::filesystem;
+    const auto base=fs::temp_directory_path()/
+        ("jkgm_image_reuse_"+std::to_string(std::chrono::steady_clock::now()
+                                           .time_since_epoch().count()));
+    struct Clean {
+        fs::path path;
+        ~Clean() {std::error_code ec;fs::remove_all(path,ec);}
+    } cleanup{base};
+    const auto pack=base/"pack";
+    const auto external=base/"external";
+    const auto nested=pack/"subfolder";
+    fs::create_directories(pack);
+    fs::create_directories(external);
+    fs::create_directories(nested);
+    const auto json=pack/"metadata.json";
+    const std::array<std::uint8_t,16> white={
+        255,255,255,255,255,255,255,255,
+        255,255,255,255,255,255,255,255
+    };
+    const auto content=png(fromRGBA(white.data(),2,2,4,Role::Albedo,false));
+    const auto write=[&](const fs::path &path){
+        std::ofstream file(path,std::ios::binary);
+        file.write(reinterpret_cast<const char*>(content.data()),
+                   static_cast<std::streamsize>(content.size()));
+    };
+    write(pack/"shared.png");
+    write(pack/"SECOND.PNG");
+    write(pack/"source.jpg");
+    write(external/"shared.png");
+    write(nested/"nested.png");
+    auto reuse=packLocalPngReference(json,pack/"shared.png");
+    expect(reuse.has_value()&&*reuse=="shared.png",
+           "Pack-local existing PNG should be referenced unchanged");
+    reuse=packLocalPngReference(json,pack/"SECOND.PNG");
+    expect(reuse.has_value()&&*reuse=="SECOND.PNG",
+           "Filename case must be preserved for a local PNG");
+    expect(!packLocalPngReference(json,external/"shared.png").has_value(),
+           "External PNG should retain the staged import workflow");
+    expect(!packLocalPngReference(json,nested/"nested.png").has_value(),
+           "Nested image is not directly pack-local");
+    expect(!packLocalPngReference(json,pack/"source.jpg").has_value(),
+           "Non-PNG files need conversion to the supported pack format");
+    expect(!packLocalPngReference(json,pack/"missing.png").has_value(),
+           "A nonexistent image cannot be reused");
+    auto repeated=packLocalPngReference(json,pack/"shared.png");
+    expect(repeated==std::optional<std::string>("shared.png"),
+           "Multiple materials should resolve to the same filename");
+}
 int main() {
     try {
         testColorAlpha();testDataChannels();testPngChannels();
+        testPackLocalReuse();
         std::cout<<"Image premultiplication and compact PNG tests passed\n";
         return 0;
     } catch(const std::exception &e) {
