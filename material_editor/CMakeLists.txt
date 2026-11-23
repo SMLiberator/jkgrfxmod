@@ -40,6 +40,7 @@ add_executable(jkgm-material-editor WIN32
   native_mat.cpp
   native_mat.hpp
   source_pack.hpp
+  editor_ini_settings.hpp
   ../glad/glad.cpp)
 target_include_directories(jkgm-material-editor PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/.. ${CMAKE_CURRENT_SOURCE_DIR}/../glad)
@@ -58,4 +59,18 @@ target_include_directories(editor-source-pack-tests PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..)
 if(MSVC)
   target_compile_options(editor-source-pack-tests PRIVATE /W3 /EHsc /utf-8)
+endif()
+
+# Exercise portable ImGui settings and multi-folder MAT discovery without
+# starting a GLFW window or OpenGL renderer.
+add_executable(editor-settings-tests
+  editor_settings_tests.cpp
+  editor_ini_settings.hpp
+  native_mat.cpp
+  native_mat.hpp)
+target_include_directories(editor-settings-tests PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/..)
+target_link_libraries(editor-settings-tests PRIVATE editor_imgui)
+if(MSVC)
+  target_compile_options(editor-settings-tests PRIVATE /W3 /EHsc /utf-8)
 endif()
