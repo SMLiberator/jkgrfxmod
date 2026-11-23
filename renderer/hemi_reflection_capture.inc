@@ -298,7 +298,9 @@
                 ++diag.search_frames;
             }
             struct capture_portal_view {
-                bool valid=false;
+                bool valid=false,thing_mask_fail_open=false;
+                uint32_t visible_sectors=0U,extra_thing_sectors=0U;
+                char const *reason="portal_graph_unavailable";
                 std::vector<uint8_t> surfaces,thing_sectors;
             };
             auto build_capture_portal_view=[&](
@@ -314,7 +316,11 @@
                     read_portals,{},probe_world.mesh,
                     probe_world.cached_surface_lookup,view,camera.position,
                     half_fov,1.0f,spans,&windows,&result.thing_sectors);
-                if(!stats.valid)return {};
+                result.reason=stats.reason;
+                if(!stats.valid)return result;
+                result.visible_sectors=stats.visible_sectors;
+                result.extra_thing_sectors=stats.extra_thing_sectors;
+                result.thing_mask_fail_open=stats.thing_mask_fail_open;
                 auto const &lookup=probe_world.cached_surface_lookup;
                 result.surfaces.assign(lookup.size(),uint8_t(0));
                 for(auto const &span:spans) {
@@ -480,6 +486,33 @@
                         }
                     }
                     if(!complete)all_directions_visibility={};
+                }
+                if((candidate.is_shared || candidate.is_debug) &&
+                   (the_config->profile_renderer ||
+                    the_config->debug_reflection_mode!="off") &&
+                   gpu_3do_present_serial%120U==0U) {
+                    uint32_t valid_faces=0U,visible_sector_sum=0U;
+                    uint32_t extra_thing_sum=0U,thing_fail_open_faces=0U;
+                    char const *first_failure="none";
+                    for(auto const &face:cube_visibility) {
+                        if(face.valid) {
+                            ++valid_faces;
+                            visible_sector_sum+=face.visible_sectors;
+                            extra_thing_sum+=face.extra_thing_sectors;
+                            if(face.thing_mask_fail_open)
+                                ++thing_fail_open_faces;
+                        } else if(first_failure[0]=='n')
+                            first_failure=face.reason;
+                    }
+                    LOG_INFO("REFLECTION portal audit mode=",selected_mode,
+                             " graph_ready=",portal_ready?1:0,
+                             " face_masks_ready=",valid_faces,"/6",
+                             " sector_reach_sum=",visible_sector_sum,
+                             " adjacent_thing_sector_sum=",extra_thing_sum,
+                             " thing_mask_failopen_faces=",thing_fail_open_faces,
+                             " all_views_union_ready=",
+                                 all_directions_visibility.valid?1:0,
+                             " first_failure=",first_failure);
                 }
                 if(profile_shared)
                     shared_capture_profile_window.cpu_ns[0]+=

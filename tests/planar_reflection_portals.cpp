@@ -87,6 +87,7 @@ int main() {
     auto result=graph.traverse(read,{0U},mesh,lookup,view,
         {{0.0f,0.0f,0.0f}},1.0f,1.0f,spans,&windows,&thing_mask);
     assert(result.valid);
+    assert(!result.thing_mask_fail_open);
     assert(windows.size()==3U && thing_mask.size()==3U);
     assert(graph.thing_sector_visible(sectors,thing_mask));
     assert(graph.thing_sector_visible(sectors+0x98U,thing_mask));

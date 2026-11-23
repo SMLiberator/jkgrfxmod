@@ -22,6 +22,8 @@ struct planar_reflection_portal_stats {
     uint32_t sectors_total=0,seed_sectors=0,visible_sectors=0;
     uint32_t portals_considered=0,portals_reached=0;
     uint32_t surfaces_reachable=0;
+    uint32_t extra_thing_sectors=0; // nearby-sector Thing expansion
+    bool thing_mask_fail_open=false; // native adjoin distance unavailable
     char const *reason="unavailable";
 };
 
@@ -602,6 +604,10 @@ public:
                 // No reliable short-portal proof: retain every sector's
                 // Things rather than introducing an incorrect horizon hole.
                 thing_sector_mask->assign(sectors_.size(),uint8_t(1));
+                stats.thing_mask_fail_open=true;
+                stats.extra_thing_sectors=0U;
+                for(auto const visible:reached)
+                    if(!visible)++stats.extra_thing_sectors;
             };
             auto read_dist=[&](uintptr_t at,float &distance)->bool {
                 if(!pointer_ok(at,0x1cU) ||
@@ -663,6 +669,9 @@ public:
                     pending.push_back({edge.destination,next,0.0f});
                 }
             }
+            for(size_t i=0;i<reached.size();++i)
+                if(!reached[i] && (*thing_sector_mask)[i])
+                    ++stats.extra_thing_sectors;
         }
         return stats;
     }
