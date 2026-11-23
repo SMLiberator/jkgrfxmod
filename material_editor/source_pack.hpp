@@ -9,6 +9,9 @@
 #include <cctype>
 #include <filesystem>
 #include <fstream>
+#include <cstdint>
+#include <limits>
+#include <utility>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -134,6 +137,61 @@ inline bool isInherited(const Document &root,const Document &material,
     return root.contains(key);
 }
 
+
+struct MatReplacement {
+    std::string name;
+    int cel=0;
+    // Preserve the author's short "mat/foo.mat" form for cel zero.
+    bool specificCel=false;
+};
+
+// Source replacements are a filename (cel 0) or [filename, cel] tuple.
+// Compiled replacements use {"name":..., "cel":...}; these are read-only
+// because their corresponding replaces_signatures cannot be rebuilt here.
+inline bool readMatReplacement(const Document &value,Kind kind,
+                               MatReplacement &out) {
+    MatReplacement result;
+    if(kind==Kind::Source && value.is_string()) {
+        result.name=value.get<std::string>();
+    } else if(kind==Kind::Source && value.is_array()&&value.size()==2&&
+              value[0].is_string()&&value[1].is_number_integer()) {
+        result.name=value[0].get<std::string>();
+        const auto cel=value[1].get<std::int64_t>();
+        if(cel<0||cel>std::numeric_limits<int>::max())return false;
+        result.cel=static_cast<int>(cel);
+        result.specificCel=true;
+    } else if(kind==Kind::Compiled && value.is_object()&&
+              value.contains("name")&&value["name"].is_string()&&
+              value.contains("cel")&&value["cel"].is_number_integer()) {
+        result.name=value["name"].get<std::string>();
+        const auto cel=value["cel"].get<std::int64_t>();
+        if(cel<0||cel>std::numeric_limits<int>::max())return false;
+        result.cel=static_cast<int>(cel);
+        result.specificCel=true;
+    } else return false;
+    out=std::move(result);
+    return true;
+}
+
+inline Document writeSourceMatReplacement(const MatReplacement &replacement) {
+    if(!replacement.specificCel&&replacement.cel==0)
+        return replacement.name;
+    return Document::array({replacement.name,replacement.cel});
+}
+
+// These helpers keep the albedo source mutually exclusive. A material
+// override of keep_albedo=true suppresses a pack-level albedo_map too.
+inline void chooseOriginalMatAlbedo(Document &entry,bool keep) {
+    entry["keep_albedo"]=keep;
+    entry.erase("use_original_albedo");
+    if(keep)entry.erase("albedo_map");
+}
+inline void chooseAlbedoImage(Document &entry,const std::string &image) {
+    entry["albedo_map"]=image;
+    entry["keep_albedo"]=false;
+    entry.erase("use_original_albedo");
+}
+
 inline void validate(const Document &doc,Kind kind) {
     if(!doc.is_object()||!doc.contains("materials")||
        !doc["materials"].is_array())
@@ -188,13 +246,11 @@ inline void validate(const Document &doc,Kind kind) {
            material["replaces"].empty())
             throw std::runtime_error("Source material "+name+" needs MAT replacements.");
         for(const auto &entry:material["replaces"]) {
-            if(entry.is_string()&&!entry.get<std::string>().empty())continue;
-            if(entry.is_array()&&entry.size()==2&&entry[0].is_string()&&
-               !entry[0].get<std::string>().empty()&&
-               entry[1].is_number_integer()&&entry[1].get<int>()>=0)
-                continue;
+            MatReplacement replacement;
+            if(readMatReplacement(entry,Kind::Source,replacement)&&
+               !replacement.name.empty())continue;
             throw std::runtime_error("Invalid MAT replacement in "+name+
-                                     ": expected filename or [filename, cel].");
+                                     ": expected a nonempty filename or [filename, cel >= 0].");
         }
     }
 }
