@@ -252,6 +252,14 @@ inline void validate(const Document &doc,Kind kind) {
             throw std::runtime_error("Invalid MAT replacement in "+name+
                                      ": expected a nonempty filename or [filename, cel >= 0].");
         }
+        // Mirror the compiler's final, resolved mutually exclusive inputs.
+        // Material-level original-MAT choices can legitimately suppress a
+        // pack-level PNG; reject only the actual effective conflict.
+        const Document effective=effectiveMaterial(doc,material,Kind::Source);
+        if(effective.value("keep_albedo",false)&&
+           effective.contains("albedo_map"))
+            throw std::runtime_error(
+                "Material "+name+": keep_albedo conflicts with albedo_map.");
     }
 }
 } // namespace editor_source
