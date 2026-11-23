@@ -95,6 +95,47 @@ void testCompiledAndValidation() {
     editor_source::validate(source,Kind::Source);
     check(Document::parse(source.dump(4))==source,"unknown fields survive");
 }
+void testAnimationInheritance() {
+    Document source={
+        {"name","Animated"},{"description","Animation defaults"},
+        {"albedo_scroll",{0.25,-0.5}},
+        {"emissive_scroll",{0.0,1.0}},
+        {"normal_scroll",{0.3,0.0}},
+        {"normal_scroll2",{-0.1,0.2}},
+        {"emissive_pulse",{{"wave","random"},{"rate",2.0},
+                            {"min",0.2},{"max",1.4},{"phase",0.5}}},
+        {"materials",Document::array({{
+            {"name","neon"},{"replaces",Document::array({"mat/neon.mat"})}
+        }})}
+    };
+    const auto original=source;
+    auto inherited=editor_source::effectiveMaterial(
+        source,source["materials"][0],Kind::Source);
+    check(inherited["albedo_scroll"]==Document::array({0.25,-0.5}),
+          "albedo scroll inherited");
+    check(inherited["emissive_scroll"]==Document::array({0.0,1.0}),
+          "emissive scroll inherited");
+    check(inherited["normal_scroll"]==source["normal_scroll"]&&
+          inherited["normal_scroll2"]==source["normal_scroll2"],
+          "independent normal layer scrolls inherited");
+    check(inherited["emissive_pulse"]==source["emissive_pulse"],
+          "emissive pulse inherited intact");
+    source["materials"][0]["albedo_scroll"]={0.0,0.0};
+    source["materials"][0]["emissive_pulse"]={
+        {"wave","sine"},{"rate",1.0},{"min",1.0},{"max",1.0},{"phase",0.0}};
+    auto overridden=editor_source::effectiveMaterial(
+        source,source["materials"][0],Kind::Source);
+    check(overridden["albedo_scroll"]==Document::array({0.0,0.0}),
+          "zero scroll overrides inherited motion");
+    check(overridden["emissive_pulse"]["min"]==1.0&&
+          overridden["emissive_pulse"]["max"]==1.0,
+          "neutral pulse overrides inherited pulse");
+    source["materials"][0].erase("albedo_scroll");
+    source["materials"][0].erase("emissive_pulse");
+    check(source==original,"remove animation override restores raw source");
+    check(Document::parse(source.dump(4))==original,
+          "animation defaults survive serialization");
+}
 void testRepositorySourcePack() {
     // Verify the compiler's real sample input is accepted verbatim and can
     // be serialized after a material override without flattening defaults.
@@ -171,6 +212,7 @@ void testRevertMaterialAndPack() {
 int main(){
     try {
         testSourceInheritance();testPackAlbedoAndAlphaOverrides();
+        testAnimationInheritance();
         testCompiledAndValidation();testRepositorySourcePack();
         testRevertMaterialAndPack();
         std::cout<<"Source pack tests passed\n";
