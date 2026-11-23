@@ -14,6 +14,7 @@
 #include "common/stb_image.h"
 #include "preview.hpp"
 #include "editor_image.hpp"
+#include "editor_wheel.hpp"
 #include "source_pack.hpp"
 #include "editor_ini_settings.hpp"
 #include <windows.h>
@@ -1333,6 +1334,8 @@ private:
                 ImGui::GetContentRegionAvail().x-53.0f));
             ImGui::SliderFloat("##lightingIntensity",&lightingIntensity_,
                                0.0f,2.0f,"Intensity: %.2fx");
+            editor_wheel::adjust(lightingIntensity_,numericWheelForLastItem(),
+                                 0.0f,2.0f);
             if(ImGui::IsItemClicked(ImGuiMouseButton_Right))
                 lightingIntensity_=1.0f;
             if(ImGui::IsItemHovered())
@@ -1430,6 +1433,15 @@ private:
         ImGui::TextDisabled("LMB: rotate  |  MMB: move  |  Wheel: zoom  |  Space: reset.");
         ImGui::End();
     }
+    // The 1.92 ImGui key-owner API claims the wheel for this hovered item,
+    // instead of also scrolling the parent properties window. The ownership
+    // claim is made even on frames with no wheel movement.
+    float numericWheelForLastItem() const {
+        if(!ImGui::IsItemHovered()||
+           !ImGui::SetItemKeyOwner(ImGuiKey_MouseWheelY))
+            return 0.0f;
+        return ImGui::GetIO().MouseWheel;
+    }
     bool floatField(const char *label,const char *key,float fallback,
                     float low,float high,bool allowAboveSlider=false) {
         Document &obj=selected();
@@ -1449,6 +1461,14 @@ private:
         if(ImGui::SliderFloat("##slider",&position,low,high,format.c_str(),
                               ImGuiSliderFlags_AlwaysClamp)) {
             obj[key]=position;changed(key,ImGui::IsItemActive());modified=true;
+        }
+        float wheelValue=modified?position:v;
+        if(editor_wheel::adjust(wheelValue,numericWheelForLastItem(),
+                    low,allowAboveSlider
+                        ?std::numeric_limits<float>::max():high)) {
+            obj[key]=wheelValue;
+            changed(key);
+            modified=true;
         }
         if(ImGui::IsItemClicked(ImGuiMouseButton_Right)&&hasOverride) {
             // Reset removes the local override, restoring a source pack's
@@ -1517,10 +1537,13 @@ private:
         for(int i=0;i<3;++i) {
             if(i>0)ImGui::SameLine();
             ImGui::SetNextItemWidth(width);
-            if(ImGui::DragFloat(ids[i],&values[size_t(i)],speed,low,high,
-                                formats[i])&&std::isfinite(values[size_t(i)])) {
+            const bool dragged=ImGui::DragFloat(
+                ids[i],&values[size_t(i)],speed,low,high,formats[i]);
+            const bool wheeled=editor_wheel::adjust(
+                values[size_t(i)],numericWheelForLastItem(),low,high);
+            if((dragged||wheeled)&&std::isfinite(values[size_t(i)])) {
                 setArray(selected(),key,values.data(),3);
-                changed(key,ImGui::IsItemActive());
+                changed(key,dragged&&ImGui::IsItemActive());
             }
             if(ImGui::IsItemClicked(ImGuiMouseButton_Right)&&
                selected().contains(key)) {
@@ -1547,12 +1570,14 @@ private:
         const auto axis=[&](int i,const char *id,const char *format) {
             float value=speed[size_t(i)];
             ImGui::SetNextItemWidth(width);
-            if(ImGui::DragFloat(id,&value,0.01f,0,0,format)&&
-               std::isfinite(value)) {
+            const bool dragged=ImGui::DragFloat(id,&value,0.01f,0,0,format);
+            const bool wheeled=editor_wheel::adjust(
+                value,numericWheelForLastItem());
+            if((dragged||wheeled)&&std::isfinite(value)) {
                 speed[size_t(i)]=value;
                 setArray(obj,key,speed.data(),2);
-                if(packField)changedPack(key,ImGui::IsItemActive());
-                else changed(key,ImGui::IsItemActive());
+                if(packField)changedPack(key,dragged&&ImGui::IsItemActive());
+                else changed(key,dragged&&ImGui::IsItemActive());
             }
             if(ImGui::IsItemClicked(ImGuiMouseButton_Right)&&
                obj.contains(key)) {
@@ -1640,12 +1665,17 @@ private:
             const bool edited=ImGui::DragFloat("##value",&value,0.01f,0,0,
                                                 format.c_str());
             const bool held=ImGui::IsItemActive();
+            const std::string name(field);
+            const float minimum=name=="rate"?0.001f:
+                                name=="min"||name=="max"?0.0f:
+                                -std::numeric_limits<float>::max();
+            const bool wheeled=editor_wheel::adjust(
+                value,numericWheelForLastItem(),minimum);
             const bool reset=ImGui::IsItemClicked(ImGuiMouseButton_Right);
             if(ImGui::IsItemHovered())
                 ImGui::SetTooltip("Left drag: adjust; double-click: type; right-click: reset to %.3f.",fallback);
-            if((edited||reset)&&std::isfinite(value)) {
+            if((edited||wheeled||reset)&&std::isfinite(value)) {
                 if(reset)value=fallback;
-                const std::string name(field);
                 if(name=="rate")value=std::max(0.001f,value);
                 if(name=="min") {
                     value=std::max(0.0f,value);
@@ -2061,8 +2091,11 @@ private:
         float value=number(root_,key,fallback);
         ImGui::SetNextItemWidth(-1.0f);
         const std::string format=std::string(label)+": %.3f";
-        if(ImGui::DragFloat("##packValue",&value,0.01f,0,0,
-                            format.c_str())&&std::isfinite(value)) {
+        const bool dragged=ImGui::DragFloat("##packValue",&value,0.01f,0,0,
+                                            format.c_str());
+        const bool wheeled=editor_wheel::adjust(
+            value,numericWheelForLastItem());
+        if((dragged||wheeled)&&std::isfinite(value)) {
             // Respect the same numeric domains as the material compiler.
             const std::string field(key);
             if(field=="normal_strength"||field=="normal_strength2")
@@ -2076,7 +2109,7 @@ private:
             else if(field=="reflection_strength"||field=="fluid_thickness")
                 value=std::max(0.0f,value);
             root_[key]=value;
-            changedPack(key,ImGui::IsItemActive());
+            changedPack(key,dragged&&ImGui::IsItemActive());
         }
         if(ImGui::IsItemClicked(ImGuiMouseButton_Right)&&has) {
             root_.erase(key);changedPack(key);
@@ -2458,11 +2491,13 @@ private:
             ImGui::SetNextItemWidth(-1.0f);
             // The compiler accepts signed, unbounded finite values.
             // Negative factors are routinely used for relief maps.
-            if(ImGui::DragFloat("##factor",&factor,0.002f,0,0,
-                                "Displacement: %.4f") &&
-               std::isfinite(factor)) {
+            const bool dragged=ImGui::DragFloat("##factor",&factor,0.002f,0,0,
+                                                 "Displacement: %.4f");
+            const bool wheeled=editor_wheel::adjust(
+                factor,numericWheelForLastItem());
+            if((dragged||wheeled)&&std::isfinite(factor)) {
                 selected()["displacement_factor"]=factor;
-                changed("displacement_factor",ImGui::IsItemActive());
+                changed("displacement_factor",dragged&&ImGui::IsItemActive());
             }
             if(ImGui::IsItemClicked(ImGuiMouseButton_Right)&&overridden) {
                 selected().erase("displacement_factor");
