@@ -117,7 +117,8 @@ int main() {
     using Reason=gpu_3do_instancing_rejection;
     auto excluded=a;
     excluded.num_lights=1U;
-    excluded.crossing_lighting=true;
+    excluded.crossing_lighting=
+        std::make_shared<gpu_3do_crossing_state>();
     excluded.thing_opacity=0.5f;
     auto const mask=gpu_3do_instancing_rejection_mask(
         excluded,shared->groups[0],gpu_3do_alpha_mode::mixed,
