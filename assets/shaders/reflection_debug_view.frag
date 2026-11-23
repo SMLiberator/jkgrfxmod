@@ -62,7 +62,7 @@ void main() {
                 (0.5/major)+vec2(0.5);
             vec4 color=capture(uv,layer);
             if(color.a>0.0001) {
-                sum=color.rgb/color.a;
+                sum=color.rgb;
                 coverage=color.a;
             }
         }
