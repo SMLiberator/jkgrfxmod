@@ -37,18 +37,39 @@ Automatically discarding it from existing images would alter their
 appearance. Image conversion/loading is a separate feature from these
 Revert commands.
 
-## Source image management and smart material sections
+## Deferred texture loading and compact PNG saving
 
-When editing `script.json`, every material texture slot includes
-**Reference...** (keep the selected image in its existing location),
-**Import copy...** (copy it into the source pack's script directory with a
-unique filename), and **Remove override** where applicable. In-pack paths
-become relative references; external paths remain absolute when referencing.
-Nothing is silently imported, rewritten or converted, and existing local
-files are never overwritten by an import. Imported image files remain on disk
-if the user later undoes/cancels the JSON change; this avoids accidentally
-deleting assets shared by other materials. Pack-default texture paths support
-these actions too.
+Material images can now be loaded and previewed **entirely in memory**.
+In source packs, **Reference...** keeps the existing source filename,
+while **Import PNG (on Save)...** converts and stages a texture for writing.
+In compiled packs, **Load PNG (on Save)...** stages a new converted
+texture for any material texture slot, without changing MAT replacement
+signatures. Staging does not create a disk file.
+
+The editor uses the pack compiler's linear-space alpha premultiplication
+for sRGB color textures. **Albedo** retains alpha if any pixel is
+transparent; otherwise it saves as RGB. **Emissive**, **MatCap**, and
+**environment** color images bake their alpha into RGB, then discard
+the unused alpha channel. **Surface, normal, clearcoat and MatCap mask**
+textures preserve RGB as data without gamma conversion or alpha;
+**displacement** saves only the red channel as an 8-bit grayscale PNG.
+On source packs, imported albedo remains straight-alpha so the regular
+pack compiler doesn't premultiply it twice. All imported images require
+power-of-two dimensions to remain compatible with the compiler.
+
+The preview uploads staged image pixels directly to OpenGL, using
+matching RGB8/sRGB8/R8 formats instead of forcing all image buffers to
+RGBA8. The R/G/B/A channel inspector can inspect staged pixels too.
+
+**Save** writes only staged images still referenced by the document,
+using a unique filename and PNG encoding. PNGs are prepared before
+writing JSON, and metadata is replaced only after the images have been
+successfully committed. Write failures roll back newly created PNGs;
+existing files are not overwritten. **Undo, Revert Material, and Cancel**
+change image references without deleting files. Drafts never saved are
+discarded when the pack is closed or File > Revert is used. Images that
+have already been saved are kept available for Undo/Redo without being
+written twice.
 
 The properties panel shows a thumbnail of each loaded image, its dimensions,
 original channel count, format and file size. **Inspect channels...** opens
@@ -96,8 +117,10 @@ uses unpremultiplied source textures, whereas compiled textures are read
 with the compiler's premultiplied-alpha convention. Image paths can be
 typed into source material slots, chosen through a file picker, or
 copied into the source pack with an explicit **Import copy** action.
-Compiling image conversions and generating MAT signatures remain future
-work. Saving a script changes JSON only, never the referenced image files.
+Integrated pack compilation and MAT signature generation remain future
+work. Staged imports are now converted and saved as PNGs next to JSON;
+existing source files referenced through Reference... are never converted
+in place.
 
 Pack defaults follow the compiler's existing inheritance logic,
 including `keep_albedo` versus `albedo_map` and the inherited alpha-cutoff
@@ -130,10 +153,11 @@ modes that normally capture live scenes. These modes are not equivalent
 in-game: the studio preview is a deliberate approximation for editing.
 Renderer parity should eventually be checked using captured reference images.
 
-**Compiler status:** The editor can reference or copy source image files, but
-does not yet convert images to compiled textures or generate MAT replacement
-signatures. Run the existing command-line compiler for creating game-ready
-packs. Integrated compilation remains a separate development milestone.
+**Compiler status:** The editor can now decode, process, preview, and
+write compiler-compatible source/compiled PNG image data, but does not
+generate MAT replacement signatures or build new game-ready packs.
+Run the existing command-line compiler for source-pack compilation.
+Integrated compilation remains a separate development milestone.
 
 ## Portable Windows build
 
