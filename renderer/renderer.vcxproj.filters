@@ -506,6 +506,9 @@
     <ClInclude Include="planar_reflection_capture_shader.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="reflection_debug_view_shader.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="screen_space_reflections.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
