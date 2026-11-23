@@ -501,24 +501,37 @@ bool loadBundledPreset(int preset,int &width,int &height,
         stbi_image_free(decoded);
         return false;
     }
-    width=w;height=h;
-    out.resize(std::size_t(w)*h*3);
+    // The bundled originals are already the reduced 1K (1024x512) HDRs.
+    // Upload at most 512x256: the preview only samples them for blurry
+    // reflections, and there is no benefit in consuming full 1K GPU storage.
+    const int destW=std::min(w,512);
+    const int destH=std::min(h,256);
+    out.resize(std::size_t(destW)*destH*3);
     const float exposure=preset==0?0.65f:preset==1?0.40f:1.65f;
-    for(int y=0;y<h;++y)for(int x=0;x<w;++x) {
-        // HDR files store north at the top; GL_TEXTURE_2D expects south
-        // at the first row for the shader's equirectangular lookup.
-        const std::size_t src=(std::size_t(h-1-y)*w+x)*3;
-        const std::size_t dst=(std::size_t(y)*w+x)*3;
+    for(int y=0;y<destH;++y)for(int x=0;x<destW;++x) {
+        // Average a source footprint before tone mapping rather than
+        // point-sampling, retaining useful bright light-panel features.
+        const int left=x*w/destW, right=std::max(left+1,(x+1)*w/destW);
+        const int top=y*h/destH, bottom=std::max(top+1,(y+1)*h/destH);
         for(int channel=0;channel<3;++channel) {
-            const float value=decoded[src+channel];
-            const float linear=std::isfinite(value)
-                ?1.0f-std::exp(-std::max(value,0.0f)*exposure):0.0f;
+            double sum=0.0;
+            for(int sy=top;sy<bottom;++sy)for(int sx=left;sx<right;++sx) {
+                // HDR files store north at the top; OpenGL expects south
+                // first for the preview shader's equirectangular lookup.
+                const float v=decoded[(std::size_t(h-1-sy)*w+sx)*3+channel];
+                if(std::isfinite(v))sum+=std::max(v,0.0f);
+            }
+            const float value=static_cast<float>(
+                sum/double((right-left)*(bottom-top)));
+            const float linear=1.0f-std::exp(-value*exposure);
             const float encoded=linear<=0.0031308f?12.92f*linear:
                 1.055f*std::pow(linear,1.0f/2.4f)-0.055f;
-            out[dst+channel]=static_cast<unsigned char>(
-                std::lround(std::clamp(encoded,0.0f,1.0f)*255.0f));
+            out[(std::size_t(y)*destW+x)*3+channel]=
+                static_cast<unsigned char>(
+                    std::lround(std::clamp(encoded,0.0f,1.0f)*255.0f));
         }
     }
+    width=destW;height=destH;
     stbi_image_free(decoded);
     return true;
 #else
@@ -620,24 +633,34 @@ void MaterialPreview::reloadImages() {
             glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_REPEAT);
         }
     }
-    std::string envfile=envOverride_.empty()?material_.files[EnvironmentMap]:envOverride_;
-    if(envOverride_.empty()&&material_.stagedImages[EnvironmentMap])
-        textures_[EnvironmentMap]=uploadStaged(
-            *material_.stagedImages[EnvironmentMap],true,
-            &imageInfo_[EnvironmentMap]);
-    else
-        textures_[EnvironmentMap]=loadTexture(
-            envfile,true,&imageInfo_[EnvironmentMap]);
+    const bool presetOnly=
+        environmentSource_==PreviewEnvironmentSource::Preset;
+    const bool custom=
+        environmentSource_==PreviewEnvironmentSource::Custom;
+    const std::string envfile=custom?envOverride_:
+        material_.files[EnvironmentMap];
+    if(!presetOnly) {
+        if(!custom&&material_.stagedImages[EnvironmentMap])
+            textures_[EnvironmentMap]=uploadStaged(
+                *material_.stagedImages[EnvironmentMap],true,
+                &imageInfo_[EnvironmentMap]);
+        else
+            textures_[EnvironmentMap]=loadTexture(
+                envfile,true,&imageInfo_[EnvironmentMap]);
+    }
     loadedEnvironmentFile_=textures_[EnvironmentMap]!=0;
     const char *presetNames[]={"Studio","Outdoor","Night"};
     const char *fallbackName=presetNames[std::clamp(preset_,0,2)];
     if(loadedEnvironmentFile_) {
-        envDescription_=std::string(envOverride_.empty()?"Material / pack EnvMap: ":"Preview override: ")+envfile;
+        envDescription_=std::string(custom?"Custom EnvMap: ":
+                                     "Material / pack EnvMap: ")+envfile;
     } else {
-        envDescription_=envfile.empty()
-            ?std::string("No EnvMap defined; using ")+fallbackName+" fallback"
-            :std::string("EnvMap image could not be loaded: ")+envfile+
-               ". Using "+fallbackName+" fallback";
+        envDescription_=presetOnly
+            ?std::string("Preset EnvMap: ")+fallbackName
+            :envfile.empty()
+                ?std::string("No material EnvMap; using ")+fallbackName+" preset"
+                :std::string("EnvMap unavailable: ")+envfile+
+                    ". Using "+fallbackName+" preset";
         textures_[EnvironmentMap]=createPreset();
     }
     // Query only on material/texture reload, not every preview frame.
@@ -666,11 +689,29 @@ void MaterialPreview::setMaterial(const PreviewMaterial &next) {
     if(changed)reloadImages();
 }
 void MaterialPreview::setPreset(int preset) {
-    preset_=preset;
-    if(envOverride_.empty()&&material_.files[EnvironmentMap].empty())reloadImages();
+    const int next=std::clamp(preset,0,2);
+    if(preset_==next)return;
+    preset_=next;
+    // A preset's light levels change on draw even when an independent
+    // material/custom reflection image is active. Refresh only if this
+    // image actually depends on the selected preset.
+    if(environmentSource_==PreviewEnvironmentSource::Preset||
+       !loadedEnvironmentFile_)
+        reloadImages();
+}
+void MaterialPreview::setEnvironmentSource(PreviewEnvironmentSource source) {
+    if(source==PreviewEnvironmentSource::Custom&&envOverride_.empty())
+        return; // Pick an image first.
+    if(environmentSource_==source)return;
+    environmentSource_=source;
+    reloadImages();
 }
 void MaterialPreview::setEnvironmentOverride(const std::string &path) {
+    const auto next=path.empty()?PreviewEnvironmentSource::MaterialPack:
+                                PreviewEnvironmentSource::Custom;
+    if(envOverride_==path&&environmentSource_==next)return;
     envOverride_=path;
+    environmentSource_=next;
     reloadImages();
 }
 void MaterialPreview::resize(int w,int h) {
