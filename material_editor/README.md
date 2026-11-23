@@ -187,11 +187,29 @@ indicator. Undo/redo history is cleared when another pack is opened.
   cannot be recovered from compiled metadata alone. The material preview
   uses an untextured fallback and points to the File menu.
 
-Game asset and CMP paths are saved independently of material packs at
-`%APPDATA%\\JkGfxMod\\material-editor.json` and restored on the next launch,
-including under Wine. Changing or clearing either selection updates
-the native MAT preview without dirtying or modifying the pack JSON.
-Preview Fresnel, camera controls, and diagnostics remain preview-only.
+**Portable game-asset settings:** Dear ImGui's existing `imgui.ini`
+now contains a custom `[JkGfxModEditor][Config]` section for the ordered
+list of JK/MotS asset folders and the selected CMP. The INI file is placed
+beside `jkgm-material-editor.exe` instead of depending on the process's
+working directory. With a writable EXE directory, moving the EXE together
+with `imgui.ini` preserves both the docking layout and game-asset settings.
+Paths within the executable's directory tree are stored relative to the
+EXE, while external asset locations are saved as absolute paths.
+
+Use **File > JK / MotS game assets > Add assets folder...** repeatedly to
+configure multiple folders. Each folder indexes loose MAT/CMP resources and
+GOB/GOO archives. Earlier folders take precedence for resource-name
+collisions, and loose resources take precedence over archive entries within
+the same folder. Open a folder's submenu to move it up/down or remove it.
+The menu also supports clearing the list and selecting/clearing the CMP.
+
+The previous `%APPDATA%\\JkGfxMod\\material-editor.json` settings file is
+imported automatically on the first launch without an existing custom INI
+section, then settings are written to `imgui.ini`. The old file is left
+untouched for safety, but is not written again. Changing folder order or
+the CMP immediately refreshes the native MAT preview, without dirtying
+material pack JSON. Preview Fresnel, camera controls, and diagnostics
+remain preview-only.
 
 ## Preview navigation
 
