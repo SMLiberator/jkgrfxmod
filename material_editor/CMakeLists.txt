@@ -100,6 +100,7 @@ if(WIN32)
         # Verify the compressed PNG is exactly 512x256 at build time.
         # The first 24 bytes contain the PNG signature and IHDR dimensions.
         file(READ "${_png}" _png_header HEX LIMIT 24)
+        string(TOLOWER "${_png_header}" _png_header)
         if(_png_header STREQUAL
            "89504e470d0a1a0a0000000d494844520000020000000100")
           file(TO_CMAKE_PATH "${_png}" _rc_path)
