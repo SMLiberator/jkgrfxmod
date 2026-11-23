@@ -808,9 +808,16 @@ private:
         PreviewMaterial p=fromMetadata(effectiveEntry_,root_,
                                      fs::u8path(file_).parent_path());
         for(size_t i=0;i<TextureCount;++i) {
-            const auto name=fs::u8path(p.files[i]).filename().u8string();
-            auto found=stagedImages_.find(name);
-            if(found!=stagedImages_.end())
+            const fs::path assigned=fs::u8path(p.files[i]).lexically_normal();
+            const auto name=assigned.filename().u8string();
+            const auto found=stagedImages_.find(name);
+            if(found==stagedImages_.end())continue;
+            const auto expected=(fs::u8path(file_).parent_path()/
+                                 fs::u8path(name)).lexically_normal();
+            // A user may reference an external texture with the same
+            // basename as a draft. Only substitute a draft for its exact
+            // reserved location beside this pack's JSON.
+            if(assigned==expected)
                 p.stagedImages[i]=found->second;
         }
         // Source textures are straight-alpha input; compiled color PNGs
