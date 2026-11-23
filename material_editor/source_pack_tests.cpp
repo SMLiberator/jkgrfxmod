@@ -1,4 +1,6 @@
 #include "source_pack.hpp"
+#include <chrono>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
@@ -115,10 +117,62 @@ void testRepositorySourcePack() {
     source["materials"][2].erase("roughness");
     check(source==before,"source override rollback restores raw document");
 }
+void testRevertMaterialAndPack() {
+    namespace fs=std::filesystem;
+    // Use the real source document to guard its inherited defaults and
+    // replacement definitions against accidental changes during a revert.
+    const auto filename=fs::path("assets/sample_matpack/script.json");
+    const Document saved=editor_source::readPack(filename);
+    Document working=saved;
+    const auto originalSecond=saved["materials"][1];
+    working["materials"][0]["roughness"]=0.96;
+    working["materials"][1]["metalness"]=0.42;
+    working["description"]="unsaved pack description";
+    check(editor_source::revertMaterial(working,saved,0),
+          "Revert Material must report a change");
+    check(working["materials"][0]==saved["materials"][0],
+          "Revert Material must restore exact saved material properties");
+    check(working["materials"][1]!=originalSecond,
+          "Revert Material must preserve unrelated unsaved material changes");
+    check(working["description"]=="unsaved pack description",
+          "Revert Material must preserve unsaved pack defaults and metadata");
+    check(!editor_source::revertMaterial(working,saved,0),
+          "Reverting an unchanged material must be a no-op");
+    check(!editor_source::revertMaterial(working,saved,working["materials"].size()),
+          "Out-of-range revert must not touch the document");
+
+    // File Revert reads the latest on-disk JSON, not an in-memory baseline.
+    const Document disk=editor_source::readPack(filename);
+    check(disk==saved,"File Revert must read the original disk document");
+    working=disk;
+    check(working==saved,"File Revert must restore the complete saved pack");
+    bool rejected=false;
+    try {
+        editor_source::readPack(
+            filename.parent_path()/"nonexistent_revert_fixture.json");
+    } catch(const std::exception&) {rejected=true;}
+    check(rejected,"Missing file must be reported instead of changing state");
+
+    const auto invalid=fs::temp_directory_path()/
+        ("jkgm_invalid_revert_"+std::to_string(
+            std::chrono::steady_clock::now().time_since_epoch().count())+".json");
+    {
+        std::ofstream out(invalid,std::ios::binary);
+        if(!out)throw std::runtime_error("Could not write invalid revert fixture");
+        out<<"{ broken json";
+    }
+    rejected=false;
+    try {editor_source::readPack(invalid);}
+    catch(const std::exception&) {rejected=true;}
+    std::error_code ec;
+    fs::remove(invalid,ec);
+    check(rejected,"Malformed disk JSON must be rejected before activation");
+}
 int main(){
     try {
         testSourceInheritance();testPackAlbedoAndAlphaOverrides();
         testCompiledAndValidation();testRepositorySourcePack();
+        testRevertMaterialAndPack();
         std::cout<<"Source pack tests passed\n";
         return 0;
     } catch(const std::exception &e) {
