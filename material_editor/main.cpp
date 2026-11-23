@@ -1177,7 +1177,7 @@ private:
         // irregular sequence of left-aligned rows. Narrow dock layouts
         // automatically stack groups without squeezing the preview buttons.
         const float toolbarWidth=ImGui::GetContentRegionAvail().x;
-        const int toolbarColumns=toolbarWidth>=980.0f?3:
+        const int toolbarColumns=toolbarWidth>=1160.0f?4:
                                  toolbarWidth>=610.0f?2:1;
         if(ImGui::BeginTable("##previewControls",toolbarColumns,
                              ImGuiTableFlags_SizingStretchSame|
@@ -1209,6 +1209,13 @@ private:
             }
 
             ImGui::TableNextColumn();
+            ImGui::TextDisabled("LIGHTING");
+            ImGui::SetNextItemWidth(-1.0f);
+            ImGui::SliderFloat("##lightingIntensity",&lightingIntensity_,
+                               0.0f,2.0f,"Intensity: %.2fx");
+            if(ImGui::IsItemHovered())
+                ImGui::SetTooltip("Preview lighting only. Emissive maps and EnvMap reflections remain unchanged.");
+            ImGui::TableNextColumn();
             ImGui::TextDisabled("ANIMATION & VIEW");
             ImGui::Checkbox("Animate",&animationPlaying_);
             ImGui::SameLine();
@@ -1233,7 +1240,7 @@ private:
         if(preview_->valid()) {
             preview_->draw(int(area.x),int(area.y),orbitYaw_,orbitPitch_,
                            orbitDistance_,orbitTarget_,shape_,envFresnel_,
-                           orthographic_,animationSeconds_);
+                           orthographic_,animationSeconds_,lightingIntensity_);
             // Image() is a passive item: dragging it moves the ImGui window.
             // An invisible button claims the mouse press for viewport orbiting,
             // while the image is drawn over that item's exact screen rectangle.
@@ -2359,6 +2366,7 @@ private:
     int selection_=-1,environment_=0;
     PreviewShape shape_=PreviewShape::Sphere;
     bool envFresnel_=false,orthographic_=false;
+    float lightingIntensity_=1.0f;
     int inspectedChannel_=0;
     bool animationPlaying_=true;
     double animationSeconds_=0.0;
