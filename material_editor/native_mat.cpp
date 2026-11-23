@@ -1,4 +1,5 @@
 #include "native_mat.hpp"
+#include "base/md5.hpp"
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -6,6 +7,8 @@
 #include <fstream>
 #include <limits>
 #include <stdexcept>
+#include <set>
+#include <tuple>
 
 namespace fs=std::filesystem;
 namespace {
@@ -314,6 +317,148 @@ bool NativeMatSource::load(const std::string &matName,int cel,
     } catch(const std::exception &e) {
         error=std::string("Could not decode MAT: ")+e.what();
         out={};
+        return false;
+    }
+}
+
+
+bool NativeMatSource::signatures(const std::string &matName,int cel,
+                                 std::vector<std::string> &out,
+                                 std::string &error) const {
+    out.clear();
+    try {
+        std::vector<std::uint8_t> bytes;
+        std::string source;
+        if(!readAsset(matName,bytes,source))
+            throw std::runtime_error("MAT not found in configured game assets: "+matName);
+        if(bytes.size()<76||std::memcmp(bytes.data(),"MAT ",4)!=0)
+            throw std::runtime_error("Not a MAT file: "+matName);
+        Cursor reader{bytes,4};
+        if(reader.next()!=0x32)
+            throw std::runtime_error("Unsupported MAT version");
+        reader.next(); // MAT type
+        const std::uint32_t records=reader.next(),textures=reader.next();
+        const std::uint32_t transparentIndex=reader.next(),bitdepth=reader.next();
+        if((bitdepth!=8&&bitdepth!=16)||records>4096||textures>4096||
+           cel<0||std::uint32_t(cel)>=records)
+            throw std::runtime_error("Invalid MAT bitdepth, cel or record count");
+        reader.skip(48);
+        std::uint32_t requestedType=0,requestedTexture=0;
+        for(std::uint32_t i=0;i<records;++i) {
+            const std::uint32_t type=reader.next();
+            reader.next(); // Color index
+            reader.skip(16);
+            if(type==8) {
+                reader.skip(12);
+                const auto texture=reader.next();
+                if(i==std::uint32_t(cel))requestedTexture=texture;
+            } else if(type!=0)
+                throw std::runtime_error("Unsupported MAT cel type");
+            if(i==std::uint32_t(cel))requestedType=type;
+        }
+        // The compiler requires a texture record for replacement matching.
+        // Never invent a hash for solid-color MAT cels.
+        if(requestedType!=8||requestedTexture>=textures)
+            throw std::runtime_error("MAT cel has no valid texture record");
+
+        struct Mip {std::uint32_t width,height;std::vector<std::uint8_t> data;};
+        std::vector<Mip> mips;
+        bool usesTransparency=false;
+        for(std::uint32_t tex=0;tex<textures;++tex) {
+            auto width=reader.next(),height=reader.next();
+            const bool transparent=reader.next()!=0;
+            reader.skip(8);
+            const auto mipCount=reader.next();
+            if(width==0||height==0||width>4096||height>4096||
+               mipCount==0||mipCount>16)
+                throw std::runtime_error("Invalid MAT mipmap dimensions/count");
+            if(tex==requestedTexture)usesTransparency=transparent;
+            for(std::uint32_t mip=0;mip<mipCount;++mip) {
+                const size_t count=std::size_t(width)*height*(bitdepth/8);
+                if(reader.pos>bytes.size()||count>bytes.size()-reader.pos)
+                    throw std::runtime_error("Truncated MAT texture data");
+                if(tex==requestedTexture) {
+                    Mip selected;
+                    selected.width=width;selected.height=height;
+                    selected.data.assign(bytes.begin()+reader.pos,
+                                         bytes.begin()+reader.pos+count);
+                    mips.push_back(std::move(selected));
+                }
+                reader.skip(count);
+                // Use the compiler's exact shrinking dimensions, including
+                // zero-sized later mips if an unusual MAT contains them.
+                width>>=1;height>>=1;
+            }
+        }
+        std::set<std::string> hashes; // same sorted unique set as compiler
+        if(bitdepth==16) {
+            for(const auto &mip:mips) {
+                jkgm::md5_hasher hash;
+                hash.add(jkgm::make_span(&mip.width,1).as_const_bytes());
+                hash.add(jkgm::make_span(&mip.height,1).as_const_bytes());
+                hash.add(jkgm::make_span(mip.data).as_const_bytes());
+                hashes.insert(static_cast<std::string>(hash.finish()));
+            }
+        } else {
+            // The compiler loads EVERY visible colormap through its VFS.
+            // Include every indexed CMP, not just the one used by the MAT
+            // thumbnail. Avoid duplicate full-path and basename aliases.
+            std::set<std::tuple<std::string,std::uint64_t,std::uint64_t>> seen;
+            std::vector<std::array<std::uint8_t,768>> colormaps;
+            for(const auto &item:files_) {
+                const auto &name=item.first;
+                if(name.size()<4||name.compare(name.size()-4,4,".cmp")!=0)
+                    continue;
+                const auto &entry=item.second;
+                const auto identity=std::make_tuple(
+                    entry.filename.u8string(),entry.offset,entry.length);
+                if(!seen.insert(identity).second)continue;
+                std::vector<std::uint8_t> cmp;
+                if(!diskBytes(entry.filename,entry.offset,entry.length,cmp)||
+                   cmp.size()<64+768||std::memcmp(cmp.data(),"CMP ",4)!=0||
+                   u32(cmp,4)!=0x1e)
+                    throw std::runtime_error("Invalid indexed CMP: "+name);
+                std::array<std::uint8_t,768> palette{};
+                std::copy_n(cmp.begin()+64,768,palette.begin());
+                colormaps.push_back(palette);
+            }
+            if(colormaps.empty())
+                throw std::runtime_error(
+                    "8-bit MAT signatures require indexed CMPs. "
+                    "Configure the JK/MotS game assets folders under File.");
+            for(const auto &mip:mips)for(const auto &palette:colormaps) {
+                jkgm::md5_hasher hash;
+                hash.add(jkgm::make_span(&mip.width,1).as_const_bytes());
+                hash.add(jkgm::make_span(&mip.height,1).as_const_bytes());
+                for(const std::uint8_t index:mip.data) {
+                    std::uint16_t value=0;
+                    if(!(usesTransparency&&index==transparentIndex)) {
+                        const std::uint8_t rr=palette[std::size_t(index)*3];
+                        const std::uint8_t gg=palette[std::size_t(index)*3+1];
+                        const std::uint8_t bb=palette[std::size_t(index)*3+2];
+                        if(usesTransparency) {
+                            value=std::uint16_t((1u<<15)|
+                                (std::uint16_t(rr>>3)<<10)|
+                                (std::uint16_t(gg>>3)<<5)|(bb>>3));
+                        } else {
+                            value=std::uint16_t(
+                                (std::uint16_t(rr>>3)<<11)|
+                                (std::uint16_t(gg>>2)<<5)|(bb>>3));
+                        }
+                    }
+                    hash.add(jkgm::make_span(&value,1).as_const_bytes());
+                }
+                hashes.insert(static_cast<std::string>(hash.finish()));
+            }
+        }
+        if(hashes.empty())throw std::runtime_error("No MAT signatures generated");
+        out.assign(hashes.begin(),hashes.end());
+        error.clear();
+        return true;
+    } catch(const std::exception &e) {
+        out.clear();
+        error=std::string("Cannot sign ")+matName+" (cel "+
+              std::to_string(cel)+"): "+e.what();
         return false;
     }
 }
