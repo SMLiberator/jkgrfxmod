@@ -167,6 +167,30 @@ int main() {
     assert(metrics.geometry_repeated_draws==0U);
     assert(metrics.repeated_member_ranges==0U);
 
+    // Real scheduler batches nonadjacent exact opaque matches but leaves a
+    // mutated CloneModel snapshot and incompatible ambient unbatched.
+    rows={record(a,shared->groups[0],0x1000U,0x11U),
+          record(changed,clone->groups[0],0x1000U,0x44U),
+          record(b,shared->groups[0],0x1000U,0x22U)};
+    auto schedule=schedule_gpu_3do_instancing(rows);
+    assert(schedule.size()==3U);
+    assert(schedule[0].source_index==0U && schedule[0].batch_id!=0U);
+    assert(schedule[1].source_index==2U &&
+           schedule[1].batch_id==schedule[0].batch_id);
+    assert(schedule[2].source_index==1U && schedule[2].batch_id==0U);
+    rows[2]=record(differing,shared->groups[0],0x1000U,0x22U);
+    schedule=schedule_gpu_3do_instancing(rows);
+    for(size_t i=0;i<schedule.size();++i) {
+        assert(schedule[i].source_index==i);
+        assert(schedule[i].batch_id==0U);
+    }
+    rows[2]=record(b,shared->groups[0],0x1000U,0x22U,true);
+    schedule=schedule_gpu_3do_instancing(rows);
+    for(auto const &item:schedule)assert(item.batch_id==0U);
+    rows={first,first};
+    schedule=schedule_gpu_3do_instancing(rows);
+    for(auto const &item:schedule)assert(item.batch_id==0U);
+
     // Window aggregation must add histograms slot-by-slot, including
     // both "all ranges" and the more relevant "repeat members" set.
     profile_sample frame{},window{};

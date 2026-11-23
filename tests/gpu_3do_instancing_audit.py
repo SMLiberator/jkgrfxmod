@@ -10,7 +10,7 @@ audit=renderer.split("void draw_gpu_3do_preview(",1)[1].split(
     "// Deliberate world-cache isolation test.",1)[0]
 assert '#include "gpu_3do_instancing_audit.hpp"' in renderer
 assert "gpu_3do_present_serial%30U==0U" in audit
-assert "if(gpu_profiling && prepare_both &&" in audit
+assert "bool const sample_instancing=gpu_profiling && prepare_both &&" in audit
 assert "audit_gpu_3do_instancing(records)" in audit
 assert "gpu_3do_instancing_conservative_candidate(" in audit
 assert "gpu_3do_instancing_capture_state(" in audit
@@ -52,6 +52,14 @@ assert "state_split_extras" in header
 assert "result.repeated_member_ranges" in header
 assert "result.rejects_repeated[i]" in header
 assert "result.state_split_extras=" in header
+assert "schedule_gpu_3do_instancing(" in header
+assert "next.model_batch_group=item.batch_id;" in audit
+assert "model_batch_count>1" in audit
+assert "gpu_3do_instanced_calls" in audit
+assert "gpu_3do_instanced_ranges" in profile
+assert "enable_gpu_3do_instancing" in read("common/config.hpp")
+assert 'j.contains("enable_gpu_3do_instancing")' in read("common/config.cpp")
+assert "enable_gpu_3do_instancing" in read("doc/config.md")
 for field in ("gpu_instancing_repeated_member_ranges",
               "gpu_instancing_repeated_eligible_ranges",
               "gpu_instancing_rejected_ranges",

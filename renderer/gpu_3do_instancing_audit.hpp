@@ -192,4 +192,55 @@ inline gpu_3do_instancing_audit_stats audit_gpu_3do_instancing(
         result.eligible_repeat_extras-result.compatible_repeated_draws;
     return result;
 }
+// Opaque-only, exact-identity schedule for real main-camera instancing.
+// CloneModel filenames never establish identical GPU geometry/materials.
+struct gpu_3do_instancing_schedule_entry {
+    size_t source_index=0;
+    size_t batch_id=0; // zero => unchanged individual draw
+};
+inline std::vector<gpu_3do_instancing_schedule_entry>
+schedule_gpu_3do_instancing(
+    std::vector<gpu_3do_instancing_audit_record> const &records)
+{
+    using geometry_key=std::tuple<uint64_t,uintptr_t,uintptr_t,uintptr_t>;
+    using batch_key=std::tuple<geometry_key,std::array<uint32_t,11>>;
+    std::map<batch_key,std::vector<size_t>> groups;
+    for(size_t i=0;i<records.size();++i) {
+        auto const &r=records[i];
+        if(!r.state_eligible || r.rejection_mask!=0U ||
+           !r.mesh_id || !r.geometry || !r.group || !r.material ||
+           !r.instance)continue;
+        geometry_key const geometry{r.mesh_id,r.geometry,r.group,r.material};
+        batch_key const key{geometry,r.state};
+        auto &members=groups[key];
+        bool repeated_owner=false;
+        for(size_t prev:members)
+            if(records[prev].instance==r.instance) {
+                repeated_owner=true;
+                break;
+            }
+        if(!repeated_owner)members.push_back(i);
+    }
+    std::vector<size_t> batch_of(records.size(),0U);
+    std::vector<std::vector<size_t>> batches(1);
+    for(auto const &entry:groups) {
+        if(entry.second.size()<2U)continue;
+        size_t const batch_id=batches.size();
+        batches.push_back(entry.second);
+        for(size_t index:entry.second)batch_of[index]=batch_id;
+    }
+    std::vector<bool> emitted(batches.size(),false);
+    std::vector<gpu_3do_instancing_schedule_entry> ordered;
+    ordered.reserve(records.size());
+    for(size_t i=0;i<records.size();++i) {
+        size_t const id=batch_of[i];
+        if(id==0U)ordered.push_back({i,0U});
+        else if(!emitted[id]) {
+            for(size_t index:batches[id])
+                ordered.push_back({index,id});
+            emitted[id]=true;
+        }
+    }
+    return ordered;
+}
 } // namespace jkgm

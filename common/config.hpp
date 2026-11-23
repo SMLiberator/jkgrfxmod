@@ -86,6 +86,7 @@ namespace jkgm {
         float ssr_ray_thickness = 0.6f; // world-space depth tolerance
         float ssr_max_distance = 64.0f; // JK world units
         bool enable_gpu_sprite_instancing = true; // compatible SPR instancing, disable for diagnostics
+        bool enable_gpu_3do_instancing = false; // opt-in exact opaque 3DO batches
         bool experimental_half_res_fluid_sprites = false; // opt-in half-size fluid SPR layer
         unsigned int fluid_sprite_layer_budget = 0U; // 0=unlimited; 1..255 surviving layers per half-size pixel
         bool enable_saber_trails = true; // GPU-cached saber fan during marker 4/5 collision windows

@@ -468,6 +468,10 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             j.at("enable_gpu_sprite_instancing").get_to(
                 rv->enable_gpu_sprite_instancing);
         }
+        if(j.contains("enable_gpu_3do_instancing")) {
+            j.at("enable_gpu_3do_instancing").get_to(
+                rv->enable_gpu_3do_instancing);
+        }
         if(j.contains("experimental_half_res_fluid_sprites")) {
             j.at("experimental_half_res_fluid_sprites").get_to(
                 rv->experimental_half_res_fluid_sprites);

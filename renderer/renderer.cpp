@@ -1361,6 +1361,16 @@ namespace jkgm {
                      " saved_draw_calls_avg=",
                      (profile_window.gpu_sprite_instanced_quads-
                       profile_window.gpu_sprite_instanced_calls)/frames);
+            LOG_INFO("PERF gpu_3do_instancing enabled=",
+                      the_config->enable_gpu_3do_instancing?1:0,
+                      " calls_avg=",
+                      profile_window.gpu_3do_instanced_calls/frames,
+                      " batched_ranges_avg=",
+                      profile_window.gpu_3do_instanced_ranges/frames,
+                      " saved_ranges_avg=",
+                      (profile_window.gpu_3do_instanced_ranges-
+                       profile_window.gpu_3do_instanced_calls)/frames,
+                      " NOTE=actual_instanced_opaque_GL_calls;not_total_GL_savings");
             auto const &rejects=profile_window.sprite_gpu_quad_rejects;
             LOG_INFO("PERF sprite_gpu_reject_avg source=",rejects[0]/frames,
                      " geomode=",rejects[1]/frames,
@@ -4922,6 +4932,7 @@ namespace jkgm {
                 size_t order;
                 // Nonzero for opaque SPRs grouped at collection time.
                 size_t sprite_batch_group=0;
+                size_t model_batch_group=0; // exact cross-Thing opaque batch
             };
             // Opaque SPR draw state, excluding each Thing's transform.
             using sprite_batch_key=std::tuple<
@@ -5317,13 +5328,14 @@ namespace jkgm {
                     draws.swap(merged_draws);
                 }
             }
-            // Assess cross-Thing instancing without modifying draw order,
-            // GL calls or shaders. CloneModel copies the filename; native
-            // material and snapshot revision can diverge, so compare the
-            // ACTUAL cached geometry ID and exact geometry/group pointers.
-            // Sampling every 30 frames avoids taxing normal profiling.
-            if(gpu_profiling && prepare_both &&
-               gpu_3do_present_serial%30U==0U) {
+            // A sampled feasibility audit and actual opt-in opaque batching
+            // share the same CloneModel-safe identity and rejection rules.
+            bool const sample_instancing=gpu_profiling && prepare_both &&
+                gpu_3do_present_serial%30U==0U;
+            bool const submit_instancing=
+                the_config->enable_gpu_3do_instancing && prepare_both &&
+                !transparent && !post_exempt && !decals_only;
+            if(sample_instancing || submit_instancing) {
                 static thread_local
                     std::vector<gpu_3do_instancing_audit_record> records;
                 records.clear();
@@ -5384,6 +5396,7 @@ namespace jkgm {
                         valid_state;
                     records.push_back(record);
                 }
+                if(sample_instancing) {
                 auto const audit=audit_gpu_3do_instancing(records);
                 ++profile_frame.gpu_instancing_audit_samples;
                 profile_frame.gpu_instancing_source_draws+=audit.source_draws;
@@ -5414,6 +5427,19 @@ namespace jkgm {
                         audit.rejects_all[i];
                     profile_frame.gpu_instancing_rejects_repeated[i]+=
                         audit.rejects_repeated[i];
+                }
+                }
+                if(submit_instancing) {
+                    auto const order=schedule_gpu_3do_instancing(records);
+                    static thread_local std::vector<pending_draw> reordered;
+                    reordered.clear();
+                    reordered.reserve(draws.size());
+                    for(auto const &item:order) {
+                        auto next=draws[item.source_index];
+                        next.model_batch_group=item.batch_id;
+                        reordered.push_back(next);
+                    }
+                    draws.swap(reordered);
                 }
             }
             if(transparent && !(post_exempt &&
@@ -5561,6 +5587,19 @@ namespace jkgm {
                     material.blend!=material_blend_mode::fluid &&
                     gpu_specular_parameters(material,false).first<=0.0f;
                 size_t sprite_batch_count=0;
+                size_t model_batch_count=0;
+                if(draw.model_batch_group!=0U && !transparent) {
+                    size_t end=draw_start+1;
+                    while(end<draws.size() &&
+                          end-draw_start<
+                              shaders::gpu_3do_preview_shader::max_sprite_instances &&
+                          draws[end].model_batch_group==draw.model_batch_group)
+                        ++end;
+                    if(end>draw_start+1) {
+                        draw_end=end;
+                        model_batch_count=end-draw_start;
+                    }
+                }
                 if(draw.sprite_batch_group!=0U) {
                     size_t end=draw_start+1;
                     while(end<draws.size() &&
@@ -5607,7 +5646,8 @@ namespace jkgm {
                 // so the painter order, alpha blending and depth tests are
                 // unchanged. Never reorder alpha ranges by material as in
                 // the opaque path.
-                while(sprite_batch_count==0 && draw_end<draws.size()) {
+                while(sprite_batch_count==0 && model_batch_count==0 &&
+                      draw_end<draws.size()) {
                     auto const &other=draws[draw_end];
                     if(other.instance!=draw.instance ||
                        other.group->material!=group.material ||
@@ -5999,18 +6039,21 @@ namespace jkgm {
                 // a single glDrawElements can replace a multi-draw when
                 // the exact index sequence would remain unchanged.
                 size_t emitted_subranges=1U;
-                if(sprite_batch_count>1) {
+                if(sprite_batch_count>1 || model_batch_count>1) {
+                    // Existing SPR array supports the same rigid 3DO matrices.
                     std::array<std::array<float,12>,
                         shaders::gpu_3do_preview_shader::max_sprite_instances>
                             sprite_models{};
                     for(size_t n=draw_start;n<draw_end;++n)
                         sprite_models[n-draw_start]=draws[n].context->modelview;
-                    prog.set_sprite_instances(sprite_models,sprite_batch_count);
+                    size_t const count=
+                        std::max(sprite_batch_count,model_batch_count);
+                    prog.set_sprite_instances(sprite_models,count);
                     glDrawElementsInstanced(GL_TRIANGLES,
                         static_cast<GLsizei>(group.count),GL_UNSIGNED_INT,
                         reinterpret_cast<void const *>(
                             uintptr_t(group.offset)*sizeof(uint32_t)),
-                        static_cast<GLsizei>(sprite_batch_count));
+                        static_cast<GLsizei>(count));
                     prog.set_sprite_instances(sprite_models,0);
                     // Restore the normal per-Thing uniform path.
                     active_instance=nullptr;
@@ -6100,6 +6143,11 @@ namespace jkgm {
                     if(draw.sprite_batch_group!=0U || sprite_batch_eligible)
                         profile_frame.gpu_sprite_instancing_eligible+=
                             sprite_batch_count>1 ? sprite_batch_count : 1U;
+                    if(model_batch_count>1) {
+                        ++profile_frame.gpu_3do_instanced_calls;
+                        profile_frame.gpu_3do_instanced_ranges+=
+                            model_batch_count;
+                    }
                     if(sprite_batch_count>1) {
                         ++profile_frame.gpu_sprite_instanced_calls;
                         profile_frame.gpu_sprite_instanced_quads+=

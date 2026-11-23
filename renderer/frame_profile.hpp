@@ -83,6 +83,7 @@ struct profile_sample {
   // active reason slots without including heavy 3DO types here.
   std::array<uint64_t,32> gpu_instancing_rejects_all{};
   std::array<uint64_t,32> gpu_instancing_rejects_repeated{};
+  uint64_t gpu_3do_instanced_calls=0,gpu_3do_instanced_ranges=0;
   uint64_t gpu_sprite_instanced_calls=0,gpu_sprite_instanced_quads=0;
   uint64_t gpu_sprite_instancing_eligible=0;
   uint64_t gpu_opaque_draw_calls=0,gpu_transparent_draw_calls=0;
@@ -211,6 +212,8 @@ struct profile_sample {
         gpu_instancing_rejects_repeated[i]+=
             o.gpu_instancing_rejects_repeated[i];
     }
+    gpu_3do_instanced_calls+=o.gpu_3do_instanced_calls;
+    gpu_3do_instanced_ranges+=o.gpu_3do_instanced_ranges;
     gpu_sprite_instanced_calls+=o.gpu_sprite_instanced_calls;
     gpu_sprite_instanced_quads+=o.gpu_sprite_instanced_quads;
     gpu_sprite_instancing_eligible+=o.gpu_sprite_instancing_eligible;
