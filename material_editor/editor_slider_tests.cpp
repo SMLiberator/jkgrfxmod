@@ -1,6 +1,7 @@
 #include "editor_slider.hpp"
 #include <cmath>
 #include <iostream>
+#include <string>
 #include <stdexcept>
 
 void require(bool condition,const char *message) {
@@ -73,28 +74,22 @@ void testDoubleClick(ImGuiSliderFlags flags) {
             "Numeric editor must retain focus after double-click");
 
     const auto typed=drawFrame(value,flags,"1.75");
-    if(!typed.modified) {
-        const ImGuiContext &ctx=*GImGui;
-        std::cerr<<"Slider diagnostic: value="<<value
-                 <<" typed-temp="<<typed.tempInput
-                 <<" active-id="<<ctx.ActiveId
-                 <<" temp-id="<<ctx.TempInputId
-                 <<" text-id="<<ctx.InputTextState.ID
-                 <<" deactivated-id="<<ctx.InputTextDeactivatedState.ID
-                 <<" nav-activate="<<ctx.NavActivateId
-                 <<" want-text="<<ctx.IO.WantTextInput
-                 <<" want-keyboard="<<ctx.IO.WantCaptureKeyboard
-                 <<" queue-length="<<ctx.IO.InputQueueCharacters.Size
-                 <<" mouse-down="<<ctx.IO.MouseDown[0]
-                 <<" ctrl="<<ctx.IO.KeyCtrl
-                 <<" text="<<(ctx.InputTextState.TextA.Data
-                      ?ctx.InputTextState.TextA.Data:"(null)")<<"\\n";
-    }
-    require(typed.modified,
-            "Typed numeric value must be accepted by the slider");
+    require(typed.tempInput,
+            "Typing must leave the slider text editor active");
+    require(!typed.modified,
+            "Native ImGui text input should commit on Enter or focus loss");
+    require(GImGui->InputTextState.TextA.Data &&
+            std::string(GImGui->InputTextState.TextA.Data)=="1.75",
+            "Entered numeric text must replace the selected slider value");
+
+    io.AddKeyEvent(ImGuiKey_Enter,true);
+    const auto committed=drawFrame(value,flags);
+    require(committed.modified,
+            "Enter must commit the typed numeric slider value");
     const float expected=flags&ImGuiSliderFlags_AlwaysClamp?1.0f:1.75f;
     require(std::fabs(value-expected)<0.0001f,
-            "Typed value must follow the slider's clamping policy");
+            "Committed value must follow the slider's input clamping policy");
+    io.AddKeyEvent(ImGuiKey_Enter,false);
 
     ImGui::DestroyContext();
 }
