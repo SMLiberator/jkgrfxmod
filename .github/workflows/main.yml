@@ -365,6 +365,8 @@ jobs:
       shell: cmd
       run: |
         python3 tests/world_frame_reuse.py || exit /b 1
+    - name: GPU cached MAT depth bias forward and reflection parity
+      run: python3 tests/gpu_cached_depth_bias.py
     - name: Directional sunlight and empty-world shadow regression tests
       shell: cmd
       run: |
