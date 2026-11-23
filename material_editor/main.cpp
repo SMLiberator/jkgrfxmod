@@ -1170,43 +1170,60 @@ private:
                 resetView();
             }
         };
-        shapeButton("Sphere",PreviewShape::Sphere);
-        ImGui::SameLine();
-        shapeButton("Cube",PreviewShape::Cube);
-        ImGui::SameLine();
-        shapeButton("Plane",PreviewShape::Plane);
-        if(ImGui::Button("Reset view (Space)"))resetView();
-        ImGui::SameLine();
-        ImGui::SetNextItemWidth(150);
-        const char *options[]={"Studio","Outdoor","Night"};
-        if(ImGui::Combo("Fallback environment",&environment_,options,3))
-            preview_->setPreset(environment_);
-        if(ImGui::Button("Override envmap...")) {
-            std::string path=chooseFile(window_,true);
-            if(!path.empty()) {
-                preview_->setEnvironmentOverride(path);override_=path;
+        // Group related controls into responsive columns rather than a long,
+        // irregular sequence of left-aligned rows. Narrow dock layouts
+        // automatically stack groups without squeezing the preview buttons.
+        const float toolbarWidth=ImGui::GetContentRegionAvail().x;
+        const int toolbarColumns=toolbarWidth>=980.0f?3:
+                                 toolbarWidth>=610.0f?2:1;
+        if(ImGui::BeginTable("##previewControls",toolbarColumns,
+                             ImGuiTableFlags_SizingStretchSame|
+                             ImGuiTableFlags_PadOuterX)) {
+            ImGui::TableNextColumn();
+            ImGui::TextDisabled("SHAPE");
+            shapeButton("Sphere",PreviewShape::Sphere);
+            ImGui::SameLine();
+            shapeButton("Cube",PreviewShape::Cube);
+            ImGui::SameLine();
+            shapeButton("Plane",PreviewShape::Plane);
+            if(ImGui::Button("Reset view (Space)"))resetView();
+
+            ImGui::TableNextColumn();
+            ImGui::TextDisabled("ENVIRONMENT");
+            ImGui::SetNextItemWidth(150);
+            const char *options[]={"Studio","Outdoor","Night"};
+            if(ImGui::Combo("Fallback##environment",&environment_,options,3))
+                preview_->setPreset(environment_);
+            if(ImGui::Button("Override envmap...")) {
+                std::string path=chooseFile(window_,true);
+                if(!path.empty()) {
+                    preview_->setEnvironmentOverride(path);override_=path;
+                }
             }
+            ImGui::SameLine();
+            if(ImGui::Button("Use pack envmap")) {
+                override_.clear();preview_->setEnvironmentOverride({});
+            }
+
+            ImGui::TableNextColumn();
+            ImGui::TextDisabled("ANIMATION & VIEW");
+            ImGui::Checkbox("Animate",&animationPlaying_);
+            ImGui::SameLine();
+            if(ImGui::Button("Restart animation"))animationSeconds_=0.0;
+            ImGui::Checkbox("Fresnel",&envFresnel_);
+            ImGui::SameLine();
+            if(ImGui::Checkbox("Orthographic",&orthographic_) &&
+               shape_==PreviewShape::Cube) {
+                // Retain pan when changing the cube's optical projection.
+                const auto previous=cubeCenteredTarget(!orthographic_);
+                const auto next=cubeCenteredTarget(orthographic_);
+                for(size_t axis=0;axis<3;++axis)
+                    orbitTarget_[axis]+=next[axis]-previous[axis];
+                dragStartTarget_=orbitTarget_;
+            }
+            ImGui::EndTable();
         }
-        ImGui::SameLine();
-        if(ImGui::Button("Use material / pack envmap")) {
-            override_.clear();preview_->setEnvironmentOverride({});
-        }
-        ImGui::Checkbox("Animate",&animationPlaying_);
-        ImGui::SameLine();
-        if(ImGui::SmallButton("Restart animation"))animationSeconds_=0.0;
-        ImGui::Checkbox("Fresnel",&envFresnel_);
-        ImGui::SameLine();
-        if(ImGui::Checkbox("Orthographic",&orthographic_) &&
-           shape_==PreviewShape::Cube) {
-            // Preserve user panning when switching projection, but account
-            // for the different optical centers of parallel and perspective
-            // rays. No camera angle, zoom or manual pan is reset.
-            const auto previous=cubeCenteredTarget(!orthographic_);
-            const auto next=cubeCenteredTarget(orthographic_);
-            for(size_t axis=0;axis<3;++axis)
-                orbitTarget_[axis]+=next[axis]-previous[axis];
-            dragStartTarget_=orbitTarget_;
-        }
+        ImGui::Separator();
         ImVec2 area=ImGui::GetContentRegionAvail();
         area.x=std::max(area.x,64.0f);
         area.y=std::max(area.y-35.0f,64.0f);
