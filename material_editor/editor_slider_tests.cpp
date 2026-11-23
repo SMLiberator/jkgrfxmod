@@ -64,6 +64,14 @@ void testDoubleClick(ImGuiSliderFlags flags) {
     require(next.tempInput,
             "Numeric editor must retain focus after double-click");
 
+    io.AddInputCharactersUTF8("1.75");
+    const auto typed=drawFrame(value,flags);
+    require(typed.modified,
+            "Typed numeric value must be accepted by the slider");
+    const float expected=flags&ImGuiSliderFlags_AlwaysClamp?1.0f:1.75f;
+    require(std::fabs(value-expected)<0.0001f,
+            "Typed value must follow the slider's clamping policy");
+
     ImGui::DestroyContext();
 }
 int main() {
