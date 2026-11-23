@@ -177,6 +177,16 @@ void testExclusiveAlbedoSource() {
     editor_source::validate(root,editor_source::Kind::Source);
     check(root["materials"][0]["replaces"][0]=="mat/body.mat",
           "albedo selection leaves MAT replacement targets untouched");
+    // Validating resolved settings catches a legacy file with both image
+    // sources selected, while respecting explicit overrides of pack defaults.
+    material["keep_albedo"]=true;
+    material["albedo_map"]="bad.png";
+    bool rejected=false;
+    try {editor_source::validate(root,editor_source::Kind::Source);}
+    catch(const std::runtime_error &) {rejected=true;}
+    check(rejected,"conflicting local image and original MAT must be rejected");
+    editor_source::chooseOriginalMatAlbedo(material,true);
+    editor_source::validate(root,editor_source::Kind::Source);
 }
 void testAnimationInheritance() {
     Document source={
