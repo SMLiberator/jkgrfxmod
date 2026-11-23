@@ -44,6 +44,46 @@ add_executable(jkgm-material-editor WIN32
   source_pack.hpp
   editor_ini_settings.hpp
   ../glad/glad.cpp)
+# Bundled CC0 photographic HDR panoramas for the three preview presets.
+# Encode as Win32 RCDATA inside the executable, preserving the single-file
+# runtime distribution. Offline/unavailable downloads leave the built-in
+# synthetic fallback available; no asset files are needed at runtime.
+if(WIN32)
+  enable_language(RC)
+  set(_preset_rc "#include <windows.h>\\n")
+  set(_preset_names studio_small_02 hilly_terrain_01 vignaioli_night)
+  set(_preset_id 401)
+  foreach(_name IN LISTS _preset_names)
+    set(_hdr "${CMAKE_CURRENT_BINARY_DIR}/${_name}_1k.hdr")
+    if(NOT EXISTS "${_hdr}")
+      file(DOWNLOAD
+        "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/${_name}_1k.hdr"
+        "${_hdr}" STATUS _download_result TIMEOUT 35 INACTIVITY_TIMEOUT 15
+        TLS_VERIFY ON)
+      list(GET _download_result 0 _download_code)
+      if(NOT _download_code EQUAL 0)
+        message(WARNING "Preview HDRI ${_name}: ${_download_result}; using fallback.")
+        file(REMOVE "${_hdr}")
+      endif()
+    endif()
+    if(EXISTS "${_hdr}")
+      file(SIZE "${_hdr}" _hdr_size)
+      if(_hdr_size GREATER 1024)
+        file(TO_CMAKE_PATH "${_hdr}" _rc_path)
+        string(APPEND _preset_rc "${_preset_id} RCDATA \\"${_rc_path}\\"\\n")
+        message(STATUS "Bundling Poly Haven HDRI: ${_name} (${_hdr_size} bytes)")
+      else()
+        file(REMOVE "${_hdr}")
+        message(WARNING "Incomplete HDRI ${_name}; using fallback.")
+      endif()
+    endif()
+    math(EXPR _preset_id "${_preset_id}+1")
+  endforeach()
+  set(_preset_resource "${CMAKE_CURRENT_BINARY_DIR}/preview_environment.rc")
+  file(WRITE "${_preset_resource}" "${_preset_rc}")
+  target_sources(jkgm-material-editor PRIVATE "${_preset_resource}")
+endif()
+
 target_include_directories(jkgm-material-editor PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/.. ${CMAKE_CURRENT_SOURCE_DIR}/../glad)
 target_link_libraries(jkgm-material-editor PRIVATE
