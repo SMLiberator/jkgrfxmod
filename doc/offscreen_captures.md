@@ -164,7 +164,9 @@ CameraToMat(cameraThing, targetMat, FOV);
   aspect ratio, never at main-renderer resolution. Nonresident MAT targets
   fail closed until their native MAT/D3D cache mapping is available.
 - Each target has a dedicated retained RGBA16F offscreen texture and depth
-  attachment, mipmapped after a **requested** render. At most four captured
+  attachment, mipmapped after a **requested** render. Photographed albedos use
+  repeat wrapping in both axes, matching tiled JK MAT UVs; planar reflection
+  targets continue to clamp at their edges. At most four captured
   MAT images can be held at once. When no new photograph is pending, capture
   shader setup, portal traversal, Thing discovery, and draw submission are
   entirely skipped. Failed recapture attempts leave the previous valid

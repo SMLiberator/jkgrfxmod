@@ -5,6 +5,7 @@ read=lambda s:(root/s).read_text(encoding="utf-8")
 main=read("renderer/main.cpp")
 renderer=read("renderer/renderer.cpp")
 capture=read("renderer/camera_to_mat_capture.inc")
+framebuffer=read("renderer/offscreen_capture_target.hpp")
 controls=read("renderer/camera_to_mat.hpp")
 runtime=read("renderer/runtime_material.hpp")
 doc=read("doc/offscreen_captures.md")
@@ -74,6 +75,11 @@ assert "visible_thing_sectors" in capture
 assert "visible_surfaces" in capture
 assert "request.world!=world" in capture
 assert "surface->desc.dwWidth" in capture and "surface->desc.dwHeight" in capture
+# Photo texture addressing must match tiled JK MAT UVs; reflections stay clamped.
+assert "entry.target->ensure(width,height,true)" in capture
+assert "bool ensure(int width,int height,bool repeat_wrap=false)" in framebuffer
+assert framebuffer.count("repeat_wrap?GL_REPEAT:GL_CLAMP_TO_EDGE")==2
+assert "repeat_wrap_==repeat_wrap" in framebuffer
 assert "make_offscreen_capture_projection(" in capture
 assert "camera.fov=request.fov;" in capture
 assert "projection.orthographic?nullptr:&frustum" in capture

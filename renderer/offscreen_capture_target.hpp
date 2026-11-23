@@ -14,6 +14,7 @@ class offscreen_capture_target {
     GLuint fbo_=0,color_=0,depth_=0;
     int width_=0,height_=0;
     bool failed_=false;
+    bool repeat_wrap_=false;
 public:
     offscreen_capture_target()=default;
     offscreen_capture_target(offscreen_capture_target const &)=delete;
@@ -27,13 +28,18 @@ public:
         if(fbo_)glDeleteFramebuffers(1,&fbo_);
         depth_=color_=fbo_=0;
         width_=height_=0;
+        repeat_wrap_=false;
     }
-    bool ensure(int width,int height) {
+    // Ordinary reflection captures clamp at the border. CameraToMat
+    // replaces a tiled JK MAT, so its sampled image must repeat instead.
+    bool ensure(int width,int height,bool repeat_wrap=false) {
         offscreen_capture_state_invalidator invalidate_on_return;
         if(width<=0 || height<=0 || width>16384 || height>16384)
             return false;
-        if(failed_ && width==width_ && height==height_)return false;
-        if(fbo_ && width_==width && height_==height)return true;
+        if(failed_ && width==width_ && height==height_ &&
+           repeat_wrap_==repeat_wrap)return false;
+        if(fbo_ && width_==width && height_==height &&
+           repeat_wrap_==repeat_wrap)return true;
         GLint max_size=0;
         glGetIntegerv(GL_MAX_TEXTURE_SIZE,&max_size);
         if(width>max_size || height>max_size)return false;
@@ -46,6 +52,7 @@ public:
         glGetIntegerv(GL_RENDERBUFFER_BINDING,&old_rb);
         release();
         width_=width;height_=height;failed_=false;
+        repeat_wrap_=repeat_wrap;
         glGenFramebuffers(1,&fbo_);
         glGenTextures(1,&color_);
         glGenRenderbuffers(1,&depth_);
@@ -57,8 +64,10 @@ public:
                      GL_RGBA,GL_HALF_FLOAT,nullptr);
         glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR_MIPMAP_LINEAR);
         glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,
+                        repeat_wrap?GL_REPEAT:GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,
+                        repeat_wrap?GL_REPEAT:GL_CLAMP_TO_EDGE);
         // Allocate the mip chain so the texture is complete before the first
         // capture; subsequent frames refresh it once after drawing.
         glGenerateMipmap(GL_TEXTURE_2D);
@@ -79,6 +88,7 @@ public:
         glActiveTexture(GLenum(old_active));
         if(status!=GL_FRAMEBUFFER_COMPLETE) {
             release();width_=width;height_=height;failed_=true;
+            repeat_wrap_=repeat_wrap;
             return false;
         }
         return true;

@@ -18,6 +18,21 @@ int main() {
     assert(eq(middle[2],0) && eq(middle[3],1));
     auto edge=offscreen_capture_clip_coordinates(o,{{8.0f,64.0f,4.0f}});
     assert(eq(edge[0],1) && eq(edge[1],1));
+    // CameraToMat's 128x128 still captures must accept FOV=0 as a
+    // one-world-unit orthographic view and positive FOV as perspective.
+    auto photo_ortho=make_offscreen_capture_projection(
+        128,128,0.0f,1.0f,128.0f);
+    assert(photo_ortho.valid && photo_ortho.orthographic);
+    assert(eq(photo_ortho.aspect,1.0f) &&
+           eq(photo_ortho.half_horizontal,0.5f));
+    auto photo_mid=offscreen_capture_clip_coordinates(
+        photo_ortho,{{0.0f,4.0f,0.0f}});
+    assert(eq(photo_mid[0],0.0f) && eq(photo_mid[1],0.0f));
+    assert(eq(photo_mid[3],1.0f));
+    auto photo_perspective=make_offscreen_capture_projection(
+        128,128,75.0f,1.0f,128.0f);
+    assert(photo_perspective.valid && !photo_perspective.orthographic);
+    assert(photo_perspective.half_horizontal>0.0f);
     assert(!make_offscreen_capture_projection(512,256,0,0,128).valid);
     assert(!make_offscreen_capture_projection(0,256,90,0,128).valid);
     assert(!make_offscreen_capture_projection(512,256,180,0,128).valid);

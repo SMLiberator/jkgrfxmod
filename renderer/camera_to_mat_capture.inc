@@ -125,7 +125,10 @@
                 if(!width || !height) {continue;}
                 if(!entry.target)
                     entry.target=std::make_unique<offscreen_capture_target>();
-                if(!entry.target->ensure(width,height)) {
+                // JK MAT UVs can tile outside [0,1]. The photographed
+                // albedo must wrap like a regular MAT, not sample one edge
+                // row/column across the entire surface.
+                if(!entry.target->ensure(width,height,true)) {
                     continue;
                 }
                 float const scene_far=reflection_capture_scene_far(camera.position);
