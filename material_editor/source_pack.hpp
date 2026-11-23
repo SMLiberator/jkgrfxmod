@@ -8,6 +8,7 @@
 #include <array>
 #include <cctype>
 #include <filesystem>
+#include <fstream>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -15,6 +16,37 @@
 namespace editor_source {
 using Document = json::json;
 enum class Kind { Source, Compiled };
+
+// File and per-material revert share the same document semantics as Open.
+ // Parse into a temporary document first: malformed or missing disk data
+ // must not change the editor's unsaved in-memory state.
+inline Document readPack(const std::filesystem::path &filename) {
+    std::ifstream stream(filename,std::ios::binary);
+    if(!stream)throw std::runtime_error("Unable to open material pack.");
+    Document doc;
+    stream>>doc;
+    if(!doc.is_object()||!doc.contains("materials")||
+       !doc["materials"].is_array())
+        throw std::runtime_error(
+            "Not a material pack (missing materials array).");
+    return doc;
+}
+
+// Restore exactly one raw material object; never flatten source inheritance
+// or affect other materials and pack-wide defaults.
+inline bool revertMaterial(Document &current,const Document &saved,
+                           size_t index) {
+    if(!current.is_object()||!saved.is_object()||
+       !current.contains("materials")||!saved.contains("materials")||
+       !current["materials"].is_array()||!saved["materials"].is_array()||
+       index>=current["materials"].size()||
+       index>=saved["materials"].size())
+        return false;
+    if(current["materials"][index]==saved["materials"][index])
+        return false;
+    current["materials"][index]=saved["materials"][index];
+    return true;
+}
 
 inline std::string lowerAscii(std::string name) {
     std::transform(name.begin(),name.end(),name.begin(),[](unsigned char ch) {
