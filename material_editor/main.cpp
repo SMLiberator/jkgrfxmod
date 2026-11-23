@@ -1941,8 +1941,18 @@ private:
         if(!ImGui::CollapsingHeader("Source material defaults"))return;
         ImGui::TextDisabled("Defaults apply where a material has no override.");
         if(ImGui::TreeNode("Default textures")) {
+            // Original JK MAT albedo is a texture-source choice, not a
+            // renderer mode; keep it beside the corresponding PNG control.
+            packDefaultBool("Keep original MAT albedo","keep_albedo");
+            const bool keepOriginal=root_.contains("keep_albedo")
+                ?root_.value("keep_albedo",false)
+                :root_.value("use_original_albedo",false);
+            if(!keepOriginal)
+                packTextureField("Albedo map","albedo_map");
+            else
+                ImGui::TextDisabled("Albedo uses the original MAT texture.");
             for(const auto &entry:std::initializer_list<std::pair<const char*,const char*>>{
-                {"Albedo map","albedo_map"},{"Emissive map","emissive_map"},
+                {"Emissive map","emissive_map"},
                 {"Normal map","normal_map"},{"Normal map 2","normal_map2"},
                 {"Displacement map","displacement_map"},
                 {"Surface map","surface_map"},{"MatCap map","matcap_map"},
@@ -1969,7 +1979,6 @@ private:
             ImGui::TreePop();
         }
         if(ImGui::TreeNode("Rendering defaults")) {
-            packDefaultBool("Keep original MAT albedo","keep_albedo");
             packDefaultBool("Texture filtering","texture_filtering");
             const char *refModes[]={"envmap","screen","fixed","planar",
                                     "hemi","cube","shared"};
@@ -1984,9 +1993,12 @@ private:
             packDefaultFloat("Fluid thickness","fluid_thickness",0);
             ImGui::TreePop();
         }
-        if(root_.value("keep_albedo",false)&&root_.contains("albedo_map"))
+        if((root_.contains("keep_albedo")
+                 ?root_.value("keep_albedo",false)
+                 :root_.value("use_original_albedo",false))&&
+           root_.contains("albedo_map"))
             ImGui::TextColored(ImVec4(1,.6f,.3f,1),
-                "Warning: keep_albedo and albedo_map defaults conflict.");
+                "Source pack has conflicting albedo defaults.");
         if(ImGui::TreeNode("Animation defaults")) {
             scrollField("Albedo scroll (U,V) / sec","albedo_scroll",true);
             scrollField("Emissive scroll (U,V) / sec","emissive_scroll",true);
