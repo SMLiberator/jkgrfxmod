@@ -369,10 +369,6 @@ namespace {
     void clear_moving_sprite_decals();
     uint64_t next_gpu_id=1;
     uint64_t gpu_frame_serial=1;
-    // Per-mesh native fallback reason retained for the shadow-only sidecar.
-    // Visible GPU lighting is limited to 16 point lights, but the original
-    // opaque mesh must still contribute to sunlight depth if it falls back.
-    thread_local bool gpu_mesh_light_overflow=false;
     jkgm::gpu_3do_native_stats gpu_native_stats;
     // Soft-cap sweep is at most once per frame, never per Thing instance.
     // The shared_ptr on pending instances preserves current-frame geometry.
@@ -654,67 +650,83 @@ namespace {
     // Local positions are used for per-vertex illumination, so they travel
     // with the cached mesh while the current Thing's lights are uniforms.
     // The inverse works for the reflected/mirrored R/F/U bases JK permits.
+    // A 17th light never rejects the mesh. The shader still uses its fixed
+    // 16-light budget; select the most influential of up to 64 camera lights.
     bool snapshot_gpu_3do_lighting(native_mesh const &m,
-                                   float const *placement,
-                                   jkgm::gpu_3do_instance &instance)
+                                    float const *placement,
+                                    jkgm::gpu_3do_instance &instance)
     {
         constexpr uintptr_t camera_global=0x0073A418U;
         if(!gpu_span_readable(reinterpret_cast<void const *>(camera_global),4))
-            return false;
+            return false; // invalid camera, not a light-count fallback
         uintptr_t camera=0;
         std::memcpy(&camera,reinterpret_cast<void const *>(camera_global),4);
-        // Original x86 rdCamera: ambient=0x54, count=0x58,
-        // 64 light pointers=0x5c, 64 world positions=0x15c,
-        // attenuationMin=0x45c.
+        // Native x86 rdCamera: ambient=0x54, count=0x58,
+        // 64 light pointers=0x5c, world positions=0x15c, attenuation=0x45c.
         if(camera<0x10000U ||
            !gpu_span_readable(reinterpret_cast<void const *>(camera),0x464U))
             return false;
-        float ambient=0.0f, attenuation=0.0f;
+        float ambient=0.0f,attenuation=0.0f;
         int32_t count=0;
         std::memcpy(&ambient,reinterpret_cast<void const *>(camera+0x54),4);
         std::memcpy(&count,reinterpret_cast<void const *>(camera+0x58),4);
         std::memcpy(&attenuation,reinterpret_cast<void const *>(camera+0x45c),4);
-        if(!std::isfinite(ambient) || !std::isfinite(attenuation) ||
-           count<0 || count>64 || attenuation<0.0f || attenuation>100.0f)
-            return false;
+        // Corrupted light metadata may reduce illumination, never geometry.
+        if(!std::isfinite(ambient)) {
+            ambient=instance.ambient;
+            ++gpu_native_stats.light_records_skipped;
+        }
+        if(!std::isfinite(attenuation) || attenuation<0.0f ||
+           attenuation>100.0f) {
+            attenuation=0.0f;
+            ++gpu_native_stats.light_records_skipped;
+        }
+        if(count<0 || count>64) {
+            count=std::max(0,std::min(count,64));
+            ++gpu_native_stats.light_records_skipped;
+        }
         instance.ambient=jkgm::clamp_authored_light(
             ambient,the_config && the_config->enable_baked_overbright);
         instance.attenuation=attenuation;
-        // With no dynamic point lights the shader uses the authored JK
-        // vertex intensity/ambient only. There is no distance attenuation
-        // to miscompute, so a nonuniform or mirrored node is safe to cache.
         if(count==0)return true;
 
         float const rx=placement[0],ry=placement[1],rz=placement[2];
         float const fx=placement[3],fy=placement[4],fz=placement[5];
         float const ux=placement[6],uy=placement[7],uz=placement[8];
-        float const cfx=fy*uz-fz*uy, cfy=fz*ux-fx*uz, cfz=fx*uy-fy*ux;
-        float const determinant=rx*cfx+ry*cfy+rz*cfz;
-        // A nonrigid node is safe to cache with dynamic lights as long as
-        // its affine matrix is invertible. The preview shader evaluates
-        // light distances in transformed camera/world space for such nodes.
-        // Singular transforms must still use native JK lighting.
-        bool const matrix_invertible=std::isfinite(determinant) &&
-            std::fabs(determinant)>1.e-6f;
-        bool nonrigid_lighting=!matrix_invertible ||
-            std::fabs(std::fabs(determinant)-1.0f)>0.05f;
+        float const cfx=fy*uz-fz*uy,cfy=fz*ux-fx*uz,cfz=fx*uy-fy*ux;
+        float const det=rx*cfx+ry*cfy+rz*cfz;
+        bool const invertible=std::isfinite(det) && std::fabs(det)>1.e-6f;
+        bool nonrigid=!invertible ||
+            std::fabs(std::fabs(det)-1.0f)>0.05f;
         float max_axis_scale=1.0f;
-        for(int axis=0;axis<3;axis++) {
+        for(int axis=0;axis<3;++axis) {
             int const i=axis*3;
             float const len=placement[i]*placement[i]+
-                            placement[i+1]*placement[i+1]+
-                            placement[i+2]*placement[i+2];
-            if(!std::isfinite(len))return false;
-            if(std::fabs(len-1.0f)>0.05f)nonrigid_lighting=true;
+                placement[i+1]*placement[i+1]+
+                placement[i+2]*placement[i+2];
+            if(!std::isfinite(len)) {
+                ++gpu_native_stats.light_records_skipped;
+                return true; // use baked/ambient lighting on invalid basis
+            }
+            if(std::fabs(len-1.0f)>0.05f)nonrigid=true;
             max_axis_scale=std::max(max_axis_scale,std::sqrt(len));
         }
-
-        for(int i=0;i<count;i++) {
+        if(!invertible) {
+            ++gpu_native_stats.light_records_skipped;
+            return true; // no inverse for light positions; keep the 3DO
+        }
+        float const mesh_reach=std::max(0.0f,m.radius)*max_axis_scale;
+        std::array<jkgm::gpu_3do_light,64> candidates{};
+        std::array<jkgm::gpu_3do_light_priority,64> priorities{};
+        unsigned eligible=0,skipped=0;
+        for(int i=0;i<count;++i) {
             uintptr_t light=0;
-            std::memcpy(&light,reinterpret_cast<void const *>(camera+0x5c+4*i),4);
+            std::memcpy(&light,
+                reinterpret_cast<void const *>(camera+0x5c+4*i),4);
             if(light<0x10000U ||
-               !gpu_span_readable(reinterpret_cast<void const *>(light),0x30))
-                return false;
+               !gpu_span_readable(reinterpret_cast<void const *>(light),0x30)) {
+                ++skipped;continue;
+            }
             uint32_t id=0,enabled=0;
             int32_t type=0;
             float strength=0.0f,radius=0.0f;
@@ -723,70 +735,59 @@ namespace {
             std::memcpy(&enabled,reinterpret_cast<void const *>(light+8),4);
             std::memcpy(&strength,reinterpret_cast<void const *>(light+0x18),4);
             std::memcpy(&radius,reinterpret_cast<void const *>(light+0x28),4);
-            if(id>=64 || !std::isfinite(strength) || !std::isfinite(radius))
-                return false;
-            if(!enabled || strength<=0.0f || radius<=0.0f) continue;
+            if(id>=64 || !std::isfinite(strength) ||
+               !std::isfinite(radius)) {
+                ++skipped;continue;
+            }
+            if(!enabled || strength<=0.0f || radius<=0.0f)continue;
             float pos[3];
-            std::memcpy(pos,reinterpret_cast<void const *>(camera+0x15c+id*12),12);
+            std::memcpy(pos,
+                reinterpret_cast<void const *>(camera+0x15c+id*12),12);
             if(!std::isfinite(pos[0]) || !std::isfinite(pos[1]) ||
-               !std::isfinite(pos[2])) return false;
+               !std::isfinite(pos[2])) {
+                ++skipped;continue;
+            }
             float const dx=pos[0]-placement[9];
             float const dy=pos[1]-placement[10];
             float const dz=pos[2]-placement[11];
-            float const reach=radius+std::max(0.0f,m.radius)*
-                max_axis_scale;
-            if(dx*dx+dy*dy+dz*dz>reach*reach) continue;
-            // Transform into the mesh's local basis as before; for
-            // nonrigid nodes the shader transforms the delta back into
-            // rigid camera space before measuring distance/angle.
-            if(!matrix_invertible)return false;
-            if(nonrigid_lighting)instance.nonrigid_light_transform=true;
-            // Spot/other light types need the original cone/angle logic.
-            // Do not misrender them as omnidirectional point lights.
-            if(type<0 || type>2) return false;
-            if(instance.num_lights==instance.lights.size()) {
-                gpu_mesh_light_overflow=true;
-                // The native fallback can omit this mesh from the GPU sun
-                // caster submission even while both cascades remain ready.
-                // Log the actual threshold hit, not every generic lighting
-                // fallback, to correlate dense exhaust/light VFX with
-                // apparently vanishing scene shadows.
-                if(the_config && the_config->profile_renderer_verbose) {
-                    // Keep enough samples to capture intermittent
-                    // overflows without filling the log every frame.
-                    static uint64_t logged_window=~uint64_t(0);
-                    static unsigned logged_count=0;
-                    uint64_t const window=gpu_frame_serial/30U;
-                    if(logged_window!=window) {
-                        logged_window=window;
-                        logged_count=0;
-                    }
-                    if(logged_count++<3U) {
-                        auto const name_end=std::find(
-                            m.name,m.name+sizeof(m.name),'\0');
-                        LOG_INFO("GPU 3DO dynamic light overflow mesh=",
-                            std::string(m.name,name_end),
-                            " camera_lights=",count,
-                            " overlapping_lights=",instance.num_lights+1U,
-                            " capacity=",instance.lights.size(),
-                            " thing_flags=",active_native_model_thing_flags,
-                            " owner=",active_native_shadow_owner);
-                    }
-                }
-                return false; // Preserve native lighting rather than discard lights.
+            float const distance_sq=dx*dx+dy*dy+dz*dz;
+            float const reach=radius+mesh_reach;
+            if(distance_sq>reach*reach)continue;
+            // Unsupported light types cannot be approximated as point
+            // sources. Ignore that one light; never reject the whole mesh.
+            if(type<0 || type>2) {
+                ++skipped;continue;
             }
-            auto &out=instance.lights[instance.num_lights++];
-            out.local_position={
-                (dx*cfx+dy*cfy+dz*cfz)/determinant,
+            jkgm::gpu_3do_light candidate{};
+            candidate.local_position={
+                (dx*cfx+dy*cfy+dz*cfz)/det,
                 (rx*(dy*uz-dz*uy)+ry*(dz*ux-dx*uz)+
-                 rz*(dx*uy-dy*ux))/determinant,
+                 rz*(dx*uy-dy*ux))/det,
                 (rx*(fy*dz-fz*dy)+ry*(fz*dx-fx*dz)+
-                 rz*(fx*dy-fy*dx))/determinant
+                 rz*(fx*dy-fy*dx))/det
             };
-            out.radius=radius;
-            out.intensity=strength;
-            out.native_id=id;
+            bool valid=true;
+            for(float v:candidate.local_position)
+                valid=valid && std::isfinite(v);
+            if(!valid) {++skipped;continue;}
+            candidate.radius=radius;
+            candidate.intensity=strength;
+            candidate.native_id=id;
+            candidates[eligible]=candidate;
+            priorities[eligible]={strength,radius,distance_sq,id};
+            ++eligible; // <= 64, by validated native camera capacity
         }
+        auto const choice=jkgm::select_gpu_3do_light_budget(
+            priorities,eligible,mesh_reach,attenuation);
+        instance.num_lights=choice.count;
+        for(unsigned i=0;i<choice.count;++i)
+            instance.lights[i]=candidates[choice.indices[i]];
+        instance.nonrigid_light_transform=choice.count>0 && nonrigid;
+        if(choice.clipped>0) {
+            ++gpu_native_stats.light_budget_clipped_meshes;
+            gpu_native_stats.light_budget_dropped+=choice.clipped;
+        }
+        gpu_native_stats.light_records_skipped+=skipped;
         return true;
     }
 
@@ -1903,9 +1904,7 @@ namespace {
         }
         auto const queue_begin=profiling ? std::chrono::steady_clock::now()
                                         : std::chrono::steady_clock::time_point{};
-        gpu_mesh_light_overflow=false;
         bool const queued=jkgm::queue_gpu_3do_mesh(mesh,placement);
-        bool const lighting_capacity_fallback=!queued && gpu_mesh_light_overflow;
         // Actors and some vehicles can legitimately use native rendering
         // (unsupported face/lighting mode or MAT warm-up). Retain just the
         // mesh identity and transform; extract geometry only if a nearby
@@ -2003,14 +2002,13 @@ namespace {
         // shadow-only GPU instance. Previously this was possible ONLY with
         // use_gpu_cache=false, leaving some characters without shadows.
         // Moving Things always need the existing sidecar. Static 3DO
-        // architecture ALSO needs one when >16 dynamic lights force its
-        // visible mesh to native rendering, or its otherwise valid depth
-        // caster disappears from the sun map for that frame. Do not double
-        // snapshot the many ordinary MAT warm-up / geometry fallbacks.
+        // architecture can still require a sidecar for genuinely native
+        // rendering. Excess point lights no longer cause fallback.
+        // Do not double-snapshot ordinary MAT/geometry warm-up fallbacks.
         if(the_config && jkgm::sun_shadow_native_sidecar_needed(
                queued,active_native_model_camera_hud,
                the_config->use_gpu_cache,the_config->enable_sun_shadows,
-               active_native_shadow_dynamic,lighting_capacity_fallback,
+               active_native_shadow_dynamic,false,
                active_native_shadow_owner,active_native_model_thing_flags)) {
             size_t const prior=pending_gpu_instances.size();
             uint64_t const geo_before=gpu_native_stats.geometry_native;
@@ -2053,8 +2051,7 @@ namespace {
                     std::string const name(m.name,name_end);
                     LOG_INFO("SUN native fallback sidecar mesh=",name,
                              " owner=",active_native_shadow_owner,
-                             " light_overflow=",lighting_capacity_fallback?1:0,
-                             " captured=",captured?1:0,
+                                                          " captured=",captured?1:0,
                              " reason=",shadow_failure,
                              " vertices=",m.num_vertices,
                              " faces=",m.num_faces);
@@ -3027,6 +3024,9 @@ jkgm::gpu_3do_native_stats jkgm::consume_gpu_3do_native_stats()
         window.snapshot_other_rejected+=sample.snapshot_other_rejected;
         window.material_native+=sample.material_native;
         window.lighting_native+=sample.lighting_native;
+        window.light_budget_clipped_meshes+=sample.light_budget_clipped_meshes;
+        window.light_budget_dropped+=sample.light_budget_dropped;
+        window.light_records_skipped+=sample.light_records_skipped;
         window.nonrigid_lit_cached+=sample.nonrigid_lit_cached;
         if(frames>=120U) {
             LOG_INFO("PERF GPU fallback taxonomy frames=",frames,
@@ -3039,6 +3039,10 @@ jkgm::gpu_3do_native_stats jkgm::consume_gpu_3do_native_stats()
                      " snapshot_other=",window.snapshot_other_rejected,
                      " material=",window.material_native,
                      " lighting=",window.lighting_native,
+                     " light_budget_clipped_meshes=",
+                     window.light_budget_clipped_meshes,
+                     " light_budget_dropped=",window.light_budget_dropped,
+                     " malformed_lights_skipped=",window.light_records_skipped,
                      " nonrigid_lit_GPU=",window.nonrigid_lit_cached);
             uint64_t mutation_total=0;
             std::ostringstream mutation_detail;

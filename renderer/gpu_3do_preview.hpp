@@ -42,6 +42,63 @@ namespace jkgm {
         float intensity=0.0f;
         uint32_t native_id=0; // rdCamera light index for SideMat tint lookup
     };
+    // Shader budget is fixed at 16 lights, independent of the native
+    // camera's 64 entries. Excess lights must NEVER reject cached geometry.
+    // Rank by a conservative upper bound for light at the nearest point of
+    // the mesh's enclosing sphere; retain original native accumulation order
+    // among the selected lights. No sorting at all below the budget.
+    struct gpu_3do_light_priority {
+        float intensity=0.0f, radius=0.0f, distance_squared=0.0f;
+        uint32_t native_id=0;
+    };
+    struct gpu_3do_light_choice {
+        std::array<unsigned,gpu_3do_max_lights> indices{};
+        unsigned count=0,clipped=0;
+    };
+    inline gpu_3do_light_choice select_gpu_3do_light_budget(
+        std::array<gpu_3do_light_priority,64> const &candidates,
+        unsigned count,float scaled_mesh_radius,float attenuation)
+    {
+        count=std::min(count,64U);
+        gpu_3do_light_choice result{};
+        result.count=std::min(count,gpu_3do_max_lights);
+        result.clipped=count-result.count;
+        if(count<=gpu_3do_max_lights) {
+            for(unsigned i=0;i<count;++i)result.indices[i]=i;
+            return result;
+        }
+        std::array<unsigned,64> order{};
+        std::iota(order.begin(),order.begin()+count,0U);
+        auto const strength=[&](unsigned index) {
+            auto const &light=candidates[index];
+            float const distance=std::sqrt(
+                std::max(0.0f,light.distance_squared));
+            float const nearest=std::max(0.0f,distance-
+                std::max(0.0f,scaled_mesh_radius));
+            return std::max(0.0f,light.intensity-
+                std::max(0.0f,attenuation)*nearest);
+        };
+        std::sort(order.begin(),order.begin()+count,
+            [&](unsigned a,unsigned b) {
+                float const x=strength(a),y=strength(b);
+                if(x!=y)return x>y;
+                auto const &l=candidates[a],&r=candidates[b];
+                if(l.intensity!=r.intensity)
+                    return l.intensity>r.intensity;
+                if(l.distance_squared!=r.distance_squared)
+                    return l.distance_squared<r.distance_squared;
+                if(l.radius!=r.radius)return l.radius>r.radius;
+                if(l.native_id!=r.native_id)
+                    return l.native_id<r.native_id;
+                return a<b;
+            });
+        for(unsigned i=0;i<result.count;++i)
+            result.indices[i]=order[i];
+        // Preserve the old floating-point sum order for the chosen lights.
+        std::sort(result.indices.begin(),
+                  result.indices.begin()+result.count);
+        return result;
+    }
 
     struct gpu_3do_face_plane {
         std::array<float,3> anchor{};
@@ -323,6 +380,8 @@ namespace jkgm {
         uint64_t empty_mesh_native=0; // mesh callback with no drawable vertices/faces
         uint64_t native_span_cache_hits=0,native_span_queries=0;
         uint64_t material_native=0,lighting_native=0;
+        uint64_t light_budget_clipped_meshes=0,light_budget_dropped=0;
+        uint64_t light_records_skipped=0;
         uint64_t nonrigid_lit_cached=0; // visible GPU mesh with transformed lights
         uint64_t ready_material_refs=0,ready_ns=0,ready_cache_hits=0;
     };
