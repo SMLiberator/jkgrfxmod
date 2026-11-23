@@ -99,6 +99,29 @@ for an active layer or map. Inherited source-pack properties count as active.
 Per-material expansion state remains under user control, and adding a new
 feature opens its section without auto-collapsing other sections.
 
+## Material animations
+
+The Albedo, Emissive and Normal maps sections expose the engine's existing
+animation properties. **Scroll (U,V) / sec** is a signed pair of texture repeats
+per second; Normal map 1 and Normal map 2 have separate speeds. Emissive can
+also use a pulse with **Sine**, **Square**, **Flicker** or **Random** waveform,
+cycle **rate** in seconds, **minimum/maximum multipliers** and a **phase**
+offset (cycles). Pulse affects emissive factor even without an emissive image.
+
+Source-pack **Animation defaults** can be inherited and independently
+overridden by materials. The **x** control removes a local scroll override,
+restoring the pack default where applicable. **Remove pulse** does the same
+for a local pulse. A material that inherits a pulse can select
+**Neutralize inherited pulse** to set a 1.0 multiplier without modifying
+the pack default. Edits participate in Undo/Redo and ordinary Save/Revert.
+
+The live preview applies the same scroll offsets and pulse waveform math as
+the game. **Animate** pauses/resumes the preview clock and **Restart
+animation** resets it to zero; neither changes pack metadata. Preview random
+waveforms use the selected material's stable list index as a seed (the game
+uses a runtime instance ID), so exact random values can differ in-game.
+All other surface masks continue to use the original UV coordinates.
+
 ## Source and compiled pack workflows
 
 The editor now supports both pack document modes:
@@ -160,7 +183,7 @@ the repository's real `assets/sample_matpack/script.json` fixture.
   unknown fields, MAT replacements, material names and signature hashes.
 
 **Preview fidelity:** this does not yet reproduce in-game sector lighting,
-shadows, fog, HDR auto-exposure, animation or the full in-game alpha composition.
+shadows, fog, HDR auto-exposure, or the full in-game alpha composition.
 It uses one equirectangular EnvMap for ALL reflection modes, including game
 modes that normally capture live scenes. These modes are not equivalent
 in-game: the studio preview is a deliberate approximation for editing.
