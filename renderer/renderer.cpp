@@ -7,6 +7,7 @@
 #include "gpu_3do_index_coalescing.hpp"
 #include "gpu_3do_instancing_audit.hpp"
 #include "gpu_3do_parallel_visibility.hpp"
+#include "reflection_capture_parallel_visibility.hpp"
 #include "cpu_render_workers.hpp"
 #include "gpu_3do_packed_vertex.hpp"
 #include "gpu_3do_auto_lod.hpp"
