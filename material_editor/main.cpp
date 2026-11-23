@@ -1878,8 +1878,11 @@ private:
                 selected()["name"]=updated;
                 changed("name",ImGui::IsItemActive());
             }
-            ImGui::TextWrapped("MAT replacements: %s",
-                selected().value("replaces",Document::array()).dump().c_str());
+            if(ImGui::TreeNode("MAT replacements")) {
+                ImGui::TextWrapped("%s",
+                    selected().value("replaces",Document::array()).dump().c_str());
+                ImGui::TreePop();
+            }
             // Source defaults are still displayed and may be overridden.
             // The source editor offers path/reference options on right-click.
         } else {
@@ -1952,8 +1955,7 @@ private:
                                             "Hemisphere","Cubemap","Shared"};
             comboField("Game reflection mode","reflection_mode",
                        modes,modeLabels,7);
-            ImGui::TextDisabled("Preview uses EnvMap for all game reflection modes.");
-            imageInfo("Surface (R/G/B)","surface_map");
+            imageInfo("Surface map","surface_map");
         }
         if(materialSection("Normal maps",3,normals)) {
             imageInfo("Normal map 1","normal_map");
