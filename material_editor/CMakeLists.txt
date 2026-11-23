@@ -85,3 +85,12 @@ target_include_directories(editor-image-tests PRIVATE
 if(MSVC)
   target_compile_options(editor-image-tests PRIVATE /W3 /EHsc /utf-8)
 endif()
+
+# Pure C++ tests for renderer-parity scroll wrapping and pulse waveforms.
+add_executable(editor-animation-tests
+  editor_animation_tests.cpp editor_animation.hpp)
+target_include_directories(editor-animation-tests PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/..)
+if(MSVC)
+  target_compile_options(editor-animation-tests PRIVATE /W3 /EHsc /utf-8)
+endif()
