@@ -15,11 +15,15 @@ struct NativeMatImage {
 
 class NativeMatSource {
 public:
-    // Index loose files and GOB/GOO entries under the selected JK/MotS root.
-    // Setting an empty root clears the source.
-    void setRoot(const std::string &directory);
+    // Index loose files and GOB/GOO archives in each folder. Earlier roots
+    // have priority on duplicate resource names, including loose vs archive.
+    void setRoots(const std::vector<std::string> &directories);
+    void setRoot(const std::string &directory); // legacy single-root helper
     void setPalette(const std::string &file);
-    const std::string &root() const {return root_;}
+    const std::vector<std::string> &roots() const {return roots_;}
+    const std::string &root() const {
+        return roots_.empty()?emptyRoot_:roots_.front();
+    }
     const std::string &palette() const {return palette_;}
     size_t indexedFiles() const {return files_.size();}
     bool load(const std::string &matName,int cel,NativeMatImage &out,
@@ -31,7 +35,8 @@ private:
         bool archive=false;
     };
     std::map<std::string,Entry> files_;
-    std::string root_,palette_;
+    std::vector<std::string> roots_;
+    std::string emptyRoot_,palette_;
     void indexArchive(const std::filesystem::path &archive);
     bool readAsset(const std::string &name,std::vector<std::uint8_t> &bytes,
                    std::string &source) const;
