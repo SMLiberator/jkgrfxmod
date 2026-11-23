@@ -40,12 +40,18 @@ Revert commands.
 
 ## Deferred texture loading and compact PNG saving
 
-Material images can now be loaded and previewed **entirely in memory**.
-In source packs, **Reference...** keeps the existing source filename,
-while **Import PNG (on Save)...** converts and stages a texture for writing.
-In compiled packs, **Load PNG (on Save)...** stages a new converted
-texture for any material texture slot, without changing MAT replacement
-signatures. Staging does not create a disk file.
+Material images can be loaded and previewed **entirely in memory**.
+Texture controls are deliberately compact: a thumbnail and **Load** /
+**Remove** buttons. **Load** stages a converted image for saving in both
+source and compiled packs. **Remove** clears the local material override
+(or removes a compiled material's assignment). Staging creates no disk
+file and does not alter MAT replacement signatures.
+
+Click the thumbnail to inspect its original filename, dimensions, file
+size and RGBA/R/G/B/A channels. Right-click a thumbnail in source mode
+to **Reference existing file...** without importing or to edit the raw
+source filename. Pack-default textures offer the same compact controls.
+Source maps inherited from pack defaults have no local override to remove.
 
 The editor uses the pack compiler's linear-space alpha premultiplication
 for sRGB color textures. **Albedo** retains alpha if any pixel is
@@ -74,14 +80,17 @@ discarded when the pack is closed or File > Revert is used. Images that
 have already been saved are kept available for Undo/Redo without being
 written twice.
 
-The properties panel shows a thumbnail of each loaded image, its dimensions,
-original channel count, format and file size. **Inspect channels...** opens
-a larger RGBA preview or grayscale R/G/B/A view. Packed surface maps expose
-the reflection/roughness/metalness channel meaning; clearcoat masks expose
-coverage/roughness/transmission. Channel views are generated lazily and
-cached until a texture is reloaded. Missing or unsupported images are
-reported without altering the source path. Compiled texture references
-also accept staged imports; MAT signatures remain unchanged.
+Texture details appear **on demand** inside the thumbnail popup, rather
+than occupying multiple lines in every material section. Packed surface
+maps expose their reflection/roughness/metalness channels there; clearcoat
+masks expose coverage/roughness/transmission. Channel views are generated
+lazily and cached until a texture is reloaded. Missing or unsupported
+images retain their filename without cluttering the panel.
+
+Normal maps are organized as two distinct groups: **Normal map 1** image
+followed immediately by **Normal map 1 strength**, then **Normal map 2**
+image and **Normal map 2 strength**. The old duplicate **Compiled textures**
+section and stale read-only warnings have been removed.
 
 Material feature headers now start open only if active: albedo is always
 open; emissive is active for map/color/pulse; reflections for a surface map
