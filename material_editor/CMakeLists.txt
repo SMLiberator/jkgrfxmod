@@ -37,6 +37,8 @@ add_executable(jkgm-material-editor WIN32
   main.cpp
   preview.cpp
   preview.hpp
+  editor_image.cpp
+  editor_image.hpp
   native_mat.cpp
   native_mat.hpp
   source_pack.hpp
@@ -73,4 +75,13 @@ target_include_directories(editor-settings-tests PRIVATE
 target_link_libraries(editor-settings-tests PRIVATE editor_imgui)
 if(MSVC)
   target_compile_options(editor-settings-tests PRIVATE /W3 /EHsc /utf-8)
+endif()
+
+# Test compact PNG encodings and compiler-compatible linear-space PMA.
+add_executable(editor-image-tests
+  editor_image_tests.cpp editor_image.cpp editor_image.hpp)
+target_include_directories(editor-image-tests PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/..)
+if(MSVC)
+  target_compile_options(editor-image-tests PRIVATE /W3 /EHsc /utf-8)
 endif()
