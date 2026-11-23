@@ -1428,34 +1428,48 @@ private:
         Document &obj=selected();
         float v=number(effectiveSelected(),key,fallback);
         ImGui::PushID(key);
-        ImGui::TextUnformatted(label);
-        const float available=ImGui::GetContentRegionAvail().x;
         const bool hasOverride=obj.find(key)!=obj.end();
-        const float sliderWidth=std::max(90.0f,available-120.0f);
-        ImGui::SetNextItemWidth(sliderWidth);
+        const float available=ImGui::GetContentRegionAvail().x;
+        // Double-click a native ImGui slider to type a precise value.
+        // The separate numeric box remains only for properties that can
+        // legitimately exceed the displayed slider's upper bound.
+        const float actionWidth=hasOverride?54.0f:0.0f;
+        const float manualWidth=allowAboveSlider?83.0f:0.0f;
+        ImGui::SetNextItemWidth(std::max(100.0f,
+            available-actionWidth-manualWidth));
         float position=std::clamp(v,low,high);
         bool modified=false;
-        if(ImGui::SliderFloat("##slider",&position,low,high,"%.3f",
+        const std::string format=std::string(label)+": %.3f";
+        if(ImGui::SliderFloat("##slider",&position,low,high,format.c_str(),
                               ImGuiSliderFlags_AlwaysClamp)) {
             obj[key]=position;changed(key,ImGui::IsItemActive());modified=true;
         }
-        ImGui::SameLine();
-        ImGui::SetNextItemWidth(73.0f);
-        float typed=v;
-        if(ImGui::InputFloat("##exact_value",&typed,0,0,"%.3f")) {
-            if(std::isfinite(typed)) {
-                typed=allowAboveSlider?std::max(low,typed):std::clamp(typed,low,high);
-                obj[key]=typed;changed(key,ImGui::IsItemActive());modified=true;
+        if(ImGui::IsItemHovered())
+            ImGui::SetTooltip("Drag to adjust, double-click to type a value.");
+        if(allowAboveSlider) {
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth(75.0f);
+            float typed=v;
+            if(ImGui::InputFloat("##exact_value",&typed,0,0,"%.3f")) {
+                if(std::isfinite(typed)) {
+                    typed=std::max(low,typed);
+                    obj[key]=typed;changed(key,ImGui::IsItemActive());
+                    modified=true;
+                }
             }
+            if(ImGui::IsItemHovered()&&v>high)
+                ImGui::SetTooltip("Values above the slider maximum are valid.");
         }
-        ImGui::SameLine();
-        if(hasOverride&&ImGui::SmallButton("x")) {
-            obj.erase(key);changed(key);modified=true;
-        } else if(!hasOverride) {
-            ImGui::TextDisabled("  ");
+        if(hasOverride) {
+            ImGui::SameLine();
+            if(ImGui::SmallButton("Reset")) {
+                // Source: revert to inherited pack defaults. Compiled:
+                // revert to the shader/compiler fallback value.
+                obj.erase(key);changed(key);modified=true;
+            }
+            if(ImGui::IsItemHovered())
+                ImGui::SetTooltip("Remove this override; restore its default value.");
         }
-        if(allowAboveSlider && v>high)
-            ImGui::SetItemTooltip("Manual value exceeds the 0-1 slider: this is supported by the renderer.");
         ImGui::PopID();
         return modified;
     }
@@ -1485,8 +1499,9 @@ private:
         // The next TextWrapped/imageInfo item naturally starts on a full line.
         ImGui::PopID();
     }
-    // A single compact signed UV speed pair. Removing the local value
-    // restores an inherited pack speed in source mode.
+    // Independent U/V drags keep the field names readable even when
+    // the material inspector is narrow. Each native DragFloat supports
+    // double-click direct numeric entry (including negative speeds).
     void scrollField(const char *label,const char *key,bool packField=false) {
         Document &obj=packField?root_:selected();
         const Document &resolved=packField?root_:effectiveSelected();
@@ -1494,14 +1509,25 @@ private:
         const bool own=obj.contains(key);
         ImGui::PushID(key);
         ImGui::TextUnformatted(label);
-        ImGui::SetNextItemWidth(std::max(100.0f,
-            ImGui::GetContentRegionAvail().x-(own?32.0f:0.0f)));
-        if(ImGui::DragFloat2("##speed",speed.data(),0.01f,0,0,"%.3f")&&
-           std::isfinite(speed[0])&&std::isfinite(speed[1])) {
-            setArray(obj,key,speed.data(),2);
-            if(packField)changedPack(key,ImGui::IsItemActive());
-            else changed(key,ImGui::IsItemActive());
-        }
+        const float available=ImGui::GetContentRegionAvail().x;
+        const float width=std::max(55.0f,
+            (available-(own?32.0f:0.0f)-ImGui::GetStyle().ItemSpacing.x)/2.0f);
+        const auto axis=[&](int i,const char *id,const char *format) {
+            float value=speed[size_t(i)];
+            ImGui::SetNextItemWidth(width);
+            if(ImGui::DragFloat(id,&value,0.01f,0,0,format)&&
+               std::isfinite(value)) {
+                speed[size_t(i)]=value;
+                setArray(obj,key,speed.data(),2);
+                if(packField)changedPack(key,ImGui::IsItemActive());
+                else changed(key,ImGui::IsItemActive());
+            }
+            if(ImGui::IsItemHovered())
+                ImGui::SetTooltip("Drag to adjust, double-click to type a signed speed.");
+        };
+        axis(0,"##u","U: %.3f");
+        ImGui::SameLine();
+        axis(1,"##v","V: %.3f");
         if(own) {
             ImGui::SameLine();
             if(ImGui::SmallButton("x")) {
@@ -1509,6 +1535,8 @@ private:
                 if(packField)changedPack(key);
                 else changed(key);
             }
+            if(ImGui::IsItemHovered())
+                ImGui::SetTooltip("Remove local scroll speed, restoring defaults.");
         }
         ImGui::PopID();
     }
@@ -1558,36 +1586,60 @@ private:
         int chosen=0;
         const std::string wave=stringValue(pulse,"wave");
         for(int i=0;i<4;++i)if(wave==values[i])chosen=i;
-        ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
-        if(ImGui::Combo("Wave",&chosen,waves,4)) {
-            pulse["wave"]=values[chosen];
-            obj[key]=pulse;
-            if(packField)changedPack(key);
-            else changed(key);
+        ImGui::SetNextItemWidth(-1.0f);
+        const std::string waveCaption=std::string("Wave: ")+waves[chosen];
+        if(ImGui::BeginCombo("##wave",waveCaption.c_str())) {
+            for(int i=0;i<4;++i) {
+                if(ImGui::Selectable(waves[i],chosen==i)) {
+                    pulse["wave"]=values[i];
+                    obj[key]=pulse;
+                    if(packField)changedPack(key);
+                    else changed(key);
+                }
+                if(chosen==i)ImGui::SetItemDefaultFocus();
+            }
+            ImGui::EndCombo();
         }
-        // Inputs are committed only when valid under compile/main.cpp's
-        // contract: rate > 0, 0 <= min <= max, and finite phase.
+        // The labels are rendered inside the drag controls rather than
+        // beyond their right edges. Double-click allows numeric entry,
+        // and the adjacent left-click R button restores that parameter's
+        // canonical compiler default without resetting the other fields.
         const auto editNumber=[&](const char *label,const char *field,
                                   float fallback) {
             float value=number(pulse,field,fallback);
-            ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
-            if(!ImGui::DragFloat(label,&value,0.01f,0,0,"%.3f")||
-               !std::isfinite(value))return;
-            const std::string name(field);
-            if(name=="rate"&&value<=0.0f)value=0.001f;
-            if(name=="min") {
-                value=std::max(0.0f,value);
-                pulse["max"]=std::max(value,number(pulse,"max",1.0f));
+            const std::string format=std::string(label)+": %.3f";
+            ImGui::PushID(field);
+            ImGui::SetNextItemWidth(std::max(95.0f,
+                ImGui::GetContentRegionAvail().x-28.0f));
+            const bool edited=ImGui::DragFloat("##value",&value,0.01f,0,0,
+                                                format.c_str());
+            if(ImGui::IsItemHovered())
+                ImGui::SetTooltip("Drag to adjust, double-click to type a value.");
+            const bool held=ImGui::IsItemActive();
+            ImGui::SameLine();
+            const bool reset=ImGui::SmallButton("R");
+            if(ImGui::IsItemHovered())
+                ImGui::SetTooltip("Reset %s to %.3f.",label,fallback);
+            if((edited||reset)&&std::isfinite(value)) {
+                if(reset)value=fallback;
+                const std::string name(field);
+                if(name=="rate")value=std::max(0.001f,value);
+                if(name=="min") {
+                    value=std::max(0.0f,value);
+                    pulse["max"]=std::max(value,number(pulse,"max",1.0f));
+                }
+                if(name=="max")
+                    value=std::max(value,number(pulse,"min",0.0f));
+                pulse[field]=value;
+                obj[key]=pulse;
+                if(packField)changedPack(key,edited&&held);
+                else changed(key,edited&&held);
             }
-            if(name=="max")value=std::max(value,number(pulse,"min",0.0f));
-            pulse[field]=value;
-            obj[key]=pulse;
-            if(packField)changedPack(key,ImGui::IsItemActive());
-            else changed(key,ImGui::IsItemActive());
+            ImGui::PopID();
         };
-        editNumber("Rate (seconds / cycle)","rate",1.0f);
-        editNumber("Minimum multiplier","min",0.0f);
-        editNumber("Maximum multiplier","max",1.0f);
+        editNumber("Rate (s/cycle)","rate",1.0f);
+        editNumber("Minimum","min",0.0f);
+        editNumber("Maximum","max",1.0f);
         editNumber("Phase (cycles)","phase",0.0f);
         ImGui::PopID();
     }
