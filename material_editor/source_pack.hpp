@@ -146,8 +146,8 @@ struct MatReplacement {
 };
 
 // Source replacements are a filename (cel 0) or [filename, cel] tuple.
-// Compiled replacements use {"name":..., "cel":...}; these are read-only
-// because their corresponding replaces_signatures cannot be rebuilt here.
+// Compiled replacements use {"name":..., "cel":...}. The editor can
+// regenerate their signatures on Save using the configured game assets.
 inline bool readMatReplacement(const Document &value,Kind kind,
                                MatReplacement &out) {
     MatReplacement result;
