@@ -896,6 +896,7 @@ private:
         }
         root_=std::move(doc);
         stagedImages_.clear();
+        committedImageNames_.clear();
         mode_=kind;
         observedRoot_=root_;savedRoot_=root_;
         undo_.clear();redo_.clear();groupActive_=false;
@@ -962,8 +963,19 @@ private:
         const std::string destination=chooseSaveMetadataFile(window_,file_,isSource());
         return !destination.empty()&&writeMetadata(destination,true);
     }
+    static bool documentReferences(const Document &node,
+                                   const std::string &filename) {
+        if(node.is_string())return node.get<std::string>()==filename;
+        if(node.is_object()||node.is_array())
+            for(const auto &member:node)
+                if(documentReferences(member,filename))return true;
+        return false;
+    }
     bool writeMetadata(const std::string &path,bool switchToCopy) {
         if(!loaded_||path.empty())return false;
+        std::vector<fs::path> temporaryFiles;
+        std::vector<fs::path> newlyWrittenFiles;
+        std::vector<std::string> writtenNames;
         try {
             // Source save must keep compiler-relative asset paths intact.
             // Copying only script.json to another directory silently breaks
@@ -982,19 +994,65 @@ private:
                         "in that folder to preserve relative asset paths.");
             }
             editor_source::validate(root_,mode_);
-            fs::path destination=fs::u8path(path);
+            const fs::path destination=fs::u8path(path);
+            const fs::path directory=destination.parent_path();
             fs::path temp=destination;
             temp+=L".tmp";
+            // Only referenced drafts are materialized. Prepare PNGs and JSON
+            // before changing any final file; commit the JSON last.
+            for(const auto &draft:stagedImages_) {
+                if(!documentReferences(root_,draft.first)||
+                   committedImageNames_.count(draft.first))
+                    continue;
+                const fs::path output=directory/fs::u8path(draft.first);
+                if(fs::exists(output))
+                    throw std::runtime_error(
+                        "Imported filename already exists: "+draft.first);
+                fs::path staging=output;
+                staging+=L".jkgm-tmp";
+                if(fs::exists(staging))
+                    throw std::runtime_error(
+                        "Temporary import file already exists: "+draft.first);
+                const auto encoded=editor_images::png(*draft.second);
+                {
+                    std::ofstream stream(staging,std::ios::binary|std::ios::trunc);
+                    if(!stream)
+                        throw std::runtime_error("Cannot stage image: "+draft.first);
+                    temporaryFiles.push_back(staging);
+                    stream.write(reinterpret_cast<const char *>(encoded.data()),
+                                 std::streamsize(encoded.size()));
+                    stream.flush();
+                    if(!stream)
+                        throw std::runtime_error("Cannot write PNG: "+draft.first);
+                }
+                writtenNames.push_back(draft.first);
+            }
             {
                 std::ofstream stream(temp,std::ios::binary|std::ios::trunc);
-                if(!stream)throw std::runtime_error("Cannot write temporary file.");
+                if(!stream)throw std::runtime_error("Cannot write temporary JSON.");
+                temporaryFiles.push_back(temp);
                 stream<<root_.dump(4)<<"\n";
                 stream.flush();
                 if(!stream)throw std::runtime_error("Failed to write JSON.");
             }
+            for(const auto &filename:writtenNames) {
+                const fs::path output=directory/fs::u8path(filename);
+                fs::path staging=output;staging+=L".jkgm-tmp";
+                if(!MoveFileExW(staging.c_str(),output.c_str(),
+                                MOVEFILE_WRITE_THROUGH))
+                    throw std::runtime_error(
+                        "Could not commit PNG: "+filename);
+                newlyWrittenFiles.push_back(output);
+            }
             if(!MoveFileExW(temp.c_str(),destination.c_str(),
                             MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH))
-                throw std::runtime_error("Cannot replace the JSON file. Close other programs using it.");
+                throw std::runtime_error(
+                    "Cannot replace the JSON file. Close other programs using it.");
+            // JSON now references only images confirmed present on disk.
+            newlyWrittenFiles.clear();
+            temporaryFiles.clear();
+            for(const auto &name:writtenNames)
+                committedImageNames_.insert(name);
             if(switchToCopy) {
                 file_=path;
                 // Texture paths are relative to metadata's location.
@@ -1009,6 +1067,9 @@ private:
                            :"Saved metadata.json. No MAT signatures were regenerated.";
             return true;
         } catch(const std::exception &e) {
+            std::error_code ec;
+            for(const auto &tmp:temporaryFiles)fs::remove(tmp,ec);
+            for(const auto &created:newlyWrittenFiles)fs::remove(created,ec);
             status_=std::string("Save failed: ")+e.what();
             MessageBoxA(glfwGetWin32Window(window_),status_.c_str(),"Save failed",MB_ICONERROR);
             return false;
@@ -2053,6 +2114,7 @@ private:
     // unreferenced draft is never written to disk during Save.
     std::map<std::string,std::shared_ptr<const editor_images::Image>>
         stagedImages_;
+    std::set<std::string> committedImageNames_;
     NativeMatSource nativeSource_;
     NativeMatImage nativeLoaded_;
     std::string nativeCacheKey_,nativeStatus_;
