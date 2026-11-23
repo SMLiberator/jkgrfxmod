@@ -42,10 +42,17 @@ Revert commands.
 
 Material images can be loaded and previewed **entirely in memory**.
 Texture controls are deliberately compact: a thumbnail and **Load** /
-**Remove** buttons. **Load** stages a converted image for saving in both
-source and compiled packs. **Remove** clears the local material override
-(or removes a compiled material's assignment). Staging creates no disk
-file and does not alter MAT replacement signatures.
+**Remove** buttons. **Load** automatically **reuses an existing PNG directly
+in the current pack's folder** by its filename: no duplicate file, no
+re-encoding, and no extra staged PNG. Multiple material slots can reference
+the exact same image. This also works for pack defaults, source
+`script.json`, and compiled `metadata.json`. A PNG in another folder
+or a non-PNG image is imported through the original conversion/staging
+workflow, writing a uniquely named pack-local PNG when the pack is saved.
+**Remove** clears the local assignment; it never deletes a shared image.
+Staging creates no disk file and does not alter MAT replacement signatures.
+An image reused **as-is** must already have suitable color/alpha encoding
+for its material role; only newly imported files get converted.
 
 Click the thumbnail to inspect its original filename, dimensions, file
 size and RGBA/R/G/B/A channels. Right-click a thumbnail in source mode
@@ -177,21 +184,21 @@ All other surface masks continue to use the original UV coordinates.
 
 Parameter names and their numeric values appear **inside** standard slider
 and drag controls. Emissive pulse **Wave**, **Rate**, **Minimum**, **Maximum**
-and **Phase** now remain legible even in the narrower inspector panes;
-U/V scrolling and RGB fields show their individual channel names.
-**Drag** with the left mouse button for continuous adjustments, or
-**double-click** a numeric slider/drag to type an exact value (also
-accessible with Ctrl+click). An ordinary left click continues to adjust
-the slider; it does not unexpectedly erase the value.
+and **Phase** remain legible in narrow inspector panes; U/V scrolling and
+RGB fields display their channel names.
 
-Click **Reset** beside a parameter to restore the corresponding default.
-On source materials, resetting a local numeric override reveals the
-pack-inherited value. Pulse parameters have individual Reset buttons
-to restore their canonical defaults while preserving other pulse settings.
-The live preview's **Lighting > Reset** button restores **1.00×** without
-changing any material or pack JSON. A separate exact-value box remains for
-reflection strength, since the game permits values above its 0–1 slider.
-All material resets participate in Undo/Redo.
+**Left-click/drag** adjusts numeric values normally, **double-click**
+(or Ctrl+click) opens precise numeric entry, and **right-click on a
+numeric control resets it**. Right-click never changes what ordinary left
+click does. On source materials, resetting a local override reveals the
+pack-inherited value. Right-clicking either U/V channel resets the whole
+scroll pair; right-clicking an RGB drag resets the entire RGB factor.
+Pulse fields reset **individually** to their canonical defaults. The live
+preview's lighting slider also resets to **1.00×** on right-click, while
+retaining its explicit **Reset** button for convenience. A separate
+exact-value box remains for reflection strength, since the game permits
+values above its 0–1 slider. Material resets participate in Undo/Redo;
+preview-only lighting never changes material JSON.
 
 ## Source and compiled pack workflows
 
