@@ -535,6 +535,7 @@ namespace jkgm {
             gl::texture_view matcap = gl::default_texture;
             gl::texture_view matcap_surface = gl::default_texture;
             point<4,float> matcap_params=make_point(1.0f,1.0f,1.0f,0.0f);
+            float matcap_lighting_influence=1.0f;
             bool has_matcap=false,has_matcap_surface=false;
             gl::texture_view clearcoat_surface=gl::default_texture;
             gl::texture_view clearcoat_normal=gl::default_texture;
@@ -4440,6 +4441,8 @@ namespace jkgm {
                     out.has_matcap=true;
                     out.matcap_params=make_point(
                         red,green,blue,surface->matcap_roughness);
+                    out.matcap_lighting_influence=
+                        surface->matcap_lighting_influence;
                     if(surface->matcap_surface_map) {
                         out.matcap_surface=texture_cache->get_texture_handle(
                             *surface->matcap_surface_map);
@@ -6208,7 +6211,8 @@ namespace jkgm {
                     }
                 }
                 prog.set_matcap(matcap_active,material.matcap_params,
-                                matcap_active && material.has_matcap_surface);
+                                matcap_active && material.has_matcap_surface,
+                                material.matcap_lighting_influence);
                 if(coat_active) {
                     if(material.has_clearcoat_surface) {
                         gl::set_active_texture_unit(26);
@@ -11320,7 +11324,8 @@ namespace jkgm {
                 }
             }
             shader.set_matcap(matcap_active,material.matcap_params,
-                              matcap_active && material.has_matcap_surface);
+                              matcap_active && material.has_matcap_surface,
+                              material.matcap_lighting_influence);
             if(coat_active) {
                 if(material.has_clearcoat_surface) {
                     gl::set_active_texture_unit(26);

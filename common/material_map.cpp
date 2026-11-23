@@ -204,6 +204,8 @@ void jkgm::material_map::add_metadata(fs::path const &metadata_file)
         mat->matcap_map=read_layer_map("matcap_map");
         mat->matcap_surface_map=read_layer_map("matcap_surface_map");
         mat->matcap_roughness=read_unit("matcap_roughness",0.0f);
+        mat->matcap_lighting_influence=
+            read_unit("matcap_lighting_influence",1.0f);
         if(em.contains("matcap_factor")) {
             auto const &factor=em["matcap_factor"];
             if(!factor.is_array() || factor.size()!=3U)

@@ -83,6 +83,7 @@ namespace jkgm {
         std::optional<fs::path> matcap_map;
         std::optional<fs::path> matcap_surface_map;
         float matcap_roughness = 0.0f;
+        float matcap_lighting_influence = 1.0f; // scene-lit (0=unlit)
         color_rgb matcap_factor = color_rgb::fill(1.0f);
 
         // Dielectric clearcoat above the base material. Independent of base

@@ -36,6 +36,7 @@ uniform vec4 specular_params,normal_specular_params,environment_info;
 #ifdef JKGM_MATCAP_LAYER
 uniform sampler2D matcap_map,matcap_surface_map;
 uniform vec4 matcap_params; // RGB factor, roughness
+uniform float matcap_lighting_influence;
 uniform int matcap_enabled,matcap_has_surface;
 #endif
 #ifdef JKGM_CLEARCOAT_LAYER
@@ -550,19 +551,25 @@ void main() {
         }
     }
 #endif
-    vec3 matcap_effect=vec3(0.0);
+    vec3 matcap_lit=vec3(0.0),matcap_unlit=vec3(0.0);
 #ifdef JKGM_MATCAP_LAYER
-    matcap_effect=world_matcap_effect(material_texcoord);
+    vec3 matcap_effect=world_matcap_effect(material_texcoord);
+    matcap_lit=matcap_effect*matcap_lighting_influence;
+    matcap_unlit=matcap_effect*(1.0-matcap_lighting_influence);
 #endif
     env_metalness*=1.0-fullbright;
     env_reflection*=1.0-fullbright;
     direct_specular*=1.0-fullbright;
     vec3 lit_diffuse=albedo*lighting*(1.0-env_metalness)*
                      base_diffuse_trans;
+    // MatCap already contains its view-dependent pattern. Apply the
+    // EXISTING illumination, then let the opaque composite handle AO,
+    // sun visibility and shadowing without a second diffuse BRDF.
+    lit_diffuse+=matcap_lit*lighting*base_diffuse_trans;
     // Coating attenuates the lower base lobe, not its own specular term.
     vec3 layered_specular=(env_reflection+direct_specular)*
                           base_specular_trans+coat_specular+
-                          matcap_effect*base_diffuse_trans;
+                          matcap_unlit*base_diffuse_trans;
     if(transparent_pass!=0) {
         // Only one color attachment exists in the forward alpha target.
         // The framebuffer uses premultiplied (ONE, ONE_MINUS_SRC_ALPHA).
@@ -715,6 +722,9 @@ void main() {
     out_normal=gbuffer_pack_normal(
         fullbright>=0.5 ? vec3(0.0) : diffuse_view_normal,1.0,
         dot(lighting,vec3(0.2126,0.7152,0.0722)));
-    out_depth=vec4(32.0/max(gl_FragCoord.w,0.00000001),albedo);
-    out_pigment=vec4(albedo,1.0);
+    // Deferred sun and spotlights need the lighting-influenced MatCap
+    // in unlit pigment, but must not illuminate the artistic unlit part.
+    out_depth=vec4(32.0/max(gl_FragCoord.w,0.00000001),
+                   albedo+matcap_lit*base_diffuse_trans);
+    out_pigment=vec4(albedo+matcap_lit*base_diffuse_trans,1.0);
 }

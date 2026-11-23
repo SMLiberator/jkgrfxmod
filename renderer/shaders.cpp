@@ -380,6 +380,8 @@ jkgm::shaders::world_cache_preview_shader::world_cache_preview_shader(
     , matcap_enabled(gl::get_uniform_location(the_program,"matcap_enabled"))
     , matcap_has_surface(gl::get_uniform_location(
           the_program,"matcap_has_surface"))
+    , matcap_lighting_influence(gl::get_uniform_location(
+          the_program,"matcap_lighting_influence"))
     , coat_surface_sampler(gl::get_uniform_location(
           the_program,"clearcoat_surface_map"))
     , coat_normal_sampler(gl::get_uniform_location(
@@ -542,13 +544,17 @@ void jkgm::shaders::world_cache_preview_shader::set_clearcoat(
     if(enabled)gl::set_uniform_vector(clearcoat_params,params);
 }
 void jkgm::shaders::world_cache_preview_shader::set_matcap(
-    bool enabled,point<4,float> params,bool has_surface)
+    bool enabled,point<4,float> params,bool has_surface,
+    float lighting_influence)
 {
     gl::set_uniform_integer(matcap_sampler,24);
     gl::set_uniform_integer(matcap_surface_sampler,25);
     gl::set_uniform_integer(matcap_enabled,enabled?1:0);
     gl::set_uniform_integer(matcap_has_surface,has_surface?1:0);
-    if(enabled)gl::set_uniform_vector(matcap_params,params);
+    if(enabled) {
+        gl::set_uniform_vector(matcap_params,params);
+        gl::set_uniform_float(matcap_lighting_influence,lighting_influence);
+    }
 }
 void jkgm::shaders::world_cache_preview_shader::set_shared_reflection(
     bool ready,bool hemisphere)
@@ -894,6 +900,8 @@ jkgm::shaders::gpu_3do_preview_shader::gpu_3do_preview_shader(
     , matcap_enabled(gl::get_uniform_location(the_program,"matcap_enabled"))
     , matcap_has_surface(gl::get_uniform_location(
           the_program,"matcap_has_surface"))
+    , matcap_lighting_influence(gl::get_uniform_location(
+          the_program,"matcap_lighting_influence"))
     , coat_surface_sampler(gl::get_uniform_location(
           the_program,"clearcoat_surface_map"))
     , coat_normal_sampler(gl::get_uniform_location(
@@ -1228,13 +1236,17 @@ void jkgm::shaders::gpu_3do_preview_shader::set_clearcoat(
     if(enabled)gl::set_uniform_vector(clearcoat_params,params);
 }
 void jkgm::shaders::gpu_3do_preview_shader::set_matcap(
-    bool enabled,point<4,float> params,bool has_surface)
+    bool enabled,point<4,float> params,bool has_surface,
+    float lighting_influence)
 {
     gl::set_uniform_integer(matcap_sampler,24);
     gl::set_uniform_integer(matcap_surface_sampler,25);
     gl::set_uniform_integer(matcap_enabled,enabled?1:0);
     gl::set_uniform_integer(matcap_has_surface,has_surface?1:0);
-    if(enabled)gl::set_uniform_vector(matcap_params,params);
+    if(enabled) {
+        gl::set_uniform_vector(matcap_params,params);
+        gl::set_uniform_float(matcap_lighting_influence,lighting_influence);
+    }
 }
 void jkgm::shaders::gpu_3do_preview_shader::set_hemi_reflection(
     bool ready,point<3,float> right,point<3,float> forward,

@@ -88,7 +88,8 @@ namespace jkgm {
             gl::uniform_location_id reflection_scroll,reflection_scroll2,environment_info;
             gl::uniform_location_id shared_reflection_sampler,shared_reflection_ready;
             gl::uniform_location_id matcap_sampler,matcap_surface_sampler;
-            gl::uniform_location_id matcap_params,matcap_enabled,matcap_has_surface;
+            gl::uniform_location_id matcap_params,matcap_enabled,matcap_has_surface,
+                matcap_lighting_influence;
             gl::uniform_location_id coat_surface_sampler,coat_normal_sampler;
             gl::uniform_location_id clearcoat_params,clearcoat_enabled;
             gl::uniform_location_id clearcoat_has_surface,clearcoat_has_normal;
@@ -133,7 +134,8 @@ namespace jkgm {
                                 point<2,float> scroll,point<2,float> scroll2,
                                 bool from,bool to,float weight,int mode);
             void set_shared_reflection(bool ready,bool hemisphere);
-            void set_matcap(bool enabled,point<4,float> params,bool has_surface);
+            void set_matcap(bool enabled,point<4,float> params,
+                            bool has_surface,float lighting_influence);
             void set_clearcoat(bool enabled,point<4,float> params,
                                bool has_surface,bool has_normal);
             void set_reflection_camera(std::array<float,3> const &position,
@@ -354,7 +356,8 @@ namespace jkgm {
             gl::uniform_location_id environment_info;
             gl::uniform_location_id hemi_map,hemi_right,hemi_forward,hemi_up,hemi_info;
             gl::uniform_location_id matcap_sampler,matcap_surface_sampler;
-            gl::uniform_location_id matcap_params,matcap_enabled,matcap_has_surface;
+            gl::uniform_location_id matcap_params,matcap_enabled,matcap_has_surface,
+                matcap_lighting_influence;
             gl::uniform_location_id coat_surface_sampler,coat_normal_sampler;
             gl::uniform_location_id clearcoat_params,clearcoat_enabled;
             gl::uniform_location_id clearcoat_has_surface,clearcoat_has_normal;
@@ -427,7 +430,8 @@ namespace jkgm {
                                     point<2,float> normal_scroll,
                                     point<2,float> normal_scroll2);
             void set_environment(bool from,bool to,float weight,int mode);
-            void set_matcap(bool enabled,point<4,float> params,bool has_surface);
+            void set_matcap(bool enabled,point<4,float> params,
+                            bool has_surface,float lighting_influence);
             void set_clearcoat(bool enabled,point<4,float> params,
                                bool has_surface,bool has_normal);
             void set_hemi_reflection(bool ready,

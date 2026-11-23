@@ -66,6 +66,7 @@ namespace jkgm {
         std::optional<std::string> matcap_map;
         std::optional<std::string> matcap_surface_map;
         std::optional<float> matcap_roughness;
+        std::optional<float> matcap_lighting_influence;
         std::optional<color_rgb> matcap_factor;
         std::optional<std::string> clearcoat_surface_map;
         std::optional<std::string> clearcoat_normal_map;
@@ -504,6 +505,8 @@ namespace jkgm {
             return value;
         };
         rv->matcap_roughness=parse_layer_unit("matcap_roughness");
+        rv->matcap_lighting_influence=
+            parse_layer_unit("matcap_lighting_influence");
         rv->clearcoat_strength=parse_layer_unit("clearcoat_strength");
         rv->clearcoat_roughness=parse_layer_unit("clearcoat_roughness");
         rv->clearcoat_transmission=parse_layer_unit("clearcoat_transmission");
@@ -857,6 +860,8 @@ namespace jkgm {
             rv["matcap_surface_map"]=*mat.matcap_surface_map;
         if(mat.matcap_roughness)
             rv["matcap_roughness"]=*mat.matcap_roughness;
+        if(mat.matcap_lighting_influence)
+            rv["matcap_lighting_influence"]=*mat.matcap_lighting_influence;
         if(mat.matcap_factor) {
             auto const &rgb=*mat.matcap_factor;
             rv["matcap_factor"]={

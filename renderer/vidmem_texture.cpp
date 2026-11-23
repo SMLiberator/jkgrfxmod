@@ -138,6 +138,8 @@ HRESULT WINAPI jkgm::vidmem_texture::Load(LPDIRECT3DTEXTURE a)
 
         surf->matcap_factor=(*repl_map)->matcap_factor;
         surf->matcap_roughness=(*repl_map)->matcap_roughness;
+        surf->matcap_lighting_influence=
+            (*repl_map)->matcap_lighting_influence;
         surf->clearcoat_defaults={{
             (*repl_map)->clearcoat_strength,
             (*repl_map)->clearcoat_roughness,
@@ -265,6 +267,7 @@ void jkgm::vidmem_texture_surface::clear()
     }
     matcap_factor=color_rgb::fill(1.0f);
     matcap_roughness=0.0f;
+    matcap_lighting_influence=1.0f;
     if(clearcoat_surface_map) {
         r->texture_cache->release_linear_texture(*clearcoat_surface_map);
         clearcoat_surface_map.reset();

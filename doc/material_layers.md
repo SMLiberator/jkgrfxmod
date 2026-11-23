@@ -11,6 +11,7 @@ The `shared` reflection mode remains independent.
 {
   "matcap_map": "pearlescent.png",
   "matcap_roughness": 0.3,
+  "matcap_lighting_influence": 1.0,
   "matcap_factor": [0.7, 0.5, 1.2],
   "matcap_surface_map": "pearl_mask.png"
 }
@@ -29,7 +30,17 @@ The `shared` reflection mode remains independent.
 - The RGB matcap image is imported as sRGB; its surface mask is imported
   as linear data. The mask's R controls the color contribution, and G
   multiplies the mip-based artistic blur. The layer is added as artistic
-  color in the emissive/compositing path, not as a second GGX lobe.
+  color as a separate layer, not as a second GGX lobe.
+- `matcap_lighting_influence` is a scalar 0..1 (default **1.0**).
+  At 1, MatCaps use the existing authored/sector and dynamic lighting,
+  with opaque SSAO, sun-shadow and spotlight response through the regular
+  G-buffer surface composite. At 0, the MatCap color remains artistic and
+  unlit, unaffected by scene darkness/shadows (but still affected by fog,
+  transparency and clearcoat). Intermediate values split the contribution.
+  Unlit MatCaps do not themselves illuminate the scene.
+- Forward transparent MatCaps use the available native/JK lighting and
+  translucent-sun shading; opaque deferred lights and SSAO do not run on
+  the forward transparency target.
 - Existing material normal maps influence MatCap orientation, including
   materials without reflection strength. The layer does not follow
   sun/point-light specular or metallic Fresnel.

@@ -59,6 +59,7 @@ uniform sampler2D env_map2;
 #ifdef JKGM_MATCAP_LAYER
 uniform sampler2D matcap_map,matcap_surface_map;
 uniform vec4 matcap_params; // artistic RGB factor and roughness, no BRDF
+uniform float matcap_lighting_influence;
 uniform int matcap_enabled,matcap_has_surface;
 #endif
 #ifdef JKGM_CLEARCOAT_LAYER
@@ -1035,8 +1036,15 @@ void main() {
           (sector_crossing_count>1 && sector_crossing_per_vertex==0
              ? sector_crossing_lit[sector_crossing_slot] : jk_lit_rgb),
         vec3(1.0),fullbright);
+    vec3 matcap_lit=vec3(0.0),matcap_unlit=vec3(0.0);
+#ifdef JKGM_MATCAP_LAYER
+    vec3 matcap_effect=gpu_matcap_effect(uv);
+    matcap_lit=matcap_effect*matcap_lighting_influence;
+    matcap_unlit=matcap_effect*(1.0-matcap_lighting_influence);
+#endif
     vec3 lit_rgb=albedo.rgb*jk_fragment_lit*
                  (1.0-env_metalness)*base_diffuse_trans;
+    lit_rgb+=matcap_lit*jk_fragment_lit*base_diffuse_trans;
     if(transparent_pass!=0 && post_exempt_pass==0 &&
        world_lighting_exempt==0 && decal_receiver_lighting==0 &&
        fullbright<0.999 &&
@@ -1046,8 +1054,9 @@ void main() {
         // Normal and Fluid receive sunlight/occlusion on diffuse RGB.
         // Fluid absorption and alpha remain unchanged further below;
         // never multiply sunlight by Fluid opacity a second time.
-        lit_rgb=illuminate_translucent_sun(lit_rgb,albedo.rgb,1.0,
-                                           view_depth,diffuse_view_normal);
+        lit_rgb=illuminate_translucent_sun(
+            lit_rgb,albedo.rgb+matcap_lit*base_diffuse_trans,1.0,
+            view_depth,diffuse_view_normal);
     }
     // Decal pigment inherits the receiver's interpolated JK diffuse light
     // instead of appearing fullbright. That scalar is written into unused
@@ -1095,10 +1104,9 @@ void main() {
 #endif
     specular*=(1.0-fog)*(1.0-fullbright);
 #ifdef JKGM_MATCAP_LAYER
-    // Artist-authored MatCaps do not generate direct-light GGX and are not
-    // gated by reflection strength or CMP fullbright. They share the
-    // regular surface visibility, fog and alpha/compositing conventions.
-    specular+=gpu_matcap_effect(uv)*(1.0-fog)*base_diffuse_trans;
+    // The artistically unlit portion bypasses deferred surface shadows
+    // and AO. It does not create physically emitted light or a GGX lobe.
+    specular+=matcap_unlit*(1.0-fog)*base_diffuse_trans;
 #endif
     projected_light*=1.0-fullbright;
     // The opaque pass composites this separate emissive attachment after
@@ -1160,6 +1168,7 @@ void main() {
                                          sprite_receiver!=0 ? 2.0 : 1.0,
                                          dot(jk_fragment_lit,vec3(0.2126,0.7152,0.0722)));
     // Packed mode stores unlit pigment separately; depth remains R16F.
-    out_depth=vec4(view_depth,albedo.rgb);
-    out_pigment=vec4(albedo.rgb,1.0);
+    out_depth=vec4(view_depth,
+                   albedo.rgb+matcap_lit*base_diffuse_trans);
+    out_pigment=vec4(albedo.rgb+matcap_lit*base_diffuse_trans,1.0);
 }
