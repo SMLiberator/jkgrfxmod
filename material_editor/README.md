@@ -4,6 +4,39 @@ A standalone Windows material editor using **Dear ImGui + OpenGL 3.3**.
 There are no Qt libraries, external GUI DLLs, game EXE, renderer DLL,
 or in-game hot-reload dependencies.
 
+## Revert commands
+
+**File > Revert** reloads the open `script.json` or `metadata.json` from
+its current disk path. If the document has unsaved edits, a confirmation
+explains that all unsaved pack/material changes will be lost and the
+document's Undo/Redo history cleared. Loading happens into a temporary
+JSON document first, so missing or malformed disk content leaves the
+working document untouched. The selected material is retained by name
+where possible, otherwise by index. The same command also refreshes
+externally edited files when no unsaved changes exist.
+
+**Edit > Revert Material** restores the selected raw material object from
+the editor's most recent saved/loaded document state, without changing
+other materials or pack-wide defaults. It is available only when the
+selected material differs from that saved state. This action is a
+single Undo/Redo step and resolves source-pack inheritance normally.
+Neither revert command deletes or rewrites image files on disk.
+
+## Texture alpha conventions
+
+Data maps (normal, surface R/G/B, displacement R, clearcoat and MatCap
+surface masks) do not use their alpha channels in the current preview
+and game shaders. New imports can treat those maps as opaque, although
+the current compiler still emits RGBA PNGs and retains input alpha bytes.
+
+Emissive images are **not** equivalent to data maps: the existing
+compiler converts their sRGB to linear light, multiplies RGB by input
+alpha, and encodes back to sRGB. The shader then uses the stored RGB.
+Consequently, emissive alpha provides an indirect intensity mask.
+Automatically discarding it from existing images would alter their
+appearance. Image conversion/loading is a separate feature from these
+Revert commands.
+
 ## Source image management and smart material sections
 
 When editing `script.json`, every material texture slot includes
