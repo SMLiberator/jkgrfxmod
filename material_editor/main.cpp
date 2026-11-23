@@ -39,6 +39,62 @@ std::string toUtf8(const wchar_t *source) {
     out.pop_back();
     return out;
 }
+fs::path editorSettingsFile() {
+    wchar_t roaming[MAX_PATH]={};
+    if(FAILED(SHGetFolderPathW(nullptr,CSIDL_APPDATA|CSIDL_FLAG_CREATE,
+                                nullptr,SHGFP_TYPE_CURRENT,roaming)))
+        return {};
+    return fs::path(roaming)/L"JkGfxMod"/L"material-editor.json";
+}
+std::string readableFileSize(std::uintmax_t bytes) {
+    if(bytes>=1024*1024)
+        return std::to_string((bytes+512*1024)/(1024*1024))+" MiB";
+    if(bytes>=1024)
+        return std::to_string((bytes+512)/1024)+" KiB";
+    return std::to_string(bytes)+" B";
+}
+std::string imageFormatLabel(const std::string &filename) {
+    std::string ext=fs::u8path(filename).extension().u8string();
+    std::transform(ext.begin(),ext.end(),ext.begin(),[](unsigned char ch) {
+        return static_cast<char>(std::toupper(ch));
+    });
+    return ext.empty()?"Image":ext.substr(1);
+}
+std::string importedImagePath(const std::string &script,const std::string &chosen) {
+    const fs::path source=fs::u8path(chosen);
+    if(!fs::is_regular_file(source))
+        throw std::runtime_error("Selected image is not a readable file.");
+    const fs::path directory=fs::u8path(script).parent_path();
+    fs::path destination=directory/source.filename();
+    std::error_code ec;
+    if(fs::equivalent(source,destination,ec))
+        return destination.filename().u8string();
+    // Never overwrite an existing pack-local texture. Use predictable
+    // suffixes and preserve the source image format/extension.
+    unsigned suffix=1;
+    while(fs::exists(destination)) {
+        if(suffix>99999)
+            throw std::runtime_error("No free import filename.");
+        destination=directory/(source.stem().u8string()+"-"+
+            std::to_string(suffix++)+source.extension().u8string());
+    }
+    fs::copy_file(source,destination,fs::copy_options::none);
+    return destination.filename().u8string();
+}
+std::string referencedImagePath(const std::string &script,const std::string &chosen) {
+    // A filename inside the script's tree becomes a portable relative path.
+    // Other locations stay absolute and are referenced without copying.
+    const fs::path absolute=fs::absolute(fs::u8path(chosen));
+    const fs::path base=fs::absolute(fs::u8path(script).parent_path());
+    std::error_code ec;
+    fs::path relative=fs::relative(absolute,base,ec);
+    if(!ec&&!relative.empty()&&!relative.is_absolute()) {
+        const auto first=*relative.begin();
+        if(first!="..")
+            return relative.generic_u8string();
+    }
+    return absolute.u8string();
+}
 std::string chooseDirectory(GLFWwindow *window) {
     BROWSEINFOW dialog{};
     dialog.hwndOwner=glfwGetWin32Window(window);
@@ -183,7 +239,8 @@ public:
     explicit Editor(GLFWwindow *window) : window_(window) {
         preview_=std::make_unique<MaterialPreview>();
         resetView();
-        status_="Open a compiled metadata.json to begin.";
+        status_="Open script.json or metadata.json to begin.";
+        loadUserSettings();
     }
     void frame() {
         // Let ImGui's own editable text boxes handle Ctrl+Z while typing.
@@ -227,6 +284,34 @@ public:
                                    "Ctrl+S",false,loaded_))save();
                 if(ImGui::MenuItem("Save As...","Ctrl+Shift+S",false,loaded_))
                     saveAs();
+                ImGui::Separator();
+                if(ImGui::BeginMenu("JK / MotS game assets")) {
+                    if(ImGui::MenuItem("Choose assets folder..."))
+                        chooseGameAssetsFolder();
+                    if(ImGui::MenuItem("Choose colormap (CMP)..."))
+                        chooseGamePalette();
+                    ImGui::Separator();
+                    if(ImGui::MenuItem("Clear assets folder",nullptr,false,
+                                       !nativeSource_.root().empty())) {
+                        nativeSource_.setRoot({});
+                        persistGameSettings();
+                    }
+                    if(ImGui::MenuItem("Clear CMP",nullptr,false,
+                                       !nativeSource_.palette().empty())) {
+                        nativeSource_.setPalette({});
+                        persistGameSettings();
+                    }
+                    ImGui::Separator();
+                    ImGui::TextDisabled("Assets: %s",
+                        nativeSource_.root().empty()?"Not selected":
+                        fs::u8path(nativeSource_.root()).filename().u8string().c_str());
+                    ImGui::TextDisabled("Palette: %s",
+                        nativeSource_.palette().empty()?"Not selected":
+                        fs::u8path(nativeSource_.palette()).filename().u8string().c_str());
+                    ImGui::TextDisabled("Saved per user, outside the material pack");
+                    ImGui::EndMenu();
+                }
+                ImGui::Separator();
                 if(ImGui::MenuItem("Exit"))requestExit();
                 ImGui::EndMenu();
             }
@@ -269,6 +354,63 @@ public:
         if(!ImGui::IsAnyItemActive())groupActive_=false;
     }
     bool exitApproved() const {return exitApproved_;}
+    void loadUserSettings() {
+        const auto path=editorSettingsFile();
+        if(path.empty())return;
+        try {
+            std::ifstream file(path,std::ios::binary);
+            if(!file)return;
+            Document json;file>>json;
+            if(!json.is_object())return;
+            const auto assets=stringValue(json,"game_assets_folder");
+            const auto cmp=stringValue(json,"colormap_file");
+            nativeSource_.setRoot(assets);
+            nativeSource_.setPalette(cmp);
+        } catch(const std::exception &e) {
+            status_=std::string("Editor settings unavailable: ")+e.what();
+        }
+    }
+    void persistGameSettings() {
+        nativeCacheKey_.clear();
+        nativeLoaded_={};
+        nativeStatus_.clear();
+        if(loaded_)syncPreview();
+        try {
+            const auto path=editorSettingsFile();
+            if(path.empty())
+                throw std::runtime_error("Windows AppData directory not found.");
+            fs::create_directories(path.parent_path());
+            fs::path temp=path;
+            temp+=L".tmp";
+            Document doc={{"game_assets_folder",nativeSource_.root()},
+                          {"colormap_file",nativeSource_.palette()}};
+            {
+                std::ofstream out(temp,std::ios::binary|std::ios::trunc);
+                if(!out)throw std::runtime_error("Cannot write editor settings.");
+                out<<doc.dump(2)<<"\n";
+                out.flush();
+                if(!out)throw std::runtime_error("Could not flush editor settings.");
+            }
+            if(!MoveFileExW(temp.c_str(),path.c_str(),
+                     MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH))
+                throw std::runtime_error("Could not replace editor settings file.");
+            status_="Game asset settings saved for future sessions.";
+        } catch(const std::exception &e) {
+            status_=std::string("Could not save game asset settings: ")+e.what();
+        }
+    }
+    void chooseGameAssetsFolder() {
+        const std::string directory=chooseDirectory(window_);
+        if(directory.empty())return;
+        nativeSource_.setRoot(directory);
+        persistGameSettings();
+    }
+    void chooseGamePalette() {
+        const std::string path=choosePaletteFile(window_);
+        if(path.empty())return;
+        nativeSource_.setPalette(path);
+        persistGameSettings();
+    }
     void requestExit() {
         if(exitApproved_)return;
         if(!dirty_) {
@@ -1288,23 +1430,7 @@ private:
             if(keeps) {
                 ImGui::Separator();
                 ImGui::TextUnformatted("Original JK MAT albedo (preview only)");
-                if(ImGui::Button("Choose game assets folder...")) {
-                    std::string directory=chooseDirectory(window_);
-                    if(!directory.empty()) {
-                        nativeSource_.setRoot(directory);
-                        nativeCacheKey_.clear();
-                        syncPreview();
-                    }
-                }
-                ImGui::SameLine();
-                if(ImGui::Button("Choose CMP...")) {
-                    std::string cmp=choosePaletteFile(window_);
-                    if(!cmp.empty()) {
-                        nativeSource_.setPalette(cmp);
-                        nativeCacheKey_.clear();
-                        syncPreview();
-                    }
-                }
+                ImGui::TextDisabled("Configure game assets and CMP under File.");
                 if(!nativeSource_.root().empty()) {
                     ImGui::TextWrapped("Assets: %s (%zu files)",
                         nativeSource_.root().c_str(),nativeSource_.indexedFiles());
