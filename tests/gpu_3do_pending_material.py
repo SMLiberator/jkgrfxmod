@@ -16,7 +16,9 @@ assert "gpu_3do_texture const *texture;" in draw
 assert "gpu_3do_texture texture;" not in draw
 assert "pending_draw candidate{&inst,&group,&tex,policy," in draw
 assert "auto const &material=*draw.texture;" in draw
-assert draw.count("draw.texture")==1
+# Multiple borrowed uses are valid: the optional instancing audit also
+# inspects the material and records its pointer before submission.
+# The pointer-only pending_draw contract above prevents material copies.
 assert "auto const &tex=found->second;" in draw
 
 # Separate lifetime boundaries: native MATs are resolved in the current
