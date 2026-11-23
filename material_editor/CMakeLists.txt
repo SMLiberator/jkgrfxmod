@@ -99,7 +99,7 @@ if(WIN32)
       if(_png_size GREATER 128)
         # Verify the compressed PNG is exactly 512x256 at build time.
         # The first 24 bytes contain the PNG signature and IHDR dimensions.
-        file(READ "${_png}" _png_header HEX LIMIT 24)
+        file(READ "${_png}" _png_header LIMIT 24 HEX)
         string(TOLOWER "${_png_header}" _png_header)
         if(_png_header STREQUAL
            "89504e470d0a1a0a0000000d494844520000020000000100")
