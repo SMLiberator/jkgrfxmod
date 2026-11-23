@@ -1067,7 +1067,14 @@ private:
                         "original script and textures. Choose another filename "
                         "in that folder to preserve relative asset paths.");
             }
-            editor_source::validate(root_,mode_);
+            Document documentToSave=root_;
+            // Source script.json has no signatures; its compiler generates
+            // them. Compiled metadata needs signature regeneration only when
+            // the replacement mapping has actually changed.
+            const size_t regenerated=isSource()?0:
+                editor_signatures::refreshChanged(
+                    documentToSave,savedRoot_,nativeSource_);
+            editor_source::validate(documentToSave,mode_);
             const fs::path destination=fs::u8path(path);
             const fs::path directory=destination.parent_path();
             fs::path temp=destination;
@@ -1075,7 +1082,7 @@ private:
             // Only referenced drafts are materialized. Prepare PNGs and JSON
             // before changing any final file; commit the JSON last.
             for(const auto &draft:stagedImages_) {
-                if(!documentReferences(root_,draft.first)||
+                if(!documentReferences(documentToSave,draft.first)||
                    committedImageNames_.count(draft.first))
                     continue;
                 const fs::path output=directory/fs::u8path(draft.first);
@@ -1105,7 +1112,7 @@ private:
                 std::ofstream stream(temp,std::ios::binary|std::ios::trunc);
                 if(!stream)throw std::runtime_error("Cannot write temporary JSON.");
                 temporaryFiles.push_back(temp);
-                stream<<root_.dump(4)<<"\n";
+                stream<<documentToSave.dump(4)<<"\n";
                 stream.flush();
                 if(!stream)throw std::runtime_error("Failed to write JSON.");
             }
@@ -1131,14 +1138,19 @@ private:
                 file_=path;
                 // Texture paths are relative to metadata's location.
                 nativeCacheKey_.clear();
-                syncPreview();
             }
+            // Only after an atomic disk commit, reflect regenerated hashes
+            // into the edit model and establish a clean saved baseline.
+            root_=std::move(documentToSave);
+            observedRoot_=root_;
             savedRoot_=root_;
             updateDirty();
+            syncPreview();
             status_=switchToCopy
                 ?"Saved copy: "+fs::u8path(path).filename().u8string()
-                :isSource()?"Saved script.json (source; not yet compiled)."
-                           :"Saved metadata.json. No MAT signatures were regenerated.";
+                :isSource()?"Saved script.json (source; compile to generate signatures)."
+                           :"Saved metadata.json; "+std::to_string(regenerated)+
+                             " material signature set(s) regenerated.";
             return true;
         } catch(const std::exception &e) {
             std::error_code ec;
