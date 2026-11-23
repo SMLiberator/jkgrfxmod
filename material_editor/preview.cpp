@@ -72,6 +72,9 @@ uniform int uAlbedoPremultiplied, uAlphaMode, uBlendMode;
 uniform float uAlphaCutoff;
 uniform vec2 uAlbedoScroll,uEmissiveScroll,uNormalScroll,uNormalScroll2;
 uniform float uEmissivePulse;
+// Preview lighting is independent of the reflection environment and emission.
+uniform vec3 uPreviewAmbient,uPreviewKey;
+uniform float uPreviewSpecular;
 const float PI=3.14159265358979323846;
 vec3 schlick(vec3 f0,float nv) {
     return f0+(vec3(1.0)-f0)*pow(1.0-clamp(nv,0.0,1.0),5.0);
@@ -179,9 +182,11 @@ void main() {
     vec3 baseFresnel=uUseEnvFresnel!=0?schlick(f0,ndv):vec3(1.0);
     vec3 baseEnvironment=env(R,rough)*baseFresnel*strength;
     vec3 baseSpec=baseEnvironment+
-                  directSpec(N,V,rough,f0,strength);
-    // Studio-only diffuse term: the game gets sector/vertex/point lighting.
-    vec3 diffuse=base*(1.0-metal)*(0.48+0.38*max(dot(N,
+                  directSpec(N,V,rough,f0,strength)*uPreviewSpecular;
+    // Preset-specific preview lighting. This stays independent from the
+    // material's emissive factor, EnvMap sampling, and MatCap contribution.
+    vec3 diffuse=base*(1.0-metal)*(uPreviewAmbient+
+                   uPreviewKey*max(dot(N,
                    normalize(vec3(-0.45,0.80,0.70))),0.0));
 
     // MatCap is artistic color in the emission-like composition path,
@@ -216,7 +221,8 @@ void main() {
     vec3 coatEnvironment=env(reflect(-V,coatNormal),coatRough)*
         coatFresnel*coverage;
     vec3 coatSpec=coatEnvironment+
-                  directSpec(coatNormal,V,coatRough,vec3(0.04),coverage);
+                  directSpec(coatNormal,V,coatRough,vec3(0.04),coverage)*
+                  uPreviewSpecular;
     vec3 emission=uEmissive*uEmissivePulse*(hasEmissive!=0?
         texture(tEmissive,tc+uEmissiveScroll).rgb:vec3(1.0));
 
@@ -676,7 +682,8 @@ void MaterialPreview::draw(int w,int h,float orbitYaw,float orbitPitch,
                            float orbitDistance,
                            const std::array<float,3> &orbitTarget,
                            PreviewShape shape,bool useEnvFresnel,
-                           bool orthographic,double animationSeconds) {
+                           bool orthographic,double animationSeconds,
+                           float lightingIntensity) {
     if(!program_)return;
     resize(w,h);
     glBindFramebuffer(GL_FRAMEBUFFER,fbo_);
@@ -707,6 +714,25 @@ void MaterialPreview::draw(int w,int h,float orbitYaw,float orbitPitch,
         orbitTarget[0]+back[0]*orbitDistance,
         orbitTarget[1]+back[1]*orbitDistance,
         orbitTarget[2]+back[2]*orbitDistance};
+    const float light=std::clamp(lightingIntensity,0.0f,2.0f);
+    // Preserve the existing Studio appearance at 1.0. Outdoor is bright
+    // with warm sun and cool sky fill; Night gives emissive materials a
+    // deliberately low-lit reference without touching their intensity.
+    const std::array<float,3> ambient=preset_==1
+        ?std::array<float,3>{0.72f,0.79f,0.88f}
+        :preset_==2?std::array<float,3>{0.018f,0.030f,0.060f}
+                   :std::array<float,3>{0.48f,0.48f,0.48f};
+    const std::array<float,3> key=preset_==1
+        ?std::array<float,3>{0.78f,0.68f,0.56f}
+        :preset_==2?std::array<float,3>{0.055f,0.077f,0.115f}
+                   :std::array<float,3>{0.38f,0.38f,0.38f};
+    const auto scaled=[light](const std::array<float,3> &v) {
+        return std::array<float,3>{v[0]*light,v[1]*light,v[2]*light};
+    };
+    v3("uPreviewAmbient",scaled(ambient));
+    v3("uPreviewKey",scaled(key));
+    f1("uPreviewSpecular",light*(preset_==1?1.2f:
+                                preset_==2?0.13f:1.0f));
     v3("uViewRight",right);v3("uViewUp",up);
     v3("uViewBack",back);v3("uCameraPos",camera);
     v3("uCameraTarget",orbitTarget);
