@@ -99,6 +99,37 @@ for an active layer or map. Inherited source-pack properties count as active.
 Per-material expansion state remains under user control, and adding a new
 feature opens its section without auto-collapsing other sections.
 
+## MAT replacements and original albedo
+
+**MAT replacements** is open by default in Material Properties. In a
+source `script.json`, each entry exposes the in-game MAT resource path and
+cel index, with Add/Remove controls. Editing a bare filename keeps its
+short-string form (cel 0); changing the cel serializes a
+`["mat/filename.mat", cel]` tuple. Multiple replacement entries remain
+independent, and the path may refer to a MAT inside a GOB/GOO archive rather
+than to a loose file. Empty paths are rejected on Save. These edits participate
+in normal Undo/Redo, Save, Revert Material and File > Revert.
+
+In compiled `metadata.json`, the same paths and cel indices are displayed
+read-only. Altering a compiled replacement without regenerating its
+`replaces_signatures` would break material matching. Edit the source and
+run the pack compiler to change these targets.
+
+**Keep original MAT albedo** is available for source and compiled materials.
+It uses the first MAT replacement's original image (and cel) for preview,
+when corresponding game assets are configured. It is mutually exclusive
+with an assigned `albedo_map`: selecting Keep removes a local image
+assignment; importing/referencing an image explicitly disables Keep.
+Source-pack defaults expose this option immediately beside Default Albedo.
+A material-level Keep override can suppress an inherited pack albedo map,
+without flattening defaults. Neither option changes the MAT replacement or
+regenerates compiled signatures. If no game assets are available, the
+original albedo preview remains unavailable until they are configured.
+
+The Live Material Preview toolbar arranges Shape, Environment, and
+Animation & View controls into responsive columns, with compact
+pause/resume and restart controls.
+
 ## Material animations
 
 The Albedo, Emissive and Normal maps sections expose the engine's existing
