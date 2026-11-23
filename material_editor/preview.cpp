@@ -484,7 +484,7 @@ bool loadBundledPreset(int preset,int &width,int &height,
     if(preset<0||preset>2)return false;
     const HMODULE module=GetModuleHandleW(nullptr);
     const HRSRC info=module?FindResourceW(
-        module,MAKEINTRESOURCEW(401+preset),RT_RCDATA):nullptr;
+        module,MAKEINTRESOURCEW(401+preset),MAKEINTRESOURCEW(10)):nullptr;
     if(!info)return false;
     const HGLOBAL handle=LoadResource(module,info);
     const void *bytes=handle?LockResource(handle):nullptr;
