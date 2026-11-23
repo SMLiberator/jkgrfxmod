@@ -10,6 +10,8 @@
 #include <vector>
 
 enum class PreviewShape { Sphere, Plane, Cube };
+// Preview reflection image selection is separate from the lighting preset.
+enum class PreviewEnvironmentSource { MaterialPack, Preset, Custom };
 // Keep camera framing in sync with the actual cube mesh dimensions.
 constexpr float kPreviewCubeHalfExtent = 0.85f;
 
@@ -60,6 +62,7 @@ public:
     const std::string &error() const { return error_; }
     void setMaterial(const PreviewMaterial &mat);
     void setPreset(int preset);
+    void setEnvironmentSource(PreviewEnvironmentSource source);
     void setEnvironmentOverride(const std::string &path);
     // Normal studio preview; Fresnel toggle affects EnvMap only (not metadata).
     void draw(int width, int height, float orbitYaw, float orbitPitch,
@@ -97,6 +100,7 @@ private:
     std::string envOverride_, envDescription_, error_;
     bool loadedEnvironmentFile_ = false;
     int width_ = 0, height_ = 0, preset_ = 0;
+    PreviewEnvironmentSource environmentSource_=PreviewEnvironmentSource::MaterialPack;
     GLsizei sphereCount_ = 0, planeCount_ = 0, cubeCount_ = 0;
     float planeAspect_ = 1.0f; // loaded albedo texture, else emissive
 };
