@@ -31,7 +31,15 @@ assert "debug_reflection_distance_culling" not in sample
 assert "debug_reflection_distance_culling" not in parser
 assert "candidate.is_debug?0.0f:" not in capture
 assert "float const interval=candidate.is_global?0.0f:" in capture
-assert "bool const debug_supported=realtime_supported" in capture
+assert "bool const debug_supported=fragment_units>=2" in capture
+assert "bool const debug_supported=realtime_supported" not in capture
+assert "the_config->enable_reflection_capture being on" in capture
+assert 'missing="capture_not_from_presented_frame"' in renderer
+assert 'missing="probe_not_created"' in renderer
+assert 'missing="probe_not_ready"' in renderer
+assert 'missing="probe_frame_mismatch"' in renderer
+assert 'REFLECTION debug view unavailable mode=' in renderer
+assert "glClear(GL_COLOR_BUFFER_BIT);" in renderer
 assert "reflection_probe_capture_distance_limit(" in capture
 assert "thing_distance_limit=" in capture
 assert "shader.set_projection(hemi)" in renderer

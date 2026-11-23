@@ -44,9 +44,12 @@
             // on ordinary GL 3.3 hardware with fewer fragment texture units.
             bool const realtime_supported=fragment_units>23 &&
                 the_config->enable_reflection_capture;
-            // Diagnostic projection uses the same realtime capture pipeline,
-            // including its configuration and hardware eligibility.
-            bool const debug_supported=realtime_supported &&
+            // The viewer requests the SAME normal capture pass (projection,
+            // eligibility, materials and culling) at the camera position.
+            // It only needs the capture pass's two texture units. Unlike
+            // materials, the fullscreen viewer does not bind unit 23 and
+            // must not depend on enable_reflection_capture being on.
+            bool const debug_supported=fragment_units>=2 &&
                 the_config->debug_reflection_mode!="off";
             if(!realtime_supported && !debug_supported && !capture_global) {
                 reflection_probes.clear();

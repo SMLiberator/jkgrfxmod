@@ -2840,19 +2840,54 @@ namespace jkgm {
         void draw_reflection_debug_view()
         {
             auto const &debug=the_config->debug_reflection_mode;
-            if(debug=="off" || mode!=renderer_mode::ingame || !ogs ||
-               !reflection_debug_display_camera.valid ||
-               gpu_3do_present_serial==0U ||
-               reflection_debug_display_serial!=gpu_3do_present_serial-1U)
-                return;
+            if(debug=="off" || mode!=renderer_mode::ingame || !ogs)return;
             uint64_t const owner=debug=="shared"
                 ?shared_reflection_owner_key:debug_reflection_owner_key;
             auto const it=reflection_probes.find(owner);
-            if(it==reflection_probes.end() || !it->second.ready ||
-               it->second.seen_frame!=reflection_debug_display_serial ||
-               !it->second.target || !it->second.target->ready())return;
+            char const *missing=nullptr;
+            if(!reflection_debug_display_camera.valid)
+                missing="camera_not_captured";
+            else if(gpu_3do_present_serial==0U ||
+                    reflection_debug_display_serial!=
+                        gpu_3do_present_serial-1U)
+                missing="capture_not_from_presented_frame";
+            else if(it==reflection_probes.end())
+                missing="probe_not_created";
+            else if(!it->second.ready)
+                missing="probe_not_ready";
+            else if(it->second.seen_frame!=reflection_debug_display_serial)
+                missing="probe_frame_mismatch";
+            else if(!it->second.target || !it->second.target->ready())
+                missing="capture_target_unavailable";
+            else if(it->second.target->layers()!=2 &&
+                    it->second.target->layers()!=6)
+                missing="unexpected_capture_layers";
+            if(missing) {
+                // A normal camera here falsely suggests the capture is
+                // functioning. Never substitute primary-camera geometry.
+                // Missing data is black, with a specific log reason.
+                if(gpu_3do_present_serial%120U==0U)
+                    LOG_WARNING("REFLECTION debug view unavailable mode=",debug,
+                        " reason=",missing,
+                        " enable_reflections=",the_config->enable_reflections?1:0,
+                        " gpu_cache=",the_config->use_gpu_cache?1:0,
+                        " capture_enabled=",
+                            the_config->enable_reflection_capture?1:0,
+                        " frame=",gpu_3do_present_serial,
+                        " captured_frame=",reflection_debug_display_serial);
+                gl::bind_framebuffer(gl::framebuffer_bind_target::any,
+                                     gl::default_framebuffer);
+                gl::set_viewport(make_box(make_point(0,0),conf_scr_res));
+                glDisable(GL_SCISSOR_TEST);
+                gl::disable(gl::capability::blend);
+                gl::set_depth_mask(false);
+                glClearColor(0.0f,0.0f,0.0f,1.0f);
+                glClear(GL_COLOR_BUFFER_BIT);
+                gl::set_depth_mask(true);
+                gl::invalidate_cached_state();
+                return;
+            }
             bool const hemi=it->second.target->layers()==2;
-            if(!hemi && it->second.target->layers()!=6)return;
             if(!reflection_debug_view_program)
                 reflection_debug_view_program=
                     std::make_unique<reflection_debug_view_shader>(
