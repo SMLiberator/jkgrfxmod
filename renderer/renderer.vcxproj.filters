@@ -293,6 +293,12 @@
     <ClInclude Include="gpu_3do_instancing_audit.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="gpu_3do_parallel_visibility.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="cpu_render_workers.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="gpu_3do_packed_vertex.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
