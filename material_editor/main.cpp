@@ -797,11 +797,14 @@ private:
         // target the wrong saved entry. File > Revert remains available.
         const bool structurePending=std::any_of(undo_.begin(),undo_.end(),
             [](const Edit &step){return step.materialIndex==-2;});
-        return !structurePending&&validSelection()&&
-               savedRoot_.contains("materials")&&
-               savedRoot_["materials"].is_array()&&
-               size_t(selection_)<savedRoot_["materials"].size()&&
-               selected()!=savedRoot_["materials"][size_t(selection_)];
+        if(!validSelection()||!savedRoot_.contains("materials")||
+           !savedRoot_["materials"].is_array()||
+           size_t(selection_)>=savedRoot_["materials"].size())return false;
+        const auto &prior=savedRoot_["materials"][size_t(selection_)];
+        if(structurePending&&stringValue(selected(),"name")!=
+                             stringValue(prior,"name"))
+            return false;
+        return selected()!=prior;
     }
     void revertSelectedMaterial() {
         if(!canRevertMaterial())return;
