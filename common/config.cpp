@@ -381,12 +381,6 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             j.at("experimental_shared_hemi").get_to(
                 rv->experimental_shared_hemi);
         }
-        if(j.contains("debug_reflection_distance_culling")) {
-            auto const &v=j.at("debug_reflection_distance_culling");
-            if(!v.is_boolean())throw std::runtime_error(
-                "debug_reflection_distance_culling must be a boolean");
-            rv->debug_reflection_distance_culling=v.get<bool>();
-        }
         if(j.contains("debug_reflection_mode")) {
             auto const &v=j.at("debug_reflection_mode");
             if(!v.is_string())throw std::runtime_error(

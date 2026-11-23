@@ -13,7 +13,8 @@
 
 namespace jkgm {
 enum class reflection_capture_cull : uint8_t {
-    visible=0U,hemisphere=1U,range=2U,frustum=3U,portal=4U
+    visible=0U,hemisphere=1U,range=2U,frustum=3U,portal=4U,
+    backface=5U
 };
 
 // Use the exact tests and ordering of the serial Hemi/Cube/Planar paths.
@@ -67,12 +68,31 @@ inline void prepare_reflection_capture_parallel_visibility(
             return;
         }
     }
+    std::array<float,3> local_eye{};
+    bool const has_local_eye=gpu_3do_local_eye(out.modelview,local_eye);
     out.groups.resize(geo.groups.size());
     for(size_t i=0;i<geo.groups.size();++i) {
         auto const &group=geo.groups[i];
-        out.groups[i]=reflection_capture_bounds_reason(
+        auto reason=reflection_capture_bounds_reason(
             out.modelview,frustum,paraboloid,thing_radius,
             group.bounds_min,group.bounds_max);
+        if(reason==reflection_capture_cull::visible &&
+           has_local_eye && !(group.face_type&0x1U) &&
+           group.plane_count>0 &&
+           group.plane_start+group.plane_count<=geo.face_planes.size()) {
+            bool any_visible=false;
+            for(uint32_t p=group.plane_start;
+                p<group.plane_start+group.plane_count;++p) {
+                auto const &plane=geo.face_planes[p];
+                if(gpu_3do_face_facing_camera(
+                       local_eye,plane.anchor,plane.normal)) {
+                    any_visible=true;
+                    break;
+                }
+            }
+            if(!any_visible)reason=reflection_capture_cull::backface;
+        }
+        out.groups[i]=reason;
     }
     out.ready=true;
 }

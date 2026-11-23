@@ -26,10 +26,12 @@ assert "it->second.target->color_texture()" in renderer
 assert "debug.is_debug=true;" in capture
 assert "debug.position=viewer.position;" in capture
 assert 'debug_reflection_mode=="shared"' in capture
-assert "debug_reflection_distance_culling = true" in cfg
-assert sample["debug_reflection_distance_culling"] is True
-assert "debug_reflection_distance_culling must be a boolean" in parser
-assert "!the_config->debug_reflection_distance_culling" in capture
+assert "debug_reflection_distance_culling" not in cfg
+assert "debug_reflection_distance_culling" not in sample
+assert "debug_reflection_distance_culling" not in parser
+assert "candidate.is_debug?0.0f:" not in capture
+assert "float const interval=candidate.is_global?0.0f:" in capture
+assert "bool const debug_supported=realtime_supported" in capture
 assert "reflection_probe_capture_distance_limit(" in capture
 assert "thing_distance_limit=" in capture
 assert "shader.set_projection(hemi)" in renderer

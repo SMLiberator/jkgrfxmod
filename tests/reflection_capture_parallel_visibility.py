@@ -28,6 +28,9 @@ assert "dual_paraboloid_bounds_outside" in helper
 assert "gpu_3do_batch_outside_frustum" in helper
 assert "out.ready=false;" in helper
 assert "geo.cached_group_bounds" in helper
+assert "reflection_capture_cull::backface" in helper
+assert "gpu_3do_face_facing_camera(" in helper
+assert "gpu_3do_face_facing_camera(" in h
 for text,needle in ((h,"capture_parallel=workers.execute("),
                     (r,"planar_parallel=workers.execute(")):
     job=text.split(needle,1)[1].split("\n                                });",1)[0] if text is h else text.split(needle,1)[1].split("\n                        });",1)[0]

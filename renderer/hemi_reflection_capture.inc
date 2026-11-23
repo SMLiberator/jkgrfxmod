@@ -44,9 +44,9 @@
             // on ordinary GL 3.3 hardware with fewer fragment texture units.
             bool const realtime_supported=fragment_units>23 &&
                 the_config->enable_reflection_capture;
-            // Debug capture needs only the base material samplers, and works
-            // without a visible reflective MAT or the realtime-probe switch.
-            bool const debug_supported=fragment_units>=2 &&
+            // Diagnostic projection uses the same realtime capture pipeline,
+            // including its configuration and hardware eligibility.
+            bool const debug_supported=realtime_supported &&
                 the_config->debug_reflection_mode!="off";
             if(!realtime_supported && !debug_supported && !capture_global) {
                 reflection_probes.clear();
@@ -251,9 +251,8 @@
                 // World changes and disabled captures still clear this cache.
                 active_owners.insert(shared_reflection_owner_key);
             }
-            // The projected diagnostic view follows the camera position, not
-            // a real owner. It is independent of material visibility and the
-            // normal per-Thing probe count/distance limit.
+            // A separate camera-centered owner selects the same dedicated
+            // capture mode, not a simplified or less-culled debug pipeline.
             if(debug_supported &&
                (the_config->debug_reflection_mode=="cube" ||
                 the_config->debug_reflection_mode=="hemi")) {
@@ -336,7 +335,8 @@
             for(auto const &candidate:candidates) {
                 uint64_t const selected_owner=candidate.is_global
                     ?candidate.exclude_owner
-                    :(candidate.is_shared?0U:candidate.owner);
+                    :((candidate.is_shared || candidate.is_debug)
+                        ?0U:candidate.owner);
                 int const selected_mode=candidate.mode;
                 auto const &focus=candidate.position;
                 // Global COG capture uses native Thing eligibility, not the
@@ -370,13 +370,8 @@
                             the_config->data_path,true);
                 auto &shader=paraboloid_mode
                     ?*paraboloid_capture_program:*hemi_capture_program;
-                // Project the full scene. The dedicated Hemi/Cube distance
-                // budget applies only to Things, not to world geometry.
-                // Debug captures normally match dedicated probe Thing range,
-                // so a configured 4-unit test is actually visible. Explicit
-                // opt-out preserves an unlimited same-camera reference.
-                float const probe_distance_limit=(candidate.is_debug &&
-                    !the_config->debug_reflection_distance_culling)?0.0f:
+                // Debug views do not override the real mode's distance rule.
+                float const probe_distance_limit=
                     reflection_probe_capture_distance_limit(
                         selected_mode,candidate.is_global,candidate.is_shared,
                         the_config->reflection_probe_max_distance);
@@ -396,13 +391,21 @@
                     !entry.target || !entry.target->ready() ||
                     entry.target->width()!=output_side ||
                     entry.target->layers()!=output_layers;
-                float const interval=(candidate.is_global || candidate.is_debug ||
-                    (candidate.is_shared && the_config->debug_reflection_mode=="shared"))
-                    ?0.0f:the_config->reflection_capture_update_interval;
+                float const interval=candidate.is_global?0.0f:
+                    the_config->reflection_capture_update_interval;
                 if(entry.ready && !needs_reconfigure && interval>0.0f &&
                    std::chrono::duration<float>(
-                       now-entry.last_refresh).count()<interval)
-                    continue; // Reuse this Thing's complete previous probe.
+                       now-entry.last_refresh).count()<interval) {
+                    // A held probe is normal: display that same completed
+                    // texture at the correct presentation frame.
+                    if(candidate.is_debug ||
+                       (candidate.is_shared &&
+                        the_config->debug_reflection_mode=="shared")) {
+                        reflection_debug_display_camera=viewer;
+                        reflection_debug_display_serial=gpu_3do_present_serial;
+                    }
+                    continue;
+                }
                 entry.ready=false;
                 entry.mode=selected_mode;
                 if(!entry.target)
@@ -416,6 +419,7 @@
                 std::unordered_set<uint64_t> reflection_excluded_owners{
                     selected_owner};
                 if(!candidate.is_global && !candidate.is_shared &&
+                   !candidate.is_debug &&
                    engine_material_debug::matches_tested_executable()) {
                     auto read=[](uintptr_t at,void *dst,size_t bytes) {
                         return engine_material_debug::read_bytes(at,dst,bytes);
@@ -427,6 +431,7 @@
                 size_t total_world_drawn=0,total_model_drawn=0;
                 size_t total_acquired_nodes=0,total_model_batches=0;
                 size_t total_model_groups_culled=0,total_world_bounds_culled=0;
+                size_t total_model_backface_culled=0;
                 size_t total_thing_range_culled=0,capture_scene_preps=0;
                 uint32_t portal_views_used=0U;
                 bool const profile_shared=
@@ -959,6 +964,8 @@
                             if(reason==reflection_capture_cull::hemisphere ||
                                reason==reflection_capture_cull::range)
                                 ++total_model_groups_culled;
+                            if(reason==reflection_capture_cull::backface)
+                                ++total_model_backface_culled;
                             continue;
                         }
                     } else {
@@ -979,6 +986,29 @@
                        gpu_3do_batch_outside_frustum(
                            frustum,modelview,
                            group.bounds_min,group.bounds_max))continue;
+                    // Match the main-camera authored JK face-plane test.
+                    if(!(group.face_type&0x1U) &&
+                       group.plane_count>0 &&
+                       group.plane_start+group.plane_count<=
+                           inst.geometry->face_planes.size()) {
+                        std::array<float,3> local_eye{};
+                        if(gpu_3do_local_eye(modelview,local_eye)) {
+                            bool any_visible=false;
+                            for(uint32_t p=group.plane_start;
+                                p<group.plane_start+group.plane_count;++p) {
+                                auto const &plane=inst.geometry->face_planes[p];
+                                if(gpu_3do_face_facing_camera(
+                                       local_eye,plane.anchor,plane.normal)) {
+                                    any_visible=true;
+                                    break;
+                                }
+                            }
+                            if(!any_visible) {
+                                ++total_model_backface_culled;
+                                continue;
+                            }
+                        }
+                    }
                     }
                     model_group_scratch.push_back(&entry);
                     if(profile_shared)
@@ -1043,9 +1073,11 @@
                                inst.sector_tint[2]));
                 shader.set_thing_fade(1.0f,0);
                 gl::bind_vertex_array(it->second->vao);
-                gl::set_front_face_raw(paraboloid_mode
-                    ?(gpu_3do_reversed_winding(inst.transform)?GL_CCW:GL_CW)
-                    :(gpu_3do_reversed_winding(inst.transform)?GL_CW:GL_CCW));
+                // Keep the projection-specific front convention, but use
+                // the same mirrored-Thing CullFace policy as the main view.
+                gl::set_front_face_raw(paraboloid_mode?GL_CW:GL_CCW);
+                gl::set_face_cull_mode(gpu_3do_reversed_winding(inst.transform)
+                    ?gl::face_mode::front:gl::face_mode::back);
                 // Keep source order for exactly coplanar alpha cutouts.
                 for(size_t i=0;i<model_group_scratch.size();) {
                     auto const &key=group_key(model_group_scratch[i]);
@@ -1265,6 +1297,7 @@
                          " model_groups=",total_model_drawn,
                          " multi_draw_batches=",total_model_batches,
                          " groups_bounds_culled=",total_model_groups_culled,
+                         " groups_backface_culled=",total_model_backface_culled,
                          " world_bounds_culled=",total_world_bounds_culled,
                          " thing_range_culled=",total_thing_range_culled,
                          " scene_preparations=",capture_scene_preps,

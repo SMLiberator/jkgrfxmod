@@ -67,8 +67,8 @@ void main() {
             }
         }
     }
-    // Magenta means the capture texture has NO valid scene coverage at
-    // this direction (not necessarily a culling error).
+    // Do not add debug-only colors absent from the captured radiance.
+    // Alpha holes have no image; real materials use their EnvMap fallback.
     frag_color=vec4(coverage>0.0001?sum/max(coverage,0.0001):
-        vec3(0.85,0.04,0.65),1.0);
+        vec3(0.0),1.0);
 }
