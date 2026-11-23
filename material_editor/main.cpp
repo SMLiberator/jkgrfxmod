@@ -305,6 +305,8 @@ public:
             if(ImGui::Shortcut(ImGuiMod_Ctrl|ImGuiMod_Shift|ImGuiKey_S))saveAs();
             else if(ImGui::Shortcut(ImGuiMod_Ctrl|ImGuiKey_S))save();
             if(ImGui::Shortcut(ImGuiMod_Ctrl|ImGuiKey_Z))undo();
+            if(ImGui::Shortcut(ImGuiMod_Ctrl|ImGuiKey_D) && validSelection())
+                duplicateSelectedMaterial();
             if(ImGui::Shortcut(ImGuiMod_Ctrl|ImGuiMod_Shift|ImGuiKey_Z) ||
                ImGui::Shortcut(ImGuiMod_Ctrl|ImGuiKey_Y))redo();
         }
@@ -359,6 +361,9 @@ public:
                                    false,!redo_.empty()))
                     redo();
                 ImGui::Separator();
+                if(ImGui::MenuItem("Duplicate Material","Ctrl+D",false,
+                                   validSelection()))
+                    duplicateSelectedMaterial();
                 if(ImGui::MenuItem("Revert Material",nullptr,false,
                                    canRevertMaterial()))
                     revertSelectedMaterial();
