@@ -1,6 +1,7 @@
 """Radial fog is an opt-in distance-only change; keep depth ABI unchanged."""
 from math import hypot, isclose
 from pathlib import Path
+import re
 import json
 
 root = Path(__file__).resolve().parents[1]
@@ -49,7 +50,9 @@ assert "float depth=32.0/max(gl_FragCoord.w" in world
 assert "length(cached_world_position-camera_world_origin)*32.0:depth" in world
 assert "float fog_depth=fog_params.w>0.5" in model
 assert "length(gpu_view_position())*32.0:view_depth" in model
-assert "out_depth=vec4(view_depth,albedo.rgb)" in model
+# MatCap lighting may alter the G/B/A pigment payload; radial fog must
+# still preserve linear forward depth in the first (red) channel.
+assert re.search(r"out_depth\s*=\s*vec4\s*\(\s*view_depth\s*,", model)
 assert "float absorption=fluid_absorption(view_depth);" in model
 assert "float absorption=world_fluid_absorption(depth);" in world
 for frag in (native_opaque, native_alpha):
