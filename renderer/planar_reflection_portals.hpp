@@ -422,8 +422,16 @@ public:
         }
         std::vector<planar_reflection_portal_rect> windows(sectors_.size());
         std::vector<uint8_t> reached(sectors_.size(),0U);
-        std::vector<uint8_t> path(sectors_.size(),0U);
-        struct seed {uint32_t sector=0;planar_reflection_portal_rect window{};};
+        // A sector may be reached through different portal paths. Native
+        // JK widens that sector to the full viewport on a revisit. We must
+        // revisit its OUTGOING portals as well: widening its window without
+        // propagation incorrectly hides geometry in downstream sectors.
+        std::vector<uint8_t> widened(sectors_.size(),0U);
+        struct seed {
+            uint32_t sector=0;
+            planar_reflection_portal_rect window{};
+            bool widened_pass=false;
+        };
         std::vector<seed> seeds;
         std::vector<uint8_t> seeded(sectors_.size(),0U);
         planar_reflection_portal_rect const full{};
@@ -499,31 +507,41 @@ public:
         }
         bool failed=false;
         char const *error="ok";
-        size_t call_count=0;
-        size_t const call_limit=sectors_.size()*8U+1U;
-        std::function<void(uint32_t,planar_reflection_portal_rect const&)> visit;
-        visit=[&](uint32_t owner,planar_reflection_portal_rect const &window) {
-            if(failed || path[owner])return;
-            if(++call_count>call_limit) {
-                failed=true;error="recursive_visit_limit";return;
+        // Every sector is processed at most twice: once for its first
+        // clipped portal window, then once for the conservative full window.
+        // Unlike recursion this also terminates correctly on cyclic adjoins
+        // and never loses a later, wider route through a sector.
+        std::vector<seed> pending;
+        pending.reserve(sectors_.size());
+        auto enqueue=[&](seed const &next) {
+            if(!reached[next.sector]) {
+                reached[next.sector]=1U;
+                windows[next.sector]=next.window;
+                pending.push_back(next);
+            } else if(!widened[next.sector]) {
+                widened[next.sector]=1U;
+                windows[next.sector]=full;
+                pending.push_back({next.sector,full,true});
             }
-            if(reached[owner]) {
-                // Native sithRender_BuildVisibleSectorList widens an already
-                // rendered sector to the FULL camera frustum on a revisit.
-                windows[owner]=full;
-                return;
+        };
+        for(auto const &entry:seeds)enqueue(entry);
+        size_t processed=0;
+        size_t const work_limit=sectors_.size()*2U+1U;
+        for(size_t head=0;head<pending.size();++head) {
+            auto const current=pending[head]; // enqueue may reallocate
+            // An incoming second path already superseded the narrow pass.
+            if(widened[current.sector] && !current.widened_pass)continue;
+            if(++processed>work_limit) {
+                failed=true;error="portal_work_limit";break;
             }
-            reached[owner]=1U;
-            windows[owner]=window;
-            path[owner]=1U;
-            for(auto const &portal:sectors_[owner].portals) {
+            for(auto const &portal:sectors_[current.sector].portals) {
                 ++stats.portals_considered;
                 uint32_t live_flags=0;
                 if(!read(portal.native_adjoin,&live_flags,4U)) {
                     failed=true;error="unreadable_live_adjoin";break;
                 }
                 if((live_flags&1U)==0U)continue;
-                // Native JK rejects adjoins seen from their back side.
+                // Match the native front-side adjoin rule.
                 auto const &p=portal.polygon.front();
                 float const distance=
                     (reflection_eye[0]-p[0])*portal.normal[0]+
@@ -532,26 +550,20 @@ public:
                 if(!std::isfinite(distance)) {
                     failed=true;error="nonfinite_portal_plane";break;
                 }
-                // An imprecise normal must never silently hide a sector.
                 float normal2=0.0f;
                 for(float n:portal.normal)normal2+=n*n;
                 if(normal2>1e-8f && distance< -0.0001f)continue;
                 bool clip_valid=false;
                 auto const clipped=planar_reflection_portal_clip_polygon(
                     portal.polygon,reflection_view,tan_half_fov,aspect,
-                    window,clip_valid);
+                    current.window,clip_valid);
                 if(!clip_valid) {
                     failed=true;error="invalid_portal_clip";break;
                 }
                 if(clipped.empty)continue;
                 ++stats.portals_reached;
-                visit(portal.destination,clipped);
-                if(failed)break;
+                enqueue({portal.destination,clipped,false});
             }
-            path[owner]=0U;
-        };
-        for(auto const &entry:seeds) {
-            visit(entry.sector,entry.window);
             if(failed)break;
         }
         if(failed) {

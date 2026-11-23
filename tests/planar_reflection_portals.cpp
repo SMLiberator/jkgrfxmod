@@ -258,5 +258,60 @@ int main() {
     assert(!graph.ensure(read,world,3U,geometry,mesh,lookup));
     result=graph.traverse(read,{0U},mesh,lookup,view,{{0.0f,0.0f,0.0f}},1.0f,1.0f,spans);
     assert(!result.valid && spans.empty());
+    // Multiple independent routes into sector 3 must update both its
+    // screen window AND the downstream traversal. The original recursive
+    // implementation widened sector 3 but never visited its outgoing
+    // portal again, incorrectly omitting sector 4.
+    {
+        auto fork=geometry;
+        fork.surface_count=6U;
+        fork.receivers.clear();
+        fork.receivers.push_back(surface(0U,0.05f,0.0f));
+        fork.receivers.push_back(surface(1U,5.0f,-2.0f));
+        fork.receivers.push_back(surface(2U,5.0f,2.0f));
+        fork.receivers.push_back(surface(3U,10.0f,-2.0f));
+        fork.receivers.push_back(surface(4U,10.0f,2.0f));
+        fork.receivers.push_back(surface(5U,15.0f,2.0f));
+        world_cache_mesh fork_mesh{};
+        assert(build_world_cache_mesh(fork,fork_mesh));
+        std::vector<uint32_t> fork_lookup;
+        assert(build_world_cache_surface_lookup(
+            fork_mesh,6U,fork_lookup));
+        put(world+0x4cU,5U);
+        std::array<uint32_t,5> const counts{{3U,1U,1U,1U,0U}};
+        std::array<uint32_t,5> const starts{{0U,3U,4U,5U,0U}};
+        constexpr uintptr_t fork_left=0x71000U;
+        constexpr uintptr_t fork_right=0x71040U;
+        constexpr uintptr_t fork_left_join=0x71080U;
+        constexpr uintptr_t fork_right_join=0x710c0U;
+        constexpr uintptr_t fork_exit=0x71100U;
+        for(uint32_t i=0;i<5U;++i) {
+            uintptr_t const at=sectors+uintptr_t(i)*0x98U;
+            put(at+0x24U,counts[i]);
+            put(at+0x28U,uint32_t(surfaces+starts[i]*0x5cU));
+            put(at+0x2cU,uint32_t(i==0U?fork_left:
+                                  i==1U?fork_left_join:
+                                  i==2U?fork_right_join:
+                                  i==3U?fork_exit:0U));
+        }
+        link(fork_left,sectors+0x98U,surfaces+0x5cU);
+        link(fork_right,sectors+2U*0x98U,surfaces+2U*0x5cU);
+        link(fork_left_join,sectors+3U*0x98U,surfaces+3U*0x5cU);
+        link(fork_right_join,sectors+3U*0x98U,surfaces+4U*0x5cU);
+        link(fork_exit,sectors+4U*0x98U,surfaces+5U*0x5cU);
+        put(fork_left+0x10U,uint32_t(fork_right));
+        graph.clear();
+        assert(graph.ensure(read,world,8U,fork,fork_mesh,fork_lookup));
+        auto const fork_result=graph.traverse(
+            read,{0U},fork_mesh,fork_lookup,view,
+            {{0.0f,0.0f,0.0f}},1.0f,1.0f,
+            spans,&windows,&thing_mask);
+        assert(fork_result.valid);
+        assert(fork_result.visible_sectors==5U);
+        assert(spans.size()==4U); // final sector has no surfaces
+        assert(windows.size()==5U);
+        assert(windows[3].left==-1.0f && windows[3].right==1.0f);
+        assert(thing_mask.size()==5U && thing_mask[4]==1U);
+    }
     return 0;
 }
