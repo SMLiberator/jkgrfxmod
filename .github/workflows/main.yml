@@ -266,6 +266,9 @@ jobs:
         cl.exe /nologo /EHsc /std:c++17 /I. tests\gpu_3do_parallel_visibility.cpp /Fe:gpu_3do_parallel_visibility_test.exe || exit /b 1
         gpu_3do_parallel_visibility_test.exe || exit /b 1
         python3 tests/gpu_3do_parallel_visibility.py || exit /b 1
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\reflection_capture_parallel_visibility.cpp /Fe:reflection_capture_parallel_visibility_test.exe || exit /b 1
+        reflection_capture_parallel_visibility_test.exe || exit /b 1
+        python3 tests/reflection_capture_parallel_visibility.py || exit /b 1
     - name: GPU 3DO submission CPU reuse regression
       run: python3 tests/gpu_3do_submission_cpu_reuse.py
     - name: Reflection and opaque GPU profiling source regression
