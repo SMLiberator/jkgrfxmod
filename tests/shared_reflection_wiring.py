@@ -36,7 +36,8 @@ assert 'reflection_probes.find(shared_reflection_owner_key)' in renderer
 assert 'bind_world_shared_reflection(shader);' in renderer
 assert renderer.count('bind_world_shared_reflection(shader);')==2
 assert 'void set_shared_reflection(bool ready,bool hemisphere)' in shader_h
-assert 'set_shared_reflection(bool ready)' in shader_cpp
+assert 'world_cache_preview_shader::set_shared_reflection(' in shader_cpp
+assert 'bool ready,bool hemisphere)' in shader_cpp
 assert '"shared_reflection_map",23,sampler_kind::texture_array' in samplers
 assert '#ifdef JKGM_REFLECTION_PROBE' in world
 assert 'uniform sampler2DArray shared_reflection_map;' in world

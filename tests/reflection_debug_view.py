@@ -12,7 +12,7 @@ header=(root/"renderer/reflection_debug_view_shader.hpp").read_text()
 assert 'debug_reflection_mode = "off"' in cfg
 assert sample["debug_reflection_mode"]=="off"
 for mode in ("off","cube","hemi","shared"):
-    assert f'vr->debug_reflection_mode!="{mode}"' in parser or mode=="off"
+    assert f'rv->debug_reflection_mode!="{mode}"' in parser
 assert "debug_reflection_owner_key" in renderer
 assert "draw_reflection_debug_view();" in renderer
 assert "frame_world_cache_camera.camera" in renderer
