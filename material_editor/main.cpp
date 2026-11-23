@@ -13,6 +13,7 @@
 #include "common/stb_image.h"
 #include "preview.hpp"
 #include "source_pack.hpp"
+#include "editor_ini_settings.hpp"
 #include <windows.h>
 #include <commdlg.h>
 #include <shlobj.h>
@@ -41,12 +42,22 @@ std::string toUtf8(const wchar_t *source) {
     out.pop_back();
     return out;
 }
+// One-time migration source for settings created before portable imgui.ini.
 fs::path editorSettingsFile() {
     wchar_t roaming[MAX_PATH]={};
     if(FAILED(SHGetFolderPathW(nullptr,CSIDL_APPDATA|CSIDL_FLAG_CREATE,
                                 nullptr,SHGFP_TYPE_CURRENT,roaming)))
         return {};
     return fs::path(roaming)/L"JkGfxMod"/L"material-editor.json";
+}
+fs::path executableDirectory() {
+    std::wstring buffer(32768,L'\0');
+    const DWORD length=GetModuleFileNameW(
+        nullptr,buffer.data(),DWORD(buffer.size()));
+    if(length==0||length>=buffer.size())
+        return fs::current_path();
+    buffer.resize(length);
+    return fs::path(buffer).parent_path();
 }
 std::string readableFileSize(std::uintmax_t bytes) {
     if(bytes>=1024*1024)
@@ -259,7 +270,8 @@ constexpr float kOrbitMaxPitch=1.55334306f; // 89 degrees
 
 class Editor {
 public:
-    explicit Editor(GLFWwindow *window) : window_(window) {
+    explicit Editor(GLFWwindow *window,editor_ini::Settings &settings)
+        :window_(window),settings_(settings) {
         preview_=std::make_unique<MaterialPreview>();
         resetView();
         status_="Open script.json or metadata.json to begin.";
@@ -309,29 +321,7 @@ public:
                     saveAs();
                 ImGui::Separator();
                 if(ImGui::BeginMenu("JK / MotS game assets")) {
-                    if(ImGui::MenuItem("Choose assets folder..."))
-                        chooseGameAssetsFolder();
-                    if(ImGui::MenuItem("Choose colormap (CMP)..."))
-                        chooseGamePalette();
-                    ImGui::Separator();
-                    if(ImGui::MenuItem("Clear assets folder",nullptr,false,
-                                       !nativeSource_.root().empty())) {
-                        nativeSource_.setRoot({});
-                        persistGameSettings();
-                    }
-                    if(ImGui::MenuItem("Clear CMP",nullptr,false,
-                                       !nativeSource_.palette().empty())) {
-                        nativeSource_.setPalette({});
-                        persistGameSettings();
-                    }
-                    ImGui::Separator();
-                    ImGui::TextDisabled("Assets: %s",
-                        nativeSource_.root().empty()?"Not selected":
-                        fs::u8path(nativeSource_.root()).filename().u8string().c_str());
-                    ImGui::TextDisabled("Palette: %s",
-                        nativeSource_.palette().empty()?"Not selected":
-                        fs::u8path(nativeSource_.palette()).filename().u8string().c_str());
-                    ImGui::TextDisabled("Saved per user, outside the material pack");
+                    renderGameAssetMenu();
                     ImGui::EndMenu();
                 }
                 ImGui::Separator();
@@ -378,61 +368,137 @@ public:
     }
     bool exitApproved() const {return exitApproved_;}
     void loadUserSettings() {
-        const auto path=editorSettingsFile();
-        if(path.empty())return;
-        try {
-            std::ifstream file(path,std::ios::binary);
-            if(!file)return;
-            Document json;file>>json;
-            if(!json.is_object())return;
-            const auto assets=stringValue(json,"game_assets_folder");
-            const auto cmp=stringValue(json,"colormap_file");
-            nativeSource_.setRoot(assets);
-            nativeSource_.setPalette(cmp);
-        } catch(const std::exception &e) {
-            status_=std::string("Editor settings unavailable: ")+e.what();
+        // The INI handler was already registered and loaded before the
+        // Editor was constructed. Only migrate the old AppData JSON if there
+        // is no custom section yet; do not remove that file.
+        bool migrated=false;
+        if(!settings_.hasIniSection) {
+            const auto oldPath=editorSettingsFile();
+            if(!oldPath.empty()) {
+                try {
+                    std::ifstream file(oldPath,std::ios::binary);
+                    if(file) {
+                        Document doc;file>>doc;
+                        if(doc.is_object()) {
+                            const auto folder=stringValue(doc,"game_assets_folder");
+                            if(!folder.empty())
+                                settings_.assetRoots.push_back(folder);
+                            settings_.palette=stringValue(doc,"colormap_file");
+                            migrated=true;
+                        }
+                    }
+                } catch(const std::exception &e) {
+                    status_=std::string("Legacy settings import failed: ")+e.what();
+                }
+            }
+        }
+        nativeSource_.setRoots(settings_.assetRoots);
+        settings_.assetRoots=nativeSource_.roots();
+        nativeSource_.setPalette(settings_.palette);
+        if(migrated) {
+            settings_.hasIniSection=true;
+            ImGui::MarkIniSettingsDirty();
+            ImGui::SaveIniSettingsToDisk(ImGui::GetIO().IniFilename);
+            status_="Migrated old game paths to portable imgui.ini.";
         }
     }
-    void persistGameSettings() {
+    void persistGameSettings(bool indexRoots=true) {
+        if(indexRoots) {
+            nativeSource_.setRoots(settings_.assetRoots);
+            settings_.assetRoots=nativeSource_.roots();
+        }
+        nativeSource_.setPalette(settings_.palette);
         nativeCacheKey_.clear();
         nativeLoaded_={};
         nativeStatus_.clear();
         if(loaded_)syncPreview();
-        try {
-            const auto path=editorSettingsFile();
-            if(path.empty())
-                throw std::runtime_error("Windows AppData directory not found.");
-            fs::create_directories(path.parent_path());
-            fs::path temp=path;
-            temp+=L".tmp";
-            Document doc={{"game_assets_folder",nativeSource_.root()},
-                          {"colormap_file",nativeSource_.palette()}};
-            {
-                std::ofstream out(temp,std::ios::binary|std::ios::trunc);
-                if(!out)throw std::runtime_error("Cannot write editor settings.");
-                out<<doc.dump(2)<<"\n";
-                out.flush();
-                if(!out)throw std::runtime_error("Could not flush editor settings.");
-            }
-            if(!MoveFileExW(temp.c_str(),path.c_str(),
-                     MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH))
-                throw std::runtime_error("Could not replace editor settings file.");
-            status_="Game asset settings saved for future sessions.";
-        } catch(const std::exception &e) {
-            status_=std::string("Could not save game asset settings: ")+e.what();
-        }
+        settings_.hasIniSection=true;
+        // Use Dear ImGui's own serializer; it retains docking/window/table
+        // state plus our custom [JkGfxModEditor][Config] section.
+        ImGui::MarkIniSettingsDirty();
+        ImGui::SaveIniSettingsToDisk(ImGui::GetIO().IniFilename);
+        status_="Game asset settings saved to portable imgui.ini.";
     }
     void chooseGameAssetsFolder() {
         const std::string directory=chooseDirectory(window_);
         if(directory.empty())return;
-        nativeSource_.setRoot(directory);
+        const std::string absolute=
+            fs::absolute(fs::u8path(directory)).lexically_normal().u8string();
+        if(std::find(settings_.assetRoots.begin(),settings_.assetRoots.end(),
+                     absolute)!=settings_.assetRoots.end()) {
+            status_="That game assets folder is already in the list.";
+            return;
+        }
+        settings_.assetRoots.push_back(absolute);
         persistGameSettings();
     }
     void chooseGamePalette() {
         const std::string path=choosePaletteFile(window_);
         if(path.empty())return;
-        nativeSource_.setPalette(path);
-        persistGameSettings();
+        settings_.palette=
+            fs::absolute(fs::u8path(path)).lexically_normal().u8string();
+        persistGameSettings(false);
+    }
+    void renderGameAssetMenu() {
+        if(ImGui::MenuItem("Add assets folder..."))
+            chooseGameAssetsFolder();
+        ImGui::TextDisabled("Earlier folders override later folders");
+        if(settings_.assetRoots.empty())
+            ImGui::TextDisabled("No game asset folders configured");
+        for(size_t i=0;i<settings_.assetRoots.size();++i) {
+            ImGui::PushID(int(i));
+            const auto &full=settings_.assetRoots[i];
+            const std::string title=std::to_string(i+1)+". "+
+                fs::u8path(full).filename().u8string();
+            bool changed=false;
+            if(ImGui::BeginMenu(title.c_str())) {
+                ImGui::TextWrapped("%s",full.c_str());
+                ImGui::Separator();
+                std::error_code ec;
+                if(!fs::is_directory(fs::u8path(full),ec))
+                    ImGui::TextDisabled("Folder is currently unavailable");
+                if(ImGui::MenuItem("Move up (higher priority)",nullptr,false,i>0)){
+                    std::swap(settings_.assetRoots[i],settings_.assetRoots[i-1]);
+                    changed=true;
+                }
+                if(ImGui::MenuItem("Move down (lower priority)",nullptr,false,
+                                    i+1<settings_.assetRoots.size())){
+                    std::swap(settings_.assetRoots[i],settings_.assetRoots[i+1]);
+                    changed=true;
+                }
+                ImGui::Separator();
+                if(ImGui::MenuItem("Remove this folder")){
+                    settings_.assetRoots.erase(settings_.assetRoots.begin()+i);
+                    changed=true;
+                }
+                ImGui::EndMenu();
+            }
+            ImGui::PopID();
+            if(changed) {
+                persistGameSettings();
+                break;
+            }
+        }
+        if(ImGui::MenuItem("Remove all asset folders",nullptr,false,
+                            !settings_.assetRoots.empty())) {
+            settings_.assetRoots.clear();
+            persistGameSettings();
+        }
+        ImGui::Separator();
+        if(ImGui::MenuItem("Choose colormap (CMP)..."))
+            chooseGamePalette();
+        if(!settings_.palette.empty()) {
+            ImGui::TextWrapped("CMP: %s",
+                              fs::u8path(settings_.palette).filename().u8string().c_str());
+            if(ImGui::MenuItem("Clear CMP")) {
+                settings_.palette.clear();
+                persistGameSettings(false);
+            }
+        } else {
+            ImGui::TextDisabled("CMP: automatic dflt.cmp lookup");
+        }
+        ImGui::Separator();
+        ImGui::TextDisabled("Stored in imgui.ini beside the executable");
     }
     void requestExit() {
         if(exitApproved_)return;
@@ -739,8 +805,10 @@ private:
                     cel=repl[1].get<int>();
                 }
             }
-            std::string key=nativeSource_.root()+"|"+nativeSource_.palette()+
-                "|"+matName+"|"+std::to_string(cel);
+            std::string key=nativeSource_.palette();
+            for(const auto &root:nativeSource_.roots())
+                key+="|"+root;
+            key+="|"+matName+"|"+std::to_string(cel);
             if(key!=nativeCacheKey_) {
                 nativeCacheKey_=key;
                 nativeLoaded_={};
@@ -1667,9 +1735,9 @@ private:
                 ImGui::Separator();
                 ImGui::TextUnformatted("Original JK MAT albedo (preview only)");
                 ImGui::TextDisabled("Configure game assets and CMP under File.");
-                if(!nativeSource_.root().empty()) {
-                    ImGui::TextWrapped("Assets: %s (%zu files)",
-                        nativeSource_.root().c_str(),nativeSource_.indexedFiles());
+                if(!nativeSource_.roots().empty()) {
+                    ImGui::TextWrapped("Game assets: %zu folders, %zu indexed files",
+                        nativeSource_.roots().size(),nativeSource_.indexedFiles());
                 }
                 if(!nativeSource_.palette().empty())
                     ImGui::TextWrapped("CMP: %s",nativeSource_.palette().c_str());
@@ -1830,6 +1898,7 @@ private:
     }
 
     GLFWwindow *window_;
+    editor_ini::Settings &settings_;
     std::unique_ptr<MaterialPreview> preview_;
     Document root_=Document::object();
     Document savedRoot_=Document::object(), observedRoot_=Document::object();
@@ -1881,11 +1950,27 @@ int runEditor() {
     ImGui::CreateContext();
     ImGuiIO &io=ImGui::GetIO();
     io.ConfigFlags|=ImGuiConfigFlags_DockingEnable;
+    // Portable: store the layout AND game asset roots in the same INI next
+    // to the EXE, even when launched from a different working directory.
+    editor_ini::Settings settings;
+    settings.exeDirectory=executableDirectory();
+    const fs::path iniPath=settings.exeDirectory/L"imgui.ini";
+    const std::string iniFile=iniPath.u8string();
+    io.IniFilename=iniFile.c_str();
+    // Preserve an existing cwd imgui.ini layout on first portable launch.
+    std::error_code iniEc;
+    if(!fs::exists(iniPath,iniEc)) {
+        const auto legacyLayout=fs::current_path()/L"imgui.ini";
+        if(legacyLayout!=iniPath&&fs::is_regular_file(legacyLayout,iniEc))
+            fs::copy_file(legacyLayout,iniPath,fs::copy_options::none,iniEc);
+    }
+    editor_ini::install(settings);
+    ImGui::LoadIniSettingsFromDisk(io.IniFilename);
     ImGui::StyleColorsDark();
     ImGui_ImplGlfw_InitForOpenGL(window,true);
     ImGui_ImplOpenGL3_Init("#version 330 core");
     {
-        Editor editor(window);
+        Editor editor(window,settings);
         while(true) {
             glfwPollEvents();
             if(glfwWindowShouldClose(window)) {
