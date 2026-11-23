@@ -207,6 +207,33 @@ inline size_t addMaterial(Document &root,Kind kind) {
     root["materials"].push_back(std::move(entry));
     return root["materials"].size()-1;
 }
+// Clone a material's complete raw properties, including replacement and
+// compiled signature metadata. A distinct name is required by pack validation.
+// Any replacement edits made afterwards trigger the normal signature refresh.
+inline size_t duplicateMaterial(Document &root,size_t index) {
+    if(!root.contains("materials")||!root["materials"].is_array()||
+       index>=root["materials"].size()||
+       !root["materials"][index].is_object())
+        throw std::runtime_error("Cannot duplicate an invalid material.");
+    const Document original=root["materials"][index];
+    const std::string base=original.value("name",std::string("material"));
+    std::set<std::string> occupied;
+    for(const auto &entry:root["materials"]) {
+        if(entry.is_object()&&entry.contains("name")&&
+           entry["name"].is_string())
+            occupied.insert(lowerAscii(entry["name"].get<std::string>()));
+    }
+    std::string name=base+" (copy)";
+    for(unsigned suffix=2;occupied.count(lowerAscii(name));++suffix) {
+        if(suffix>=1000000)
+            throw std::runtime_error("Too many copies of this material.");
+        name=base+" (copy "+std::to_string(suffix)+")";
+    }
+    Document clone=original;
+    clone["name"]=name;
+    root["materials"].push_back(std::move(clone));
+    return root["materials"].size()-1;
+}
 inline bool removeMaterial(Document &root,size_t index) {
     if(!root.contains("materials")||!root["materials"].is_array()||
        index>=root["materials"].size())return false;
