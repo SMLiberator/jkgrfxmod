@@ -13,8 +13,16 @@ struct FrameResult {
     ImVec2 sliderPos{};
 };
 
-FrameResult drawFrame(float &value,ImGuiSliderFlags flags) {
+FrameResult drawFrame(float &value,ImGuiSliderFlags flags,
+                      const char *typedChars=nullptr) {
     ImGui::NewFrame();
+    // A headless test has no GLFW keyboard backend. Feed the already
+    // processed character queue that InputTextEx reads during this frame.
+    // This isolates slider text entry from platform input-event trickling.
+    if(typedChars)
+        for(const char *p=typedChars;*p;++p)
+            ImGui::GetIO().InputQueueCharacters.push_back(
+                static_cast<ImWchar>(static_cast<unsigned char>(*p)));
     ImGui::SetNextWindowPos(ImVec2(0.0f,0.0f),ImGuiCond_Always);
     ImGui::SetNextWindowSize(ImVec2(430.0f,150.0f),ImGuiCond_Always);
     ImGui::Begin("slider test",nullptr,
@@ -64,14 +72,7 @@ void testDoubleClick(ImGuiSliderFlags flags) {
     require(next.tempInput,
             "Numeric editor must retain focus after double-click");
 
-    io.AddInputCharactersUTF8("1.75");
-    FrameResult typed;
-    // The ImGui input-event queue can defer text for a frame when
-    // mouse-up and text events are received close together.
-    for(int frame=0;frame<8;++frame) {
-        typed=drawFrame(value,flags);
-        if(typed.modified)break;
-    }
+    const auto typed=drawFrame(value,flags,"1.75");
     if(!typed.modified) {
         const ImGuiContext &ctx=*GImGui;
         std::cerr<<"Slider diagnostic: value="<<value
@@ -84,7 +85,10 @@ void testDoubleClick(ImGuiSliderFlags flags) {
                  <<" want-text="<<ctx.IO.WantTextInput
                  <<" want-keyboard="<<ctx.IO.WantCaptureKeyboard
                  <<" queue-length="<<ctx.IO.InputQueueCharacters.Size
-                 <<" mouse-down="<<ctx.IO.MouseDown[0]<<"\\n";
+                 <<" mouse-down="<<ctx.IO.MouseDown[0]
+                 <<" ctrl="<<ctx.IO.KeyCtrl
+                 <<" text="<<(ctx.InputTextState.TextA.Data
+                      ?ctx.InputTextState.TextA.Data:"(null)")<<"\\n";
     }
     require(typed.modified,
             "Typed numeric value must be accepted by the slider");
