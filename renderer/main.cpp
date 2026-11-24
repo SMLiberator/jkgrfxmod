@@ -3646,6 +3646,7 @@ namespace {
         reinterpret_cast<sprite_hw_upload_fn>(sprite_hw_upload_addr);
     struct sprite_flare_proc_source {
         std::array<float,3> position{};
+        std::array<float,3> camera_offset{};
         bool valid=false;
     };
     // Indexed by native rdProcEntry slot; captures the originating Thing
@@ -4794,16 +4795,23 @@ namespace {
         if(is_flare && before<sprite_flare_proc_sources.size()) {
             auto &source=sprite_flare_proc_sources[before];
             source={};
-            void const *owner=nullptr;
-            auto const *rd=static_cast<uint8_t const *>(sprite_draw_active.thing);
-            if(gpu_span_readable(rd,0x48U))
-                std::memcpy(&owner,rd+0x44U,sizeof(owner)); // rdThing.pThing
-            if(owner && gpu_span_readable(
-                   static_cast<uint8_t const *>(owner)+0xb8U,12U)) {
+            // Native rdSprite_Draw transforms orient->translation into
+            // camera space, then adds SPR.offset in camera Right/Look/Up.
+            // Capture the SAME render-time origin (including node attachment
+            // poses), not SithThing.position or a post-clipping quad center.
+            auto const *orient=static_cast<uint8_t const *>(
+                sprite_draw_active.orientation);
+            auto const *resource=static_cast<uint8_t const *>(sprite);
+            if(gpu_span_readable(orient,12U*sizeof(float)) &&
+               gpu_span_readable(resource+0xa0U,3U*sizeof(float))) {
                 std::memcpy(source.position.data(),
-                    static_cast<uint8_t const *>(owner)+0xb8U,12U);
+                            orient+9U*sizeof(float),3U*sizeof(float));
+                std::memcpy(source.camera_offset.data(),
+                            resource+0xa0U,3U*sizeof(float));
                 source.valid=true;
                 for(float coordinate:source.position)
+                    if(!std::isfinite(coordinate))source.valid=false;
+                for(float coordinate:source.camera_offset)
                     if(!std::isfinite(coordinate))source.valid=false;
             }
         }
@@ -4869,7 +4877,8 @@ namespace {
                 for(auto const &span:pending_sprite_flare_spans) {
                     if(span.start+span.count>count) continue;
                     uint32_t const marker=jkgm::sprite_flare_sources().add(
-                        span.source.position,span.source.valid);
+                        span.source.position,span.source.camera_offset,
+                        span.source.valid);
                     for(uint32_t i=span.start;i<span.start+span.count;i++) {
                         auto *specular=reinterpret_cast<uint8_t *>(
                             const_cast<void *>(vertices))+uintptr_t(i)*32U+20U;

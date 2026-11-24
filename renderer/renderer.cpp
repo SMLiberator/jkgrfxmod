@@ -12913,16 +12913,17 @@ namespace jkgm {
                 native_normals = reinterpret_cast<uint32_t const *>(normal_slots_address);
             }
 
-            // A flare's specular marker indexes its originating SithThing
-            // position. Cache the native view once per ExecuteBuffer, only
+            // A flare's specular marker indexes its actual render-time
+            // Thing origin and authored camera-space SPR offset.
+            // Cache the native view once per ExecuteBuffer, only
             // when flare geometry actually reaches the converter.
             bool flare_camera_checked=false,flare_camera_valid=false;
             gpu_3do_matrix34 flare_view{};
             engine_camera flare_camera{};
             auto project_flare_source=[&](uint32_t marker,
                                           sprite_flare_center &out) {
-                std::array<float,3> world{};
-                if(!sprite_flare_sources().lookup(marker,world))return false;
+                sprite_flare_source_location source{};
+                if(!sprite_flare_sources().lookup(marker,source))return false;
                 if(!flare_camera_checked) {
                     flare_camera_checked=true;
                     flare_camera=read_active_render_camera();
@@ -12934,11 +12935,12 @@ namespace jkgm {
                 // the configured framebuffer. Project with the NATIVE
                 // screen's aspect, then offset into its actual GL viewport.
                 if(!project_sprite_flare_thing_center(
-                       world,flare_view,
+                       source.position,flare_view,
                        std::tan(flare_camera.fov*0.008726646259971648f),
                        get<x>(internal_scr_res_f)/get<y>(internal_scr_res_f),
                        {{get<x>(internal_scr_res_f),
-                         get<y>(internal_scr_res_f)}},out))
+                         get<y>(internal_scr_res_f)}},out,
+                       source.camera_offset))
                     return false;
                 out.pixel[0]+=float(get<x>(actual_display_area.start));
                 out.pixel[1]+=float(get<y>(actual_display_area.start));

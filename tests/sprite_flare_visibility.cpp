@@ -10,17 +10,25 @@ static bool near(float a,float b) {return std::fabs(a-b)<1.e-5f;}
 int main() {
     sprite_flare_source_registry sources;
     std::array<float,3> const thing_position{{0.0f,10.0f,0.0f}};
-    uint32_t const marker=sources.add(thing_position);
+    std::array<float,3> const offset{{2.0f,-2.0f,2.0f}};
+    uint32_t const marker=sources.add(thing_position,offset);
     assert(sprite_flare_is_marker(marker));
     assert(marker!=sprite_flare_source_magic);
     assert(!sprite_flare_is_marker(0U));
     std::array<float,3> resolved{};
     assert(sources.lookup(marker,resolved));
     assert(resolved==thing_position);
+    sprite_flare_source_location captured{};
+    assert(sources.lookup(marker,captured));
+    assert(captured.position==thing_position);
+    assert(captured.camera_offset==offset);
     assert(!sources.lookup(sprite_flare_source_magic,resolved));
     assert(!sources.lookup(0x12345678U,resolved));
     assert(sources.add(thing_position,false)==sprite_flare_source_magic);
     assert(sources.add({{std::numeric_limits<float>::quiet_NaN(),1.0f,2.0f}})
+           ==sprite_flare_source_magic);
+    assert(sources.add(thing_position,
+               {{0.0f,std::numeric_limits<float>::quiet_NaN(),0.0f}})
            ==sprite_flare_source_magic);
     assert(sources.size()==1U);
 
@@ -34,6 +42,31 @@ int main() {
     assert(near(center.pixel[0],400.0f));
     assert(near(center.pixel[1],300.0f));
     assert(near(center.view_depth,320.0f));
+    // Vanilla camera-facing SPR offsets are added AFTER the world-to-view
+    // transform. Both screen position and depth must follow the offset.
+    assert(project_sprite_flare_thing_center(
+        thing_position,identity_camera,1.0f,4.0f/3.0f,
+        {{800.0f,600.0f}},center,offset));
+    assert(near(center.pixel[0],500.0f));
+    assert(near(center.pixel[1],400.0f));
+    assert(near(center.view_depth,256.0f));
+    // Camera rotation must not rotate an authored camera-space offset.
+    std::array<float,12> const yawed_camera{{
+        0,1,0,-1,0,0,0,0,1,0,0,0
+    }};
+    assert(project_sprite_flare_thing_center(
+        {{10.0f,0.0f,0.0f}},yawed_camera,1.0f,4.0f/3.0f,
+        {{800.0f,600.0f}},center,offset));
+    assert(near(center.pixel[0],500.0f));
+    assert(near(center.pixel[1],400.0f));
+    assert(near(center.view_depth,256.0f));
+    assert(!project_sprite_flare_thing_center(
+        thing_position,identity_camera,1.0f,4.0f/3.0f,
+        {{800.0f,600.0f}},center,{{0.0f,-11.0f,0.0f}}));
+    assert(!project_sprite_flare_thing_center(
+        thing_position,identity_camera,1.0f,4.0f/3.0f,
+        {{800.0f,600.0f}},center,
+        {{std::numeric_limits<float>::quiet_NaN(),0.0f,0.0f}}));
     // The source stays at the same pixel/depth regardless of flare quad
     // dimensions, roll, clipping or its UVs: none are inputs here.
     assert(project_sprite_flare_thing_center(
