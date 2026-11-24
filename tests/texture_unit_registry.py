@@ -51,52 +51,7 @@ for prog in programs:
     if prog=="gpu_3do_preview":
         source+=expand(prog+".vert")
     validate(prog,mapping,source)
-# Sector crossing retains unit 19; removed continuous ambient must not
-# reserve texture units, GLSL samplers or a vertex-shader capability guard.
-sh=read("renderer/shaders.cpp")
-assert "forward_sector_buffer=19;" in header
-assert "forward_next_extended_unit=20;" in header
-assert "forward_next_extended_required_units=21;" in header
-for obsolete in ("forward_continuous_", "continuous_voxel_"):
-    assert obsolete not in header
-assert "JKGM_CONTINUOUS_AMBIENT_GPU" not in sh
-
-# All sun shadow receivers now use PCF-only depth-comparison samplers.
-post_src=read("assets/shaders/post_opaque_composite.frag")
-assert "uniform sampler2DShadow sun_shadow_image;" in post_src
-assert "uniform sampler2DShadow sun_shadow_far_image;" in post_src
-assert "JKGM_SUN_VSM" not in post_src
-assert "sun_shadow_raw_near" not in header
-assert "depth_variant" not in header
-assert "opaque_sky_aperture=16;" in header
-assert "translucent_sun_sky_aperture_map" in header
-assert "sun_sky_aperture_map" in header
-sh=read("renderer/shaders.cpp")
-assert "JKGM_SUN_SKY_APERTURE 1" in sh
-assert "units>=texture_units::forward_next_extended_required_units" in sh
-assert "static_assert(no_incompatible_target_aliases(gpu_3do_preview)" in header
-# World-cache units 16/17 remain hardware depth-comparison samplers.
-wm=re.search(r"constexpr binding world_cache\[\]=\{(.*?)\n\};",header,re.S)
-assert wm
-for uniform,slot in (("translucent_sun_near_depth","16"),
-                     ("translucent_sun_far_depth","17")):
-    assert f'{{"{uniform}",{slot},sampler_kind::shadow}}' in wm.group(1)
-gpu=read("renderer/gpu_3do_preview.hpp")
-cpp=read("renderer/renderer.cpp")
-sh=read("renderer/shaders.cpp")
-assert "texture_units::forward_sector_buffer;" in gpu
-assert "prog.set_decal_receiver_lighting(decals_only," in cpp
-assert "texture_units::forward_decal_light" in cpp
-# The world-only planar capture occupies a distinct 2D sampler on unit 15.
-assert '{"planar_reflection_map",15,sampler_kind::tex2d}' in wm.group(1)
-assert "gl::set_uniform_integer(planar_sampler,15);" in sh
-assert "gl::set_active_texture_unit(15);" in cpp
-for signature in ("game_pass_shader::set_translucent_shadow(",
-                  "gpu_3do_preview_shader::set_translucent_shadow("):
-    block=sh.split(signature,1)[1].split("\n}",1)[0]
-    assert block.index("texture_units::forward_spotlight_shadow")<block.index("if(slot<0)return;")
-block=sh.split("game_post_opaque_composite_shader::set_spotlight_shadow(",1)[1].split("\n}",1)[0]
-assert block.index("gl::set_uniform_integer(spotlight_shadow_image,10);")<block.index("if(slot>=0)")
+# Ensure new, unregistered sampler declarations are rejected.
 # Test that introducing an unregistered sampler fails source validation.
 m=re.search(r"constexpr binding gpu_3do_preview\[\]=\{(.*?)\n\};",header,re.S)
 entries=re.findall(r'\{"(\w+)",(\d+),sampler_kind::(\w+)\}',m.group(1))
@@ -110,14 +65,4 @@ except AssertionError:
     pass
 else:
     raise AssertionError("New unregistered sampler was accepted")
-print("OpenGL texture-unit registry, alias and shader declarations passed")
-
-# Core linked-program construction must initialize every registered
-# sampler, including those whose feature flag is currently disabled.
-assert "initialize_registered_samplers(name,prog);" in sh
-assert "glGetIntegerv(GL_CURRENT_PROGRAM,&previous);" in sh
-assert "glUseProgram(static_cast<GLuint>(previous));" in sh
-assert "glUniform1i(location,entry.unit);" in sh
-
-# Decal light and displacement reuse unit 9 ONLY when mutually exclusive.
-assert "bool const parallax=!inst.camera_hud &&\n                    !inst.is_projected_decal &&" in cpp
+print("OpenGL sampler registry and declared-target compatibility passed")

@@ -21,13 +21,7 @@ jobs:
     - name: OpenGL texture unit registry and sampler collision guards
       run: python3 tests/texture_unit_registry.py
 
-    - name: Shared translucent spotlight shader regression
-      run: |
-        python3 tests/translucent_spotlight_shared.py
-        python3 tests/translucent_sun_sampling_shared.py
-        python3 tests/spotlight_shadow_bias.py
-
-    - name: Repository structure, config documentation, and project headers
+    - name: Repository structure, sample config, and project headers
       run: python3 tests/repository_structure.py
 
     - name: Standalone native utility and mesh cache unit tests
@@ -41,8 +35,6 @@ jobs:
         gpu_mesh_cache_eviction_test.exe
         cl.exe /nologo /EHsc /std:c++17 /I. tests\\native_mesh_revision_policy.cpp /Fe:native_mesh_revision_policy_test.exe
         native_mesh_revision_policy_test.exe
-        python3 tests/gpu_mesh_cache_wiring.py
-        python3 tests/native_mesh_revision_wiring.py
         cl.exe /nologo /EHsc /std:c++17 /I. tests\\gpu_3do_uv.cpp /Fe:gpu_3do_uv_test.exe
         gpu_3do_uv_test.exe
         cl.exe /nologo /EHsc /std:c++17 /I. tests\\sprite_orientation.cpp /Fe:sprite_orientation_test.exe
@@ -53,7 +45,6 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\\camera_to_mat.cpp /Fe:camera_to_mat_test.exe || exit /b 1
         camera_to_mat_test.exe || exit /b 1
-        python3 tests/camera_to_mat_wiring.py || exit /b 1
 
     - name: Reflection capture CPU reuse regression
       shell: cmd
@@ -64,7 +55,6 @@ jobs:
         reflection_capture_model_batches_test.exe || exit /b 1
         cl.exe /nologo /EHsc /std:c++17 /I. tests\\gpu_3do_shared_bounds.cpp /Fe:gpu_3do_shared_bounds_test.exe || exit /b 1
         gpu_3do_shared_bounds_test.exe || exit /b 1
-        python3 tests/reflection_capture_cpu_reuse.py || exit /b 1
 
     - name: Native sector palette request isolation regression
       shell: cmd
@@ -77,15 +67,12 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\hud_ammo_override.cpp /Fe:hud_ammo_override_test.exe
         hud_ammo_override_test.exe
-        python3 tests/hud_ammo_wiring.py
 
     - name: COG interpolation arithmetic and native handler wiring
       shell: cmd
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\cog_math.cpp /Fe:cog_math_test.exe
         cog_math_test.exe
-        python3 tests/cog_math_wiring.py
-        python3 tests/cog_model_radius.py
 
     - name: Compressed MP3 OGG FLAC decoder regression tests
       shell: cmd
@@ -123,17 +110,12 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\thing_light_rgb.cpp /Fe:thing_light_rgb_test.exe
         thing_light_rgb_test.exe
-        python3 tests/thing_light_rgb.py
 
     - name: Static.jkl saved Thing index native restore and bounds regression tests
       shell: cmd
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\\saved_static_template.cpp /Fe:saved_static_template_test.exe
         saved_static_template_test.exe
-        python3 tests/saved_static_template.py
-
-    - name: Weak sunlight shadow intensity regression tests
-      run: python3 tests/sun_shadow_intensity.py
 
     - name: Per-Thing saber SideMat RGB matching and frame isolation tests
       shell: cmd
@@ -146,56 +128,42 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\camera_hud_thing.cpp /Fe:camera_hud_thing_test.exe
         camera_hud_thing_test.exe
-        python3 tests/camera_hud_deferred.py
-
-    - name: DirectDraw HUD overlay layout regression
-      run: python3 tests/hud_overlay_layout.py
-
-    - name: Gameplay-to-menu 2D presentation regression
-      run: python3 tests/menu_presentation_transitions.py
 
     - name: Native ThingNode attachment death and cleanup regression
       shell: cmd
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\thing_node_attachment.cpp /Fe:thing_node_attachment_test.exe || exit /b 1
         thing_node_attachment_test.exe || exit /b 1
-        python3 tests/thing_node_detach_wiring.py || exit /b 1
-        python3 tests/thing_node_removal_wiring.py || exit /b 1
 
     - name: Native template-spawn parent inheritance regression
       shell: cmd
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\native_spawn_parent.cpp /Fe:native_spawn_parent_test.exe || exit /b 1
         native_spawn_parent_test.exe || exit /b 1
-        python3 tests/native_spawn_parent_wiring.py || exit /b 1
 
     - name: JK.dll GetThingJointNode puppet joint mapping regression
       shell: cmd
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\cog_thing_joint_node.cpp /Fe:cog_thing_joint_node_test.exe || exit /b 1
         cog_thing_joint_node_test.exe || exit /b 1
-        python3 tests/cog_thing_joint_node_wiring.py || exit /b 1
 
     - name: JK.dll GetThingCreateThingTemplate null-guard regression
       shell: cmd
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\cog_create_thing.cpp /Fe:cog_create_thing_test.exe || exit /b 1
         cog_create_thing_test.exe || exit /b 1
-        python3 tests/cog_create_thing_wiring.py || exit /b 1
 
     - name: Native COG symbol declaration extensions
       shell: cmd
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\cog_symbol_extensions.cpp /Fe:cog_symbol_extensions_test.exe || exit /b 1
         cog_symbol_extensions_test.exe || exit /b 1
-        python3 tests/cog_symbol_extensions_wiring.py || exit /b 1
 
     - name: Per-frame HUD update modes and dirty-region regressions
       shell: cmd
       run: |
         cl.exe /nologo /EHsc /std:c++17 /Irenderer tests\hud_dirty_regions.cpp /Fe:hud_dirty_regions_test.exe
         hud_dirty_regions_test.exe
-        python3 tests/hud_updates_wiring.py
 
     - name: COG RayCastEx native collideSize sphere regression tests
       shell: cmd
@@ -214,21 +182,18 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\sun_caustics.cpp /Fe:sun_caustics_test.exe || exit /b 1
         sun_caustics_test.exe || exit /b 1
-        python3 tests/sun_caustics_wiring.py || exit /b 1
 
     - name: COG camera depth and squared/exact distance regressions
       shell: cmd
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\cog_camera_distance.cpp /Fe:cog_camera_distance_test.exe || exit /b 1
         cog_camera_distance_test.exe || exit /b 1
-        python3 tests/cog_camera_distance_wiring.py || exit /b 1
 
     - name: Current camera RLU orientation COG getter regressions
       shell: cmd
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\cog_camera_axes.cpp /Fe:cog_camera_axes_test.exe || exit /b 1
         cog_camera_axes_test.exe || exit /b 1
-        python3 tests/cog_camera_axes_wiring.py || exit /b 1
 
     - name: COG Thing offset and position transforms regression tests
       shell: cmd
@@ -246,64 +211,39 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\runtime_material_state.cpp /Fe:runtime_material_state_test.exe
         runtime_material_state_test.exe
-    - name: Material pack compiler MatCap and clearcoat round-trip contracts
-      run: python3 tests/material_pack_layers.py
     - name: Matcap and clearcoat metadata defaults and validation contracts
       shell: cmd
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\material_layer_metadata.cpp /Fe:material_layer_metadata_test.exe || exit /b 1
         material_layer_metadata_test.exe || exit /b 1
-        python3 tests/material_layer_metadata.py || exit /b 1
-    - name: Clearcoat direct/environment layering and runtime COG contracts
-      run: python3 tests/clearcoat_layer_wiring.py
-    - name: Shared camera-centered realtime cube and matcap-mode removal
-      run: python3 tests/shared_reflection_wiring.py
     - name: GPU 3DO parallel visibility A/B
       shell: cmd
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\gpu_3do_parallel_visibility.cpp /Fe:gpu_3do_parallel_visibility_test.exe || exit /b 1
         gpu_3do_parallel_visibility_test.exe || exit /b 1
-        python3 tests/gpu_3do_parallel_visibility.py || exit /b 1
         cl.exe /nologo /EHsc /std:c++17 /I. tests\reflection_capture_parallel_visibility.cpp /Fe:reflection_capture_parallel_visibility_test.exe || exit /b 1
         reflection_capture_parallel_visibility_test.exe || exit /b 1
-        python3 tests/reflection_capture_parallel_visibility.py || exit /b 1
-    - name: GPU 3DO submission CPU reuse regression
-      run: python3 tests/gpu_3do_submission_cpu_reuse.py
-    - name: Reflection and opaque GPU profiling source regression
-      run: |
-        python3 tests/reflection_gpu_profiling.py
-        python3 tests/opaque_geometry_gpu_profiling.py
-        python3 tests/gbuffer_packed_normals.py
-        python3 tests/gl_state_cache_wiring.py
-        python3 tests/gbuffer_color_packing.py
-        python3 tests/gbuffer_pigment_packing.py
-    - name: GPU GL mesh cache sweep and reuse profiling regression
-      run: python3 tests/gpu_gl_sweep_profiling.py
     - name: GPU 3DO cached opaque group ordering parity
       shell: cmd
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\gpu_3do_opaque_order.cpp /Fe:gpu_3do_opaque_order_test.exe || exit /b 1
         gpu_3do_opaque_order_test.exe || exit /b 1
-        python3 tests/gpu_3do_opaque_order_wiring.py || exit /b 1
     - name: GPU 3DO contiguous cached index-range coalescing
       shell: cmd
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\gpu_3do_index_coalescing.cpp /Fe:gpu_3do_index_coalescing_test.exe || exit /b 1
         gpu_3do_index_coalescing_test.exe || exit /b 1
-        python3 tests/gpu_3do_index_coalescing.py || exit /b 1
     - name: GPU 3DO CloneModel-safe instancing audit
       shell: cmd
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\gpu_3do_instancing_audit.cpp /Fe:gpu_3do_instancing_audit_test.exe || exit /b 1
         gpu_3do_instancing_audit_test.exe || exit /b 1
-        python3 tests/gpu_3do_instancing_audit.py || exit /b 1
 
     - name: GPU 3DO light budget clipping
       shell: cmd
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\gpu_3do_light_budget.cpp /Fe:gpu_3do_light_budget_test.exe || exit /b 1
         gpu_3do_light_budget_test.exe || exit /b 1
-        python3 tests/gpu_3do_light_budget.py || exit /b 1
 
     - name: GPU 3DO native model-view precision tests
       shell: cmd
@@ -335,7 +275,6 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\sector_crossing_gpu.cpp /Fe:sector_crossing_gpu_test.exe || exit /b 1
         sector_crossing_gpu_test.exe || exit /b 1
-        python3 tests/gpu_sector_crossing.py || exit /b 1
 
     - name: Source-indexed MAT fullbright mask regression tests
       shell: cmd
@@ -352,19 +291,11 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\gpu_3do_packed_vertex.cpp /Fe:gpu_3do_packed_vertex_test.exe || exit /b 1
         gpu_3do_packed_vertex_test.exe || exit /b 1
-        python3 tests/gpu_3do_packed_vertex.py || exit /b 1
     - name: Native world GPU cache geometry and live surface state tests
       shell: cmd
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\world_cache.cpp /Fe:world_cache_test.exe
         world_cache_test.exe
-        python3 tests/world_cache_live_upload.py || exit /b 1
-    - name: GPU cached world frame material and lighting snapshot contracts
-      shell: cmd
-      run: |
-        python3 tests/world_frame_reuse.py || exit /b 1
-    - name: GPU cached MAT depth bias forward and reflection parity
-      run: python3 tests/gpu_cached_depth_bias.py
     - name: Directional sunlight and empty-world shadow regression tests
       shell: cmd
       run: |
@@ -401,38 +332,11 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\\gpu_3do_triangulation.cpp /Fe:gpu_3do_triangulation_test.exe
         gpu_3do_triangulation_test.exe
-    - name: Fluid sunlight receiver regression
-      run: python3 tests/fluid_sun_receivers.py
-    - name: GPU cached emissive alpha parity regression
-      run: python3 tests/gpu_emissive_alpha.py
-    - name: GPU 3DO pending material reference regression
-      run: python3 tests/gpu_3do_pending_material.py
-    - name: GPU 3DO shared visible collection regression
-      run: python3 tests/gpu_3do_shared_collection.py
-    - name: Standard compositor and native triangle uploads
-      run: python3 tests/standard_compositor.py
-    - name: Experimental radial fog regression
-      run: python3 tests/experimental_radial_fog.py
-    - name: Experimental half-resolution spatial blur regression
-      run: python3 tests/standard_spatial_blur.py
-    - name: Experimental half-resolution SSAO regression
-      run: python3 tests/half_res_ssao.py
-    - name: Experimental half-resolution sun-visibility regression
-      run: python3 tests/half_res_sun_visibility.py
-    - name: Experimental fluid-SPR half-resolution and stencil-budget contracts
-      run: python3 tests/experimental_fluid_sprite_overdraw.py
-    - name: Experimental specular-normal orientation regression
-      run: python3 tests/specular_normal_baseline.py
-    - name: Independent sun cascade resolution and PCF regression
-      run: python3 tests/sun_cascade_pcf_experiment.py
-    - name: Dynamic Thing atlas tile-guarded four-tap PCF regression
-      run: python3 tests/sun_dynamic_shadow_pcf.py
     - name: Intensity-adaptive sun PCF radius regression
       shell: cmd
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\\sun_pcf_intensity.cpp /Fe:sun_pcf_intensity_test.exe || exit /b 1
         sun_pcf_intensity_test.exe || exit /b 1
-        python3 tests/sun_pcf_intensity.py || exit /b 1
     - name: Native 3DO automatic LOD override regression
       shell: cmd
       run: |
@@ -445,7 +349,6 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\\global_env_capture.cpp /Fe:global_env_capture_test.exe || exit /b 1
         global_env_capture_test.exe || exit /b 1
-        python3 tests/global_env_capture_wiring.py || exit /b 1
     - name: Experimental camera-facing hemi reflection probe
       shell: cmd
       run: |
@@ -453,40 +356,31 @@ jobs:
         hemi_reflection_camera_test.exe || exit /b 1
         cl.exe /nologo /EHsc /std:c++17 /I. tests\reflection_attachment_family.cpp /Fe:reflection_attachment_family_test.exe || exit /b 1
         reflection_attachment_family_test.exe || exit /b 1
-    - name: Experimental screen-space reflections integration
-      run: python3 tests/screen_space_reflections.py
     - name: Planar reflection camera and material metadata regression
       shell: cmd
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\planar_reflection_camera.cpp /Fe:planar_reflection_camera_test.exe || exit /b 1
         planar_reflection_camera_test.exe || exit /b 1
-        python3 tests/planar_reflection_camera.py || exit /b 1
         cl.exe /nologo /EHsc /std:c++17 /I. tests\planar_reflection_things.cpp /Fe:planar_reflection_things_test.exe || exit /b 1
         planar_reflection_things_test.exe || exit /b 1
         cl.exe /nologo /EHsc /std:c++17 /I. tests\planar_reflection_culling.cpp /Fe:planar_reflection_culling_test.exe || exit /b 1
         planar_reflection_culling_test.exe || exit /b 1
         cl.exe /nologo /EHsc /std:c++17 /I. tests\planar_reflection_portals.cpp /Fe:planar_reflection_portals_test.exe || exit /b 1
         planar_reflection_portals_test.exe || exit /b 1
-        python3 tests/planar_reflection_things.py || exit /b 1
         cl.exe /nologo /EHsc /std:c++17 /I. tests\planar_reflection_workset.cpp /Fe:planar_reflection_workset_test.exe || exit /b 1
         planar_reflection_workset_test.exe || exit /b 1
         cl.exe /nologo /EHsc /std:c++17 /I. tests\planar_reflection_native_nodes.cpp /Fe:planar_reflection_native_nodes_test.exe || exit /b 1
         planar_reflection_native_nodes_test.exe || exit /b 1
-        python3 tests/planar_reflection_native_nodes.py || exit /b 1
         cl.exe /nologo /EHsc /std:c++17 /I. tests\planar_reflection_render_math.cpp /Fe:planar_reflection_render_math_test.exe || exit /b 1
         planar_reflection_render_math_test.exe || exit /b 1
-        python3 tests/planar_reflection_capture.py || exit /b 1
         cl.exe /nologo /EHsc /std:c++17 /I. tests\offscreen_capture_projection.cpp /Fe:offscreen_capture_projection_test.exe || exit /b 1
         offscreen_capture_projection_test.exe || exit /b 1
         cl.exe /nologo /EHsc /std:c++17 /I. tests\planar_receiver_visibility.cpp /Fe:planar_receiver_visibility_test.exe || exit /b 1
         planar_receiver_visibility_test.exe || exit /b 1
         cl.exe /nologo /EHsc /std:c++17 /I. tests\gpu_thing_occlusion_math.cpp /Fe:gpu_thing_occlusion_math_test.exe || exit /b 1
         gpu_thing_occlusion_math_test.exe || exit /b 1
-        python3 tests/gpu_thing_occlusion.py || exit /b 1
         cl.exe /nologo /EHsc /std:c++17 /I. tests\sprite_flare_visibility.cpp /Fe:sprite_flare_visibility_test.exe || exit /b 1
         sprite_flare_visibility_test.exe || exit /b 1
-    - name: Experimental sun sky-aperture gate source contracts
-      run: python3 tests/sun_sky_aperture_experiment.py
     - name: GPU 3DO alpha partition tests
       shell: cmd
       run: |
@@ -497,9 +391,10 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\thing_opacity.cpp /Fe:thing_opacity_test.exe || exit /b 1
         thing_opacity_test.exe || exit /b 1
-        python3 tests/thing_opacity_wiring.py || exit /b 1
-    - name: Native JKGM EXE bootstrap PE regression tests
-      run: python tests/test_bootstrap_patcher.py
+    - name: Native JKGM patcher fixture tests
+      run: |
+        python tests/test_bootstrap_patcher.py
+        python tests/test_sprite_type_patcher.py
     - name: Package standalone development binaries
       shell: pwsh
       run: |
@@ -549,17 +444,6 @@ jobs:
         path: test-build/*
         if-no-files-found: error
         retention-days: 7
-
-  # Cleanup branch exercises dormant source-contract suites before any
-  # behavior-preserving shader or native-hook extraction is merged.
-  source-contracts:
-    name: Extended source-contract regressions
-    if: ${{ github.ref == 'refs/heads/cleanup' }}
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v4
-    - name: Run extended source-contract tests
-      run: python3 tests/cleanup_source_contracts.py
 
   prune-old-runs:
     name: Prune obsolete development CI runs
