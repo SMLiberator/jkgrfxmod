@@ -353,11 +353,11 @@ void testAnimationInheritance() {
 void testRepositorySourcePack() {
     // Verify the compiler's real sample input is accepted verbatim and can
     // be serialized after a material override without flattening defaults.
-    std::ifstream file("assets/sample_matpack/script.json");
+    std::ifstream file("material_editor/fixtures/sample_matpack/script.json");
     if(!file)throw std::runtime_error("Missing repository source pack fixture");
     Document source;
     file>>source;
-    check(editor_source::detect("assets/sample_matpack/script.json",source)==Kind::Source,
+    check(editor_source::detect("material_editor/fixtures/sample_matpack/script.json",source)==Kind::Source,
           "repository source mode");
     editor_source::validate(source,Kind::Source);
     check(source["materials"].size()>10,"repository material count");
@@ -376,7 +376,7 @@ void testRevertMaterialAndPack() {
     namespace fs=std::filesystem;
     // Use the real source document to guard its inherited defaults and
     // replacement definitions against accidental changes during a revert.
-    const auto filename=fs::path("assets/sample_matpack/script.json");
+    const auto filename=fs::path("material_editor/fixtures/sample_matpack/script.json");
     const Document saved=editor_source::readPack(filename);
     Document working=saved;
     const auto originalSecond=saved["materials"][1];
