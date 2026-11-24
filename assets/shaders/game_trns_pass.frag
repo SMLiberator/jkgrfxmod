@@ -203,8 +203,9 @@ vec2 parallax_mapping(vec2 tc)
 
 
 // The flare's render-time Thing origin plus camera-space SPR offset is
-// projected once on the CPU and packed into the otherwise-unused normal. All three vertices
-// share the same value; clipping and UV orientation do not affect the test.
+// projected once on the CPU and packed into the otherwise-unused normal.
+// All vertices share the same value; clipping and UV orientation do not
+// affect the test.
 // Position: x/y framebuffer pixels, z=native linear depth (32 * view Y).
 // Opaque scene_depth also stores 32 * view Y; never compare it with raw Y.
 float flare_center_visibility()
