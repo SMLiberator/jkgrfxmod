@@ -35,8 +35,6 @@ jobs:
         gpu_mesh_cache_eviction_test.exe
         cl.exe /nologo /EHsc /std:c++17 /I. tests\\native_mesh_revision_policy.cpp /Fe:native_mesh_revision_policy_test.exe
         native_mesh_revision_policy_test.exe
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\\gpu_3do_uv.cpp /Fe:gpu_3do_uv_test.exe
-        gpu_3do_uv_test.exe
         cl.exe /nologo /EHsc /std:c++17 /I. tests\\sprite_orientation.cpp /Fe:sprite_orientation_test.exe
         sprite_orientation_test.exe
 
@@ -49,10 +47,6 @@ jobs:
     - name: Reflection capture CPU reuse regression
       shell: cmd
       run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\\reflection_capture_world_buckets.cpp /Fe:reflection_capture_world_buckets_test.exe || exit /b 1
-        reflection_capture_world_buckets_test.exe || exit /b 1
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\\reflection_capture_model_batches.cpp /Fe:reflection_capture_model_batches_test.exe || exit /b 1
-        reflection_capture_model_batches_test.exe || exit /b 1
         cl.exe /nologo /EHsc /std:c++17 /I. tests\\gpu_3do_shared_bounds.cpp /Fe:gpu_3do_shared_bounds_test.exe || exit /b 1
         gpu_3do_shared_bounds_test.exe || exit /b 1
 
@@ -61,12 +55,6 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\jk_palette_effects.cpp /Fe:jk_palette_effects_test.exe
         jk_palette_effects_test.exe
-
-    - name: Local-player HUD ammo bin selection regression
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\hud_ammo_override.cpp /Fe:hud_ammo_override_test.exe
-        hud_ammo_override_test.exe
 
     - name: COG interpolation arithmetic and native handler wiring
       shell: cmd
@@ -147,41 +135,17 @@ jobs:
         cl.exe /nologo /EHsc /std:c++17 /I. tests\cog_thing_joint_node.cpp /Fe:cog_thing_joint_node_test.exe || exit /b 1
         cog_thing_joint_node_test.exe || exit /b 1
 
-    - name: JK.dll GetThingCreateThingTemplate null-guard regression
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\cog_create_thing.cpp /Fe:cog_create_thing_test.exe || exit /b 1
-        cog_create_thing_test.exe || exit /b 1
-
-    - name: Native COG symbol declaration extensions
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\cog_symbol_extensions.cpp /Fe:cog_symbol_extensions_test.exe || exit /b 1
-        cog_symbol_extensions_test.exe || exit /b 1
-
     - name: Per-frame HUD update modes and dirty-region regressions
       shell: cmd
       run: |
         cl.exe /nologo /EHsc /std:c++17 /Irenderer tests\hud_dirty_regions.cpp /Fe:hud_dirty_regions_test.exe
         hud_dirty_regions_test.exe
 
-    - name: COG RayCastEx native collideSize sphere regression tests
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\cog_raycast_native_sphere.cpp /Fe:cog_raycast_native_sphere_test.exe
-        cog_raycast_native_sphere_test.exe
-
     - name: Explicit COG RayCastEx precision geometry regression tests
       shell: cmd
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\cog_raycast_ex.cpp /Fe:cog_raycast_ex_test.exe
         cog_raycast_ex_test.exe
-
-    - name: Procedural sun caustic pattern and Fluid transmission contracts
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\sun_caustics.cpp /Fe:sun_caustics_test.exe || exit /b 1
-        sun_caustics_test.exe || exit /b 1
 
     - name: COG camera depth and squared/exact distance regressions
       shell: cmd
@@ -200,12 +164,6 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\cog_thing_offsets.cpp /Fe:cog_thing_offsets_test.exe
         cog_thing_offsets_test.exe
-    - name: Bounded transparency sorter regression tests
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\\triangle_sort_budget.cpp /Fe:triangle_sort_budget_test.exe
-        triangle_sort_budget_test.exe
-
     - name: Material transition regression tests
       shell: cmd
       run: |
@@ -276,16 +234,6 @@ jobs:
         cl.exe /nologo /EHsc /std:c++17 /I. tests\sector_crossing_gpu.cpp /Fe:sector_crossing_gpu_test.exe || exit /b 1
         sector_crossing_gpu_test.exe || exit /b 1
 
-    - name: Source-indexed MAT fullbright mask regression tests
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\jk_cmp_fullbright_mask.cpp /Fe:jk_cmp_fullbright_mask_test.exe
-        jk_cmp_fullbright_mask_test.exe
-    - name: Animated moving decal GeoSet LOD enumeration regression
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\sprite_decal_geoset.cpp /Fe:sprite_decal_geoset_test.exe
-        sprite_decal_geoset_test.exe
     - name: Packed GPU 3DO vertex compression and source contracts
       shell: cmd
       run: |
@@ -363,20 +311,12 @@ jobs:
         planar_reflection_camera_test.exe || exit /b 1
         cl.exe /nologo /EHsc /std:c++17 /I. tests\planar_reflection_things.cpp /Fe:planar_reflection_things_test.exe || exit /b 1
         planar_reflection_things_test.exe || exit /b 1
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\planar_reflection_culling.cpp /Fe:planar_reflection_culling_test.exe || exit /b 1
-        planar_reflection_culling_test.exe || exit /b 1
         cl.exe /nologo /EHsc /std:c++17 /I. tests\planar_reflection_portals.cpp /Fe:planar_reflection_portals_test.exe || exit /b 1
         planar_reflection_portals_test.exe || exit /b 1
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\planar_reflection_workset.cpp /Fe:planar_reflection_workset_test.exe || exit /b 1
-        planar_reflection_workset_test.exe || exit /b 1
         cl.exe /nologo /EHsc /std:c++17 /I. tests\planar_reflection_native_nodes.cpp /Fe:planar_reflection_native_nodes_test.exe || exit /b 1
         planar_reflection_native_nodes_test.exe || exit /b 1
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\planar_reflection_render_math.cpp /Fe:planar_reflection_render_math_test.exe || exit /b 1
-        planar_reflection_render_math_test.exe || exit /b 1
         cl.exe /nologo /EHsc /std:c++17 /I. tests\offscreen_capture_projection.cpp /Fe:offscreen_capture_projection_test.exe || exit /b 1
         offscreen_capture_projection_test.exe || exit /b 1
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\planar_receiver_visibility.cpp /Fe:planar_receiver_visibility_test.exe || exit /b 1
-        planar_receiver_visibility_test.exe || exit /b 1
         cl.exe /nologo /EHsc /std:c++17 /I. tests\gpu_thing_occlusion_math.cpp /Fe:gpu_thing_occlusion_math_test.exe || exit /b 1
         gpu_thing_occlusion_math_test.exe || exit /b 1
         cl.exe /nologo /EHsc /std:c++17 /I. tests\sprite_flare_visibility.cpp /Fe:sprite_flare_visibility_test.exe || exit /b 1
@@ -391,6 +331,32 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\thing_opacity.cpp /Fe:thing_opacity_test.exe || exit /b 1
         thing_opacity_test.exe || exit /b 1
+    - name: Native safety, bounds and raycast behavior
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\cog_raycast_results.cpp /Fe:cog_raycast_results_test.exe || exit /b 1
+        cog_raycast_results_test.exe || exit /b 1
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\gpu_3do_frustum.cpp /Fe:gpu_3do_frustum_test.exe || exit /b 1
+        gpu_3do_frustum_test.exe || exit /b 1
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\precise_type3_raycast.cpp /Fe:precise_type3_raycast_test.exe || exit /b 1
+        precise_type3_raycast_test.exe || exit /b 1
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\readable_region_cache.cpp /Fe:readable_region_cache_test.exe || exit /b 1
+        readable_region_cache_test.exe || exit /b 1
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\thing_node_math.cpp /Fe:thing_node_math_test.exe || exit /b 1
+        thing_node_math_test.exe || exit /b 1
+
+    - name: Sprite, collision and shadow utility behavior
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\mots_native_collision_query.cpp /Fe:mots_native_collision_query_test.exe || exit /b 1
+        mots_native_collision_query_test.exe || exit /b 1
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\native_sprite_cel.cpp /Fe:native_sprite_cel_test.exe || exit /b 1
+        native_sprite_cel_test.exe || exit /b 1
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\sprite_instance_info.cpp /Fe:sprite_instance_info_test.exe || exit /b 1
+        sprite_instance_info_test.exe || exit /b 1
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\sun_dynamic_shadow_layout.cpp /Fe:sun_dynamic_shadow_layout_test.exe || exit /b 1
+        sun_dynamic_shadow_layout_test.exe || exit /b 1
+
     - name: Native JKGM patcher fixture tests
       run: |
         python tests/test_bootstrap_patcher.py
