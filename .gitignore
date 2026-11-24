@@ -19,3 +19,6 @@ Artifacts/
 __pycache__/
 *.py[cod]
 .pytest_cache/
+
+# Standalone editor CMake build output
+build/
