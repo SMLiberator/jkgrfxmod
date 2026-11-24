@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [performance]
+    branches: [master]
   workflow_dispatch:
 
 jobs:
@@ -412,20 +412,20 @@ jobs:
         retention-days: 7
 
   prune-old-runs:
-    name: Prune obsolete CI runs on performance
+    name: Prune obsolete CI runs on master
     # Retain recent results and preserve a bounded history of failures.
     needs: [build]
-    if: ${{ always() && github.ref == 'refs/heads/performance' }}
+    if: ${{ always() && github.ref == 'refs/heads/master' }}
     runs-on: ubuntu-latest
     permissions:
       actions: write
       contents: read
     steps:
-    - name: Checkout performance branch
+    - name: Checkout master branch
       uses: actions/checkout@v4
     - name: Run safe CI history prune
       env:
         GH_TOKEN: ${{ github.token }}
       run: |
         python3 -m unittest discover -s tests -p test_prune_ci_runs.py
-        python3 tools/prune_ci_runs.py --repo "${{ github.repository }}" --branch performance --expected-head-sha "${{ github.sha }}" --keep-latest 40 --keep-failures 5 --max-deletes 100 --execute
+        python3 tools/prune_ci_runs.py --repo "${{ github.repository }}" --branch master --expected-head-sha "${{ github.sha }}" --keep-latest 40 --keep-failures 5 --max-deletes 100 --execute

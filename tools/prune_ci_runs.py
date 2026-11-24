@@ -76,7 +76,7 @@ def list_ci_runs(token, repo, branch):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""))
-    parser.add_argument("--branch", default="performance")
+    parser.add_argument("--branch", default="master")
     parser.add_argument("--keep-latest", type=int, default=40)
     parser.add_argument("--keep-failures", type=int, default=5)
     parser.add_argument("--max-deletes", type=int, default=100)
