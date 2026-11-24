@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Offline tests for bounded development CI run retention."""
+"""Offline tests for bounded CI run retention."""
 import importlib.util
 from pathlib import Path
 import unittest
 
 spec = importlib.util.spec_from_file_location(
-    "pruner", Path(__file__).resolve().parents[1] / "tools" / "prune_development_ci.py"
+    "pruner", Path(__file__).resolve().parents[1] / "tools" / "prune_ci_runs.py"
 )
 pruner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(pruner)

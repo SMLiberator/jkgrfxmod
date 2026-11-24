@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prune obsolete *development CI* GitHub Actions runs and their artifacts.
+"""Prune obsolete branch-specific CI GitHub Actions runs and their artifacts.
 
 Runs from other workflows, current/in-progress jobs and the most recent
 40 CI executions are protected. Retain five most recent failures even if
@@ -45,7 +45,7 @@ def request(token, method, path):
             "Accept": "application/vnd.github+json",
             "Authorization": "Bearer " + token,
             "X-GitHub-Api-Version": "2022-11-28",
-            "User-Agent": "jkgrfxmod-dev-run-pruner",
+            "User-Agent": "jkgrfxmod-ci-run-pruner",
         },
     )
     with urllib.request.urlopen(req, timeout=30) as response:
@@ -76,7 +76,7 @@ def list_ci_runs(token, repo, branch):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""))
-    parser.add_argument("--branch", default="development")
+    parser.add_argument("--branch", default="performance")
     parser.add_argument("--keep-latest", type=int, default=40)
     parser.add_argument("--keep-failures", type=int, default=5)
     parser.add_argument("--max-deletes", type=int, default=100)
@@ -92,7 +92,7 @@ def main():
     if not token:
         parser.error("GH_TOKEN/GITHUB_TOKEN is required")
 
-    # Rapid development pushes can overlap CI runs. Only the newest one
+    # Rapid successive pushes can overlap CI runs. Only the newest one
     # needs to prune. This avoids overlapping bulk DELETE requests and
     # lets superseded CI builds finish green rather than being cancelled.
     if args.expected_head_sha:
@@ -101,14 +101,14 @@ def main():
             f"/repos/{args.repo}/branches/{urllib.parse.quote(args.branch, safe='')}"
         )
         if branch["commit"]["sha"] != args.expected_head_sha:
-            print("Prune skipped: superseded by a newer development push.")
+            print("Prune skipped: superseded by a newer branch push.")
             return
 
     runs = list_ci_runs(token, args.repo, args.branch)
     candidates = selection(runs, args.keep_latest, args.keep_failures)
     to_delete = candidates[:args.max_deletes]
     print(
-        f"Development CI cleanup: {len(runs)} runs, "
+        f"CI cleanup for {args.branch}: {len(runs)} runs, "
         f"{len(candidates)} eligible, {len(to_delete)} selected; "
         f"mode={'DELETE' if args.execute else 'DRY RUN'}",
         flush=True,
@@ -138,7 +138,7 @@ def main():
     print(
         f"Deleted {len(to_delete) - failures} eligible CI runs; "
         f"{max(0, len(candidates) - len(to_delete))} older eligible runs "
-        "can be pruned by subsequent development CI runs.",
+        "can be pruned by subsequent CI runs.",
         flush=True,
     )
 

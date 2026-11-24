@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [development, cleanup, performance]
+    branches: [performance]
   workflow_dispatch:
 
 jobs:
@@ -361,7 +361,7 @@ jobs:
       run: |
         python tests/test_bootstrap_patcher.py
         python tests/test_sprite_type_patcher.py
-    - name: Package standalone development binaries
+    - name: Package standalone test binaries
       shell: pwsh
       run: |
         New-Item -ItemType Directory -Path test-build -Force | Out-Null
@@ -403,31 +403,29 @@ jobs:
           }
         }
         Write-Host "Verified $($sourceShaders.Count) packaged shaders against repository sources."
-    - name: Upload standalone development test build
+    - name: Upload standalone test build
       uses: actions/upload-artifact@v4
       with:
-        name: jkgrfxmod-standalone-development
+        name: jkgrfxmod-standalone
         path: test-build/*
         if-no-files-found: error
         retention-days: 7
 
   prune-old-runs:
-    name: Prune obsolete development CI runs
-    # Scheduled workflows only run from master (the repo default branch).
-    # Instead, prune after EVERY development CI push, even failed builds,
-    # without introducing a new workflow on master.
+    name: Prune obsolete CI runs on performance
+    # Retain recent results and preserve a bounded history of failures.
     needs: [build]
-    if: ${{ always() && github.ref == 'refs/heads/development' }}
+    if: ${{ always() && github.ref == 'refs/heads/performance' }}
     runs-on: ubuntu-latest
     permissions:
       actions: write
       contents: read
     steps:
-    - name: Checkout development branch
+    - name: Checkout performance branch
       uses: actions/checkout@v4
     - name: Run safe CI history prune
       env:
         GH_TOKEN: ${{ github.token }}
       run: |
-        python3 -m unittest discover -s tests -p test_prune_development_ci.py
-        python3 tools/prune_development_ci.py --repo "${{ github.repository }}" --branch development --expected-head-sha "${{ github.sha }}" --keep-latest 40 --keep-failures 5 --max-deletes 100 --execute
+        python3 -m unittest discover -s tests -p test_prune_ci_runs.py
+        python3 tools/prune_ci_runs.py --repo "${{ github.repository }}" --branch performance --expected-head-sha "${{ github.sha }}" --keep-latest 40 --keep-failures 5 --max-deletes 100 --execute
