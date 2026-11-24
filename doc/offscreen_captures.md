@@ -44,7 +44,9 @@ CaptureEnvMap(player, 1.5);
 
 `CameraToMat` captures a single image from a camera Thing and replaces **only the selected MAT's albedo image**. The source camera is sampled when the queued capture executes. The image remains frozen until another request or a material reset.
 
-- A positive `FOV` is the horizontal field of view in degrees. `FOV=0` uses orthographic projection.
+- Positive `FOV` values give the horizontal perspective field of view in degrees (less than 179).
+- Negative `FOV` values select orthographic projection: their absolute value is the **vertical coverage in JK world units**. For example, `-0.1` covers 0.1 JKU vertically, `-1` covers 1 JKU, and `-20` covers 20 JKU. Horizontal coverage follows the target MAT's aspect ratio.
+- `FOV=0` is a **no-op**: no new photograph is queued, and the last completed photo (or pending request) is preserved. Use `ReloadMaterial` to discard an existing photograph. Moving the source camera farther away does not enlarge orthographic coverage.
 - Capture resolution follows the target MAT's original resident dimensions and aspect ratio.
 - Albedo factor and color tint, normal and surface maps, emissive properties, clearcoat, reflectivity and UV behavior are unchanged.
 - At most four photographed material images are retained. Capture targets are released on world changes.
@@ -55,9 +57,11 @@ CaptureEnvMap(player, 1.5);
 Example:
 
 ```c
-CameraToMat(cameraThing, screenMat, 75); // photograph
-CameraToMat(cameraThing, screenMat, 0);  // orthographic photograph
-ReloadMaterial(screenMat);               // restore authored material
+CameraToMat(cameraThing, screenMat, 75);  // perspective photo, 75 degrees
+CameraToMat(cameraThing, screenMat, -0.5); // orthographic, 0.5 JKU tall
+CameraToMat(cameraThing, screenMat, -20);  // orthographic, 20 JKU tall
+CameraToMat(cameraThing, screenMat, 0);    // no new capture
+ReloadMaterial(screenMat);                 // restore authored material
 ```
 
 Perspective captures include world sky apertures. They are scene captures, not a full replay of transparent sprites, particles, effects and postprocessing.

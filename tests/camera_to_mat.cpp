@@ -7,7 +7,12 @@ int main() {
     c.prepare_world(100);
     assert(!c.has_requests());
     assert(!c.request(1,0,100,90));
-    assert(!c.request(1,(uint64_t(0x12345000U)<<32)|77U,100,-1.0f));
+    assert(!c.request(1,(uint64_t(0x12345000U)<<32)|77U,100,
+                      -std::numeric_limits<float>::infinity()));
+    // Zero FOV is a no-op: no new slot or generation, even before a photo.
+    uint64_t const initial_revision=c.revision();
+    assert(c.request(1,(uint64_t(0x12345000U)<<32)|77U,100,0.0f));
+    assert(!c.has_requests() && c.revision()==initial_revision);
     assert(!c.request(1,(uint64_t(0x12345000U)<<32)|77U,100,179.0f));
     assert(!c.request(1,(uint64_t(0x12345000U)<<32)|77U,100,std::numeric_limits<float>::quiet_NaN()));
     assert(!c.request(16384,(uint64_t(0x12345000U)<<32)|77U,0,90));
@@ -19,9 +24,14 @@ int main() {
     auto s=c.snapshot();
     assert(s.size()==1 && s[0].mat==1 && s[0].fov==90);
     uint64_t const old_generation=s[0].generation;
-    assert(c.request(1,(uint64_t(0x12345000U)<<32)|88U,100,0));
+    // Zero FOV must not replace a completed or pending photograph.
+    assert(c.request(1,(uint64_t(0x12345000U)<<32)|88U,100,0.0f));
     s=c.snapshot();
-    assert(s[0].fov==0 && uint32_t(s[0].owner)==88U);
+    assert(s[0].fov==90 && uint32_t(s[0].owner)==77U);
+    assert(s[0].generation==old_generation);
+    assert(c.request(1,(uint64_t(0x12345000U)<<32)|88U,100,-0.5f));
+    s=c.snapshot();
+    assert(s[0].fov==-0.5f && uint32_t(s[0].owner)==88U);
     // Explicit repeat requests are distinct one-shot generations, not live.
     assert(s[0].generation>old_generation);
     assert(jkgm::camera_to_mat_controls::needs_capture(
@@ -31,12 +41,15 @@ int main() {
     for(unsigned i=2;i<=4;++i)
         assert(c.request(i,(uint64_t(0x12345000U)<<32)|77U,100,70));
     assert(!c.request(5,(uint64_t(0x12345000U)<<32)|77U,100,70));
+    // Zero doesn't consume additional slots even at capacity.
+    assert(c.request(5,(uint64_t(0x12345000U)<<32)|77U,100,0.0f));
+    assert(c.snapshot().size()==4);
     c.erase(2);
     assert(c.snapshot().size()==3);
     assert(c.request(5,(uint64_t(0x12345000U)<<32)|77U,100,70));
     c.prepare_world(101);
     assert(c.snapshot().empty());
-    assert(c.request(32768,(uint64_t(0x12345000U)<<32)|77U,101,90));
+    assert(c.request(32768,(uint64_t(0x12345000U)<<32)|77U,101,-1.0f));
     assert(c.snapshot()[0].mat==32768);
     c.clear();
     assert(c.snapshot().empty());

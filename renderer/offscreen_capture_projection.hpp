@@ -1,7 +1,8 @@
 #pragma once
 // GL-independent projection description for reusable secondary cameras.
-// A camera-to-MAT FOV of zero means orthographic; ortho_vertical_span is the
-// view height in JK world units, independent of target MAT resolution.
+// Low-level secondary-camera projection: fov_degrees=0 selects orthographic;
+// ortho_vertical_span is the view height in JK world units, independent of
+// target MAT resolution. The CameraToMat COG API uses *negative* FOV for this.
 #include <cmath>
 #include <array>
 namespace jkgm {
@@ -36,6 +37,18 @@ inline offscreen_capture_projection make_offscreen_capture_projection(
         std::isfinite(p.reciprocal_far) &&
         std::isfinite(p.aspect) && p.aspect>0.0f;
     return p;
+}
+// CameraToMat COG convention: positive FOV = perspective degrees,
+// negative FOV = orthographic vertical span in JK units, zero = no capture.
+// Keep the low-level zero-FOV projection interface unchanged for other users.
+inline offscreen_capture_projection make_camera_to_mat_projection(
+    int target_width,int target_height,float signed_fov,float far_plane)
+{
+    if(!std::isfinite(signed_fov) || signed_fov==0.0f)return {};
+    return make_offscreen_capture_projection(
+        target_width,target_height,
+        signed_fov<0.0f?0.0f:signed_fov,
+        signed_fov<0.0f?-signed_fov:1.0f,far_plane);
 }
 // Camera-view axes are x=right, y=forward, z=up. This agrees with the
 // capture GLSL for both projection modes, with no native rdCamera mutation.

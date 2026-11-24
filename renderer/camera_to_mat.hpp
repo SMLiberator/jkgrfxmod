@@ -15,7 +15,7 @@ struct camera_to_mat_request {
     uint32_t mat=0;
     uint64_t owner=0; // native Thing address/signature
     uint32_t world=0;
-    float fov=90.0f; // 0 = orthographic
+    float fov=90.0f; // >0 perspective degrees, <0 orthographic height in JK units
     uint64_t generation=0;
 };
 class camera_to_mat_controls {
@@ -49,7 +49,10 @@ public:
     bool request(uint32_t mat,uint64_t owner,uint32_t world,float fov) {
         if(mat>65535U || (mat&0x7fffU)>=16384U || !world ||
            !owner || uint32_t(owner)==0U ||
-           !std::isfinite(fov) || fov<0.0f || fov>=179.0f)return false;
+           !std::isfinite(fov) || fov>=179.0f)return false;
+        // FOV 0 requests no new photograph and never consumes a capture slot.
+        // Existing photographs (and any queued one-shot) remain unchanged.
+        if(fov==0.0f)return true;
         std::lock_guard<std::mutex> lock(mutex_);
         if(world_ && world_!=world)requests_.clear();
         world_=world;

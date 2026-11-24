@@ -65,7 +65,7 @@ The patched game and associated JK.dll expose additional controls. The table bel
 | Numeric helpers | `Min`, `Max`, `Clamp`, `Sign`, `Lerp`, `InverseLerp` |
 | HUD | `SetAmmoBin`, `GetAmmoBin` |
 
-`CameraToMat` is a **one-shot capture**. It replaces only the selected MAT's albedo image and retains its factors, emission, normals and other layers. `FOV=0` requests an orthographic capture; a script can call the verb repeatedly for a changing image. `ReloadMaterial` clears the target MAT's runtime overrides and restores its authored properties.
+`CameraToMat` is a **one-shot capture**. It replaces only the selected MAT's albedo image and retains its factors, emission, normals and other layers. `FOV>0` uses perspective degrees, `FOV<0` uses its absolute value as the orthographic vertical span in JK units, and `FOV=0` leaves the current photo unchanged. A script can call the verb repeatedly for a changing image. `ReloadMaterial` clears the target MAT's runtime overrides and restores its authored properties.
 
 `RayCastEx(sourceThing, maxDistance)` performs an explicit, precise query along the source Thing's Look vector. On a hit, the standard `GetRayHitPos`, `GetRayHitNormal`, `GetRayHitDistance`, `GetRayHitThing` and `GetRayHitSurface` accessors report the result.
 

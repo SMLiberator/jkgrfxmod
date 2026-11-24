@@ -9896,7 +9896,8 @@ namespace {
     // CameraToMat(cameraThing,targetMat,FOV): queue one still image using
     // the Thing's pose at capture time; repeat in COG to simulate live video.
     // Never alter the game's active rdCamera.
-    // An FOV of zero is orthographic (default height: one world unit).
+    // FOV>0: perspective degrees; FOV<0: orthographic height in JK units.
+    // FOV=0: do not queue a photograph or change any existing photo.
     void __cdecl cog_camera_to_mat(void *ctx)
     {
         float const fov=cog_pop_float(ctx);
@@ -9924,6 +9925,10 @@ namespace {
         if(!jkgm::get_camera_to_mat_controls().request(
                 uint32_t(mat),owner,world,fov)) {
             LOG_WARNING("CameraToMat rejected invalid FOV or full target budget");
+            return;
+        }
+        if(fov==0.0f) {
+            LOG_DEBUG("COG CameraToMat: zero FOV, no new photograph");
             return;
         }
         LOG_DEBUG("COG CameraToMat: mat=",mat," fov=",fov);

@@ -132,8 +132,8 @@
                     continue;
                 }
                 float const scene_far=reflection_capture_scene_far(camera.position);
-                auto const projection=make_offscreen_capture_projection(
-                    width,height,camera.fov,1.0f,scene_far);
+                auto const projection=make_camera_to_mat_projection(
+                    width,height,camera.fov,scene_far);
                 if(!projection.valid) {continue;}
                 auto const view=planar_camera_native_view(camera);
                 auto frustum=frame_world_cache_camera.frustum;
@@ -283,7 +283,7 @@
                         return true;
                     };
                     // Perspective sky apertures are rendered before ordinary
-                    // depth. Orthographic FOV=0 uses fog as the background.
+                    // depth. Orthographic (negative-FOV) photos use fog as background.
                     if(!projection.orthographic)
                         draw_reflection_capture_sky(
                             shader,camera,view,frustum,projection,
