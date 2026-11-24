@@ -9893,13 +9893,14 @@ namespace {
         return id >= 0 && id <= 65535;
     }
 
-    // CameraToMat(cameraThing,targetMat,FOV): queue one still image using
-    // the Thing's pose at capture time; repeat in COG to simulate live video.
-    // Never alter the game's active rdCamera.
-    // FOV>0: perspective degrees; FOV<0: orthographic height in JK units.
-    // FOV=0: do not queue a photograph or change any existing photo.
-    void __cdecl cog_camera_to_mat(void *ctx)
+    // The existing three-argument CameraToMat keeps its signed FOV
+    // convention and simplified shader. Ex adds flags and accepts positive
+    // FOV/orthographic height without breaking existing COG scripts.
+    // The camera Thing must survive until the deferred render executes.
+    void cog_camera_to_mat_request(void *ctx,bool extended)
     {
+        uint32_t const mode=extended
+            ?uint32_t(cog_pop_int(ctx)):jkgm::camera_to_mat_simplified;
         float const fov=cog_pop_float(ctx);
         int const mat=cog_pop_int(ctx);
         void *thing=cog_pop_thing(ctx);
@@ -9922,16 +9923,28 @@ namespace {
         uint64_t const owner=
             (uint64_t(uint32_t(reinterpret_cast<uintptr_t>(thing)))<<32)|
             signature;
-        if(!jkgm::get_camera_to_mat_controls().request(
-                uint32_t(mat),owner,world,fov)) {
-            LOG_WARNING("CameraToMat rejected invalid FOV or full target budget");
+        auto &controls=jkgm::get_camera_to_mat_controls();
+        bool const accepted=extended
+            ?controls.request_ex(uint32_t(mat),owner,world,fov,mode)
+            :controls.request(uint32_t(mat),owner,world,fov);
+        if(!accepted) {
+            LOG_WARNING("CameraToMat rejected FOV, mode, or full target budget");
             return;
         }
         if(fov==0.0f) {
             LOG_DEBUG("COG CameraToMat: zero FOV, no new photograph");
             return;
         }
-        LOG_DEBUG("COG CameraToMat: mat=",mat," fov=",fov);
+        LOG_DEBUG("COG CameraToMat: mat=",mat," fov=",fov,
+                  " mode=",mode);
+    }
+    void __cdecl cog_camera_to_mat(void *ctx)
+    {
+        cog_camera_to_mat_request(ctx,false);
+    }
+    void __cdecl cog_camera_to_mat_ex(void *ctx)
+    {
+        cog_camera_to_mat_request(ctx,true);
     }
     // Reload/ResetMaterial returns the MAT to its authored+pack defaults.
     // Unlike ResetMaterialAlbedo, this cancels *all* per-MAT COG overrides.
@@ -10898,6 +10911,7 @@ namespace {
         cog_verb_entry{"setglobalenvmap", cog_set_global_env_map},
         cog_verb_entry{"captureenvmap", cog_capture_env_map},
         cog_verb_entry{"cameratomat", cog_camera_to_mat},
+        cog_verb_entry{"cameratomatex", cog_camera_to_mat_ex},
         cog_verb_entry{"reloadmaterial", cog_reload_material},
         cog_verb_entry{"resetmaterial", cog_reload_material},
         cog_verb_entry{"resetglobalenvmap", cog_reset_global_env_map},

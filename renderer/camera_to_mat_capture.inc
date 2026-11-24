@@ -103,6 +103,7 @@
                 }
                 camera.fov=request.fov;
                 camera.valid=true;
+                bool const unlit=(request.mode&camera_to_mat_unlit)!=0U;
 
                 // Resolve actual uploaded native MAT dimensions. This
                 // identifies static as well as level MATs and validates D3D
@@ -232,10 +233,12 @@
                     glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
                     shader.use_program();
                     shader.set_projection(projection);
+                    shader.set_capture_unlit(unlit);
                     shader.set_clip({{0.0f,0.0f,0.0f,0.0f}},false);
                     auto const info=fog.info.value();
                     shader.set_fog(make_point(info[0],info[1],
-                        the_config->enable_fog?info[2]:0.0f,0.0f),
+                        (the_config->enable_fog && !unlit)?info[2]:0.0f,
+                        0.0f),
                         make_point(fog_rgb[0],fog_rgb[1],fog_rgb[2]));
                     jk_palette_effect effect{};
                     if(native_sector_palette_mode().load(
@@ -405,7 +408,7 @@
                 if(the_config->profile_renderer)
                     LOG_INFO("CameraToMat photographed MAT=",request.mat,
                              " size=",width,"x",height,
-                             " FOV=",request.fov,
+                             " FOV=",request.fov," mode=",request.mode,
                              " acquired_nodes=",offscreen.stats.ready_nodes);
             }
         }

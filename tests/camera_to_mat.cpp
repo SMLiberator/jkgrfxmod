@@ -53,5 +53,45 @@ int main() {
     assert(c.snapshot()[0].mat==32768);
     c.clear();
     assert(c.snapshot().empty());
+
+    // New mode-based API is independent of the signed legacy FOV.
+    using namespace jkgm;
+    assert(camera_to_mat_valid_mode(0x0U));
+    assert(camera_to_mat_valid_mode(0x1U));
+    assert(camera_to_mat_valid_mode(0x2U));
+    assert(camera_to_mat_valid_mode(0x3U));
+    assert(camera_to_mat_valid_mode(0x4U));
+    assert(camera_to_mat_valid_mode(0x5U));
+    assert(!camera_to_mat_valid_mode(0x6U)); // simplified + unlit
+    assert(!camera_to_mat_valid_mode(0x7U));
+    assert(!camera_to_mat_valid_mode(0x8U)); // unknown flags
+
+    constexpr uint64_t source=(uint64_t(0x12345000U)<<32)|77U;
+    assert(c.request_ex(7,source,102,20.0f,0x5U));
+    s=c.snapshot();
+    assert(s.size()==1 && s[0].mat==7 &&
+           s[0].fov==-20.0f && s[0].mode==0x5U);
+    uint64_t const ex_generation=s[0].generation;
+    assert(c.request_ex(7,source,102,0.0f,0x5U));
+    assert(c.snapshot()[0].generation==ex_generation);
+    assert(!c.request_ex(8,source,102,45.0f,0x6U));
+    assert(!c.request_ex(8,source,102,45.0f,0x8U));
+    assert(!c.request_ex(8,source,102,-1.0f,0x1U));
+    assert(!c.request_ex(8,source,102,179.0f,0x0U));
+    assert(!c.request_ex(8,source,102,
+        std::numeric_limits<float>::infinity(),0x1U));
+    assert(c.snapshot().size()==1);
+    // Height 179 JKU is valid orthographic area, not a 179-degree FOV.
+    assert(c.request_ex(7,source,102,179.0f,0x1U));
+    assert(c.snapshot()[0].fov==-179.0f &&
+           c.snapshot()[0].mode==0x1U);
+    assert(c.request_ex(7,source,102,75.0f,0x0U));
+    assert(c.snapshot()[0].fov==75.0f &&
+           c.snapshot()[0].mode==0x0U);
+    assert(c.request_ex(7,source,102,75.0f,0x4U));
+    assert(c.snapshot()[0].mode==camera_to_mat_unlit);
+    assert(c.request(7,source,102,-0.5f));
+    assert(c.snapshot()[0].fov==-0.5f &&
+           c.snapshot()[0].mode==camera_to_mat_simplified);
     return 0;
 }

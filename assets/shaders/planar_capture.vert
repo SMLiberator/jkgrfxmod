@@ -14,6 +14,7 @@ uniform vec4 view_right,view_forward,view_up,view_origin;
 uniform vec4 projection;
 uniform int is_model;
 uniform int capture_sky_mode; // world aperture at far depth
+uniform int capture_unlit; // CameraToMatEx: skip native/JK baked lighting
 uniform int packed_vertex_format;
 uniform vec4 clip_plane_view;
 uniform vec4 jk_color_filter,jk_color_tint,jk_color_add_fade;
@@ -58,7 +59,11 @@ void main() {
             ?p.y*(1.0-0.000002):-projection.z,p.y);
     capture_forward_depth=p.y;
     pixel_uv=local_uv+(is_model!=0 ? vec2(0.0):native_uv_offset);
-    if(is_model==0) {
+    if(capture_unlit!=0) {
+        // Preserve material albedo/tint while ignoring world, vertex,
+        // colormap and sector lighting (including ambient attenuation).
+        baked_light=vec3(1.0);
+    } else if(is_model==0) {
         baked_light=jk_capture_color(native_light,native_cmp_or_mode,
                                      native_sector_tint);
     } else {

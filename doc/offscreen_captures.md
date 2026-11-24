@@ -40,13 +40,23 @@ Example:
 CaptureEnvMap(player, 1.5);
 ```
 
-## `CameraToMat(cameraThing, targetMat, FOV)`
+## `CameraToMat` and `CameraToMatEx`
 
-`CameraToMat` captures a single image from a camera Thing and replaces **only the selected MAT's albedo image**. The source camera is sampled when the queued capture executes. The image remains frozen until another request or a material reset.
+`CameraToMat(cameraThing, targetMat, FOV)` and `CameraToMatEx(cameraThing, targetMat, FOV, mode)` capture a single image from a Thing's position and orientation, replacing **only the selected MAT's albedo image**. The source is read when the queued capture executes, **not synchronously with the COG call**; do not destroy the camera Thing until the photograph has finished. The image remains frozen until another request or a material reset.
 
-- Positive `FOV` values give the horizontal perspective field of view in degrees (less than 179).
-- Negative `FOV` values select orthographic projection: their absolute value is the **vertical coverage in JK world units**. For example, `-0.1` covers 0.1 JKU vertically, `-1` covers 1 JKU, and `-20` covers 20 JKU. Horizontal coverage follows the target MAT's aspect ratio.
-- `FOV=0` is a **no-op**: no new photograph is queued, and the last completed photo (or pending request) is preserved. Use `ReloadMaterial` to discard an existing photograph. Moving the source camera farther away does not enlarge orthographic coverage.
+- Legacy `CameraToMat` always uses the simplified capture shader. Positive `FOV` values give the horizontal perspective angle in degrees (less than 179). Negative `FOV` values are **orthographic vertical coverage in JK world units**: `-0.1` covers 0.1 JKU, `-1` covers 1 JKU, and `-20` covers 20 JKU.
+- New `CameraToMatEx` takes a nonnegative `FOV`. With `mode & 0x1`, this is the orthographic **vertical area in JKU**; otherwise it is the horizontal perspective angle in degrees (less than 179). Horizontal orthographic coverage follows the target MAT's aspect ratio.
+- In either verb, `FOV=0` is a **no-op**: no new photograph is queued, and any pending or completed photo is preserved. Use `ReloadMaterial` to discard the image. Moving the camera farther away does not enlarge orthographic coverage.
+- `CameraToMatEx` mode bits:
+  
+  | Bit | Behavior |
+  | --- | --- |
+  | `0x0` | Default perspective projection; **temporarily uses simplified shading** until the full secondary renderer is implemented. |
+  | `0x1` | Orthographic projection; `FOV` is vertical JKU area. |
+  | `0x2` | Simplified capture shader (current legacy behavior): albedo, native/JK vertex lighting, emission, and fog. |
+  | `0x4` | Unlit/unfogged: preserve albedo, authored tint and emission, but skip vertex/baked light and fog. |
+  
+  Combine `0x1` with `0x2` or `0x4`: e.g. `0x3` is simplified orthographic, `0x5` is unlit orthographic. `0x2` and `0x4` cannot be combined; unknown bits are rejected. Full shading in `0x0`/`0x1` is reserved for a future implementation, and currently renders like simplified mode.
 - Capture resolution follows the target MAT's original resident dimensions and aspect ratio.
 - Albedo factor and color tint, normal and surface maps, emissive properties, clearcoat, reflectivity and UV behavior are unchanged.
 - At most four photographed material images are retained. Capture targets are released on world changes.
@@ -57,11 +67,12 @@ CaptureEnvMap(player, 1.5);
 Example:
 
 ```c
-CameraToMat(cameraThing, screenMat, 75);  // perspective photo, 75 degrees
-CameraToMat(cameraThing, screenMat, -0.5); // orthographic, 0.5 JKU tall
-CameraToMat(cameraThing, screenMat, -20);  // orthographic, 20 JKU tall
-CameraToMat(cameraThing, screenMat, 0);    // no new capture
-ReloadMaterial(screenMat);                 // restore authored material
+CameraToMat(cameraThing, screenMat, 75);      // legacy simplified perspective
+CameraToMat(cameraThing, screenMat, -0.5);    // legacy simplified orthographic
+CameraToMatEx(cameraThing, screenMat, 75, 0x2); // explicit simplified perspective
+CameraToMatEx(cameraThing, mapMat, 20, 0x5);  // unlit orthographic, 20 JKU tall
+CameraToMatEx(cameraThing, mapMat, 0, 0x5);   // no new capture
+ReloadMaterial(mapMat);                       // restore authored material
 ```
 
 Perspective captures include world sky apertures. They are scene captures, not a full replay of transparent sprites, particles, effects and postprocessing.

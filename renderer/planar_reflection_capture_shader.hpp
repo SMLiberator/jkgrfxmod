@@ -12,7 +12,7 @@
 namespace jkgm {
 class planar_reflection_capture_shader : public opengl_shader {
     gl::uniform_location_id vr_,vf_,vu_,origin_,projection_,clip_;
-    gl::uniform_location_id clip_enabled_,ortho_mode_;
+    gl::uniform_location_id clip_enabled_,ortho_mode_,capture_unlit_;
     gl::uniform_location_id model_,sampler_,uv_scale_,uv_scroll_;
     gl::uniform_location_id tint_,has_albedo_,alpha_;
     gl::uniform_location_id fog_params_,fog_color_,jk_filter_,jk_tint_,jk_fade_,jk_limit_;
@@ -44,6 +44,7 @@ public:
          clip_(gl::get_uniform_location(the_program,"clip_plane_view")),
          clip_enabled_(gl::get_uniform_location(the_program,"clip_enabled")),
          ortho_mode_(gl::get_uniform_location(the_program,"orthographic_mode")),
+         capture_unlit_(gl::get_uniform_location(the_program,"capture_unlit")),
          model_(gl::get_uniform_location(the_program,"is_model")),
          sampler_(gl::get_uniform_location(the_program,"albedo_map")),
          uv_scale_(gl::get_uniform_location(the_program,"uv_scale")),
@@ -129,6 +130,12 @@ public:
             p.half_horizontal,p.aspect,p.reciprocal_far,
             p.orthographic?1.0f:0.0f));
         gl::set_uniform_integer(ortho_mode_,p.orthographic?1:0);
+        // The program is also used for reflection captures; reset their
+        // lighting state even after a preceding unlit CameraToMat frame.
+        gl::set_uniform_integer(capture_unlit_,0);
+    }
+    void set_capture_unlit(bool unlit) {
+        gl::set_uniform_integer(capture_unlit_,unlit?1:0);
     }
     void set_modelview(gpu_3do_matrix34 const &m,bool model,bool packed=false) {
         model_uv_=model;
