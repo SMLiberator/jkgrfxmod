@@ -1,71 +1,24 @@
-# Experimental GPU 3DO occlusion culling
+# GPU 3DO and sprite occlusion culling
 
-## Scope (main camera only)
+`experimental_3do_occlusion_culling` enables **asynchronous** main-camera GPU queries against completed opaque depth. Hidden results can skip eligible GPU-cached models and ordinary sprite quads during subsequent frames. The default is `false`.
 
-`experimental_3do_occlusion_culling` is **disabled by default**. It
-uses asynchronous OpenGL 3.3 `GL_ANY_SAMPLES_PASSED` queries with small
-12-triangle bounding-box proxies after the *complete main opaque G-buffer*
-has rendered the cached world and opaque 3DOs. It then suppresses GPU 3DO
-draw-list construction for fully hidden Things in subsequent frames.
+Queries use the authored Thing/model radius for 3DO bounds. Ordinary sprites submit their real cached quad. Neither the Thing's simulation nor COG logic is stopped when a draw is culled.
 
-The native hook snapshots stable Thing identity and world position when
-occlusion is enabled, even if sun shadows, decals and continuous ambient
-are independently disabled. With this option off the extra read is absent.
+## Settings
 
-This first iteration intentionally leaves native `rdModel3_Draw` / pose
-callbacks, simulation, shadows, planar reflections, HUD Things, sprites,
-projected decals and non-GPU native fallbacks untouched.
+| Option | Behavior |
+| --- | --- |
+| `experimental_3do_occlusion_culling` | Enable GPU model and ordinary sprite occlusion queries. |
+| `experimental_3do_native_occlusion_culling` | Also allow native model early-return when a recent, consistent GPU result proves it hidden. |
+| `gpu_3do_occlusion_proxy_mode` | `0` = 3D box; `1` = nearest-depth screen rectangle; `2` = center-depth screen rectangle. |
+| `gpu_3do_occlusion_query_budget` | Maximum new queries per frame (`128` by default; `0` = unlimited). |
+| `gpu_3do_occlusion_min_triangles` | Minimum model triangles to query (`0` includes small models); sprites are exempt. |
+| `gpu_3do_occlusion_debug_view` | `0` = off; `1` = wireframe; `2` = filled transparent query proxies. |
 
-## Authored JK radius
+All results are polled without blocking for GPU completion. Records are invalidated or rechecked when their world, camera, Thing identity, bounds or geometry changes. Recently hidden Things are retested so moving doors or occluders can reveal them again.
 
-JK's model-wide frustum culling uses the authored
-`rdModel3.radius`, centered at `SithThing.position`, and does not grow
-the sphere when mesh nodes animate outside it. The query follows this
-authored Thing-centric contract, using a conservatively expanded box
-(1.1 times radius plus 0.15 JK units). The radius is adjusted only for
-the Thing's scale/shear. It does not rebuild or scan animated meshes.
+Camera HUD, skybox Things, projected decals and unsupported fallback geometry are excluded where appropriate. Shadows and reflection capture continue to use their own visibility rules. An invalid or uncertain query result renders the Thing normally.
 
-Caveat: native frustum acceptance and occlusion acceptance are *not the
-same*. A mesh animated beyond its authored Thing sphere can be seen around
-an opaque wall while that sphere is occluded. This test can temporarily
-hide such malformed models. Keep the opt-in disabled for parity testing;
-a future implementation can exempt known out-of-bounds animations.
+The native early-return option is a separate, opt-in optimization. It requires the GPU query option and does not disable any game's engine simulation.
 
-## Query budget and safe fallback
-
-`gpu_3do_occlusion_query_budget`: integer 1..64, default 24. Only 3DO
-Things with at least 500 cached source triangles are queried. A maximum
-of 256 active native Thing identity records are maintained, with
-infrequently observed records retired. Query candidates rotate and
-previously occluded records are refreshed first.
-
-Queries never block for a pending result. Two consecutive hidden results
-are required before hiding anything. Results expire after four frames or
-when camera position/orientation/FOV, the Thing position/scale, or world
-identity changes. Query objects are deleted on world switch or teardown.
-A camera inside the model sphere always draws the model. An invalid or
-unavailable bound conservatively draws normally.
-
-One limitation of asynchronous camera-local visibility: moving opaque
-doors/walls can reveal an occluded Thing before its query refreshes.
-The short expiration and prioritized rechecks mitigate, but cannot
-guarantee a zero-frame delay. The native 3DO renderer is unaffected.
-
-When `profile_renderer=true`, logs include:
-`3DO OCCLUSION candidates`, `queried`, `query_budget`, `records`,
-`submitted_total`, `completed_total`, `skipped_instance_total`.
-Compare frame CPU/GPU timings and total draw calls with the feature
-disabled/enabled in exactly the same scene. The number of hidden Thing
-instances is not itself a performance gain if queries cost more.
-
-## Follow-up optimization candidates
-
-- Screen-size-driven LOD is preferable to removing all models that
-  occupy only a few pixels. Start with using the engine's available
-  lower-detail GeoSets; later evaluate GPU-generated simplified meshes.
-- If a model's *entire conservative bound* is reliably smaller than a
-  subpixel threshold, an optional distance-independent screen-size
-  reject is a separate experiment, not enabled here.
-- OpenGL 4.3 compute shaders / SSBOs / indirect multi-draw may support
-  GPU-driven visibility and Hi-Z culling; the 3.3 code path should
-  remain an available fallback.
+`profile_renderer` reports query submissions, result polling, hidden skips and relevant CPU/GPU costs. The debug view shows the proxies that were actually tested.

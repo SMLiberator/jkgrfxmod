@@ -1,57 +1,33 @@
-# Independent matcap and clearcoat material layers
+# MatCap and clearcoat material layers
 
-**Status:** Independent MatCap rendering and a second dielectric clearcoat
-specular layer are implemented for cached-world and GPU 3DO materials.
-The pack compiler supports both, and the clearcoat COG API is registered.
-The `shared` reflection mode remains independent.
+JkGRfxMod adds independent MatCap and clearcoat layers to **GPU-cached world and 3DO materials**. Both are authored through material-pack properties and can coexist with ordinary environment reflections.
 
-## Artistic matcap (separate from reflection_mode)
+## MatCap
+
+A MatCap projects an image according to the material's view-space normal. It is useful for stylized surfaces, iridescent paint and artistic highlights, independently of `reflection_mode`.
 
 ```json
 {
   "matcap_map": "pearlescent.png",
+  "matcap_factor": [0.7, 0.5, 1.2],
   "matcap_roughness": 0.3,
   "matcap_lighting_influence": 1.0,
-  "matcap_factor": [0.7, 0.5, 1.2],
   "matcap_surface_map": "pearl_mask.png"
 }
 ```
 
-- Matcaps sample by view-space normal; they do not create physical specular
-  highlights or consume an independent reflection capture.
-- `matcap_factor` is an RGB multiplier (each component 0..4), and subsumes
-  any separate `matcap_strength` parameter.
-- `matcap_roughness` controls mipmap blurring (0..1), not microfacet BRDF.
-- The proposed linear `matcap_surface_map` uses R=intensity and
-  G=roughness multiplier, with B reserved. With no map, both multipliers
-  are implicitly 1. When `matcap_map` is absent, the layer is inactive.
-- The old `"reflection_mode":"matcap"` is rejected; use
-  `matcap_map` for the independently authored layer instead.
-- The RGB matcap image is imported as sRGB; its surface mask is imported
-  as linear data. The mask's R controls the color contribution, and G
-  multiplies the mip-based artistic blur. The layer is added as artistic
-  color as a separate layer, not as a second GGX lobe.
-- `matcap_lighting_influence` is a scalar 0..1 (default **1.0**).
-  At 1, MatCaps use the existing authored/sector and dynamic lighting,
-  with opaque SSAO, sun-shadow and spotlight response through the regular
-  G-buffer surface composite. At 0, the MatCap color remains artistic and
-  unlit, unaffected by scene darkness/shadows (but still affected by fog,
-  transparency and clearcoat). Intermediate values split the contribution.
-  Unlit MatCaps do not themselves illuminate the scene.
-- Forward transparent MatCaps use the available native/JK lighting and
-  translucent-sun shading; opaque deferred lights and SSAO do not run on
-  the forward transparency target.
-- Existing material normal maps influence MatCap orientation, including
-  materials without reflection strength. The layer does not follow
-  sun/point-light specular or metallic Fresnel.
-- MatCap uniforms and texture binds are skipped when inactive. The
-  extra samplers use units 24/25 and are compiled out when the driver's
-  `GL_MAX_TEXTURE_IMAGE_UNITS` is below 26; on such GPUs the new MatCap
-  layer is unavailable while ordinary rendering continues unchanged.
-- Only GPU-cached world and GPU 3DO rendering supports the new layer at
-  this stage. Native triangle fallback still uses its existing shaders.
+- `matcap_factor` multiplies the MatCap RGB image; components range from 0 to 4.
+- `matcap_roughness` controls mipmap-based blur (0 to 1).
+- The optional linear `matcap_surface_map` uses R for intensity and G for roughness modulation.
+- `matcap_lighting_influence` controls how strongly the MatCap follows scene lighting (0 to 1; default 1). At 0 the layer remains artistic/unlit; at 1 it responds to available authored and dynamic lighting/shadowing.
+- Material normal maps affect MatCap orientation. The MatCap itself does not add physical GGX highlights or emit light.
+- MatCap images are color textures (sRGB), while their surface maps are linear data.
 
-## Clearcoat (second dielectric specular lobe)
+The layer requires GPUs with enough fragment sampler units for the additional maps; on hardware without that capacity, ordinary material rendering remains available.
+
+## Clearcoat
+
+Clearcoat adds a second dielectric specular lobe, with its own roughness and optional normal map, over the base material. It shares the base material's available environment or realtime capture source but computes separate highlights.
 
 ```json
 {
@@ -63,30 +39,11 @@ The `shared` reflection mode remains independent.
 }
 ```
 
-- Defaults: strength=0 with no `clearcoat_surface_map`, otherwise 1;
-  roughness=0.1; transmission=1. Explicit 0 remains 0.
-- The linear `clearcoat_surface_map` uses R=strength, G=roughness,
-  B=transmission, each multiplied by its corresponding scalar.
-- `clearcoat_transmission`=1 preserves underlying brightness apart from
-  the clearcoat Fresnel effect; 0 darkens the underlying diffuse appearance
-  where coat is present. The coat reflection itself is not darkened.
-  Coverage-weighted attenuation avoids darkening an uncoated surface.
-- Clearcoat has its own optional normal map and roughness. Initially it
-  reuses the base material's reflection source, with no additional capture.
-- It is skipped when strength is zero or the GPU cannot support the
-  optional samplers. Both cached world and 3DO shaders reuse the same
-  EnvMap/planar/realtime probe sources as the base, but compute their own
-  dielectric sun and dynamic-point-light GGX highlights.
-- The coating partially attenuates underlying base reflections with its
-  Schlick Fresnel term, and applies coverage-weighted transmission primarily
-  to diffuse and MatCap colors; emission is not darkened.
-- A zero-strength authored material can be activated at runtime for rain.
-  Its clearcoat surface and normal maps remain available for such activation.
-- The extra coat samplers are at forward units 26/27, compiled out on
-  devices with fewer than 28 fragment texture units.
-- Scalar parameters are constrained to 0..1 and must be finite.
+The linear clearcoat surface map uses R = strength, G = roughness, B = transmission, each multiplied by its material scalar. With no surface map, strength defaults to 0; with one, it defaults to 1. Roughness defaults to 0.1 and transmission to 1.
 
-## Runtime COG control
+`clearcoat_transmission` controls attenuation of underlying diffuse and MatCap color where the coating is present. The separate coat reflection remains visible, and emission is not attenuated.
+
+## Runtime COG controls
 
 ```c
 SetMatClearcoat(material, VectorSet(strength, roughness, transmission), fadeTime);
@@ -94,16 +51,6 @@ current = GetMatClearcoat(material);
 ResetMatClearcoat(material, fadeTime);
 ```
 
-The setter animates **absolute** material-level values, starting interrupted
-fades from the current interpolated value. Get returns the current
-interpolated values before per-pixel modulation. Reset animates back to
-authored material defaults, not a hardcoded identity vector. Overrides
-follow the native MAT index and are cleared on world changes.
-The getter uses the last resolved authored defaults; a MAT never resolved
-by the renderer yet reports the fallback `(0, 0.1, 1)` until resident.
+`SetMatClearcoat` animates **absolute** strength, roughness and transmission; interruptions continue from the current interpolated values. `ResetMatClearcoat` returns to the authored defaults, and `GetMatClearcoat` reads the current values. Overrides follow MAT identity and are cleared on world changes.
 
-`"reflection_mode":"shared"` now selects one lazy camera-centered
-realtime cubemap, shared across requesting cached-world and GPU 3DO
-materials. It uses the existing six-view capture, same interval and
-resolution, and is not subject to the persistent CaptureEnvMap Cog-only
-static scenery policy. `"envmap"` remains the lightweight default.
+See [material-pack compiler additions](compile.md) and [reflection captures](offscreen_captures.md).

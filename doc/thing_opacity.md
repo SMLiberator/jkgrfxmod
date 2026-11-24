@@ -1,6 +1,6 @@
 # Per-Thing 3DO opacity fades
 
-**Branch:** `performance`; GPU-cached `rdModel3` Things only.
+Supported by GPU-cached `rdModel3` Things.
 
 ```c
 SetThingOpacity(thing, opacity, dither, fadeTime);
@@ -56,5 +56,4 @@ cached coverage, without invalidating their source geometry.
 - Fully transparent **special** materials, like emissive-only VFX, keep
   their original no-shadow policy.
 
-Tests: `tests/thing_opacity.cpp` and
-`tests/thing_opacity_wiring.py`.
+

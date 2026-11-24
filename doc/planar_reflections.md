@@ -1,291 +1,38 @@
-# Planar reflection foundation
+# Planar reflections
 
-**Status: experimental same-frame planar reflection capture and world-MAT compositing.**
-`reflection_mode: "planar"` is recognized in compiled material-pack
-`metadata.json`. The capture renders real cached-world geometry and
-independently acquired animated 3DOs into a separate color/depth target.
-The GPU cached-world shader now projects this scene onto coplanar world
-surfaces using that material mode. Native triangle and 3DO receiving-material
-paths still use their existing EnvMap fallback; those are future work.
+`reflection_mode: "planar"` gives supported **GPU-cached world surfaces** a mirrored scene reflection. It is intended for flat water, mirrors and other planar materials.
 
-The existing modes retain numeric values 0–3; planar is 4. Experimental
-`reflection_mode: "hemi"` is 5, describing a single camera-facing 160°
-perspective approximation to a hemisphere. This is not a cubemap or a true
-180° fisheye; the regular EnvMap supplies uncovered angles. A future cubemap
-mode can use the distinct name `"cubemap"` if needed.
+Planar captures require `enable_reflections`, `enable_reflection_capture` and `enable_reflection_probes`. When dedicated probes are disabled or a capture is unavailable, the material uses its available EnvMap fallback.
 
-## Independent Thing discovery (implemented)
+## Capture and receiver behavior
 
-OpenJKDF2's `sithRender_RenderThings` walks the Thing lists of the
-sectors chosen by the camera. The new diagnostic scans **every**
-SithSector and follows each native `pNextThingInSector`, without
-calling JK's render traversal or assuming a `SithThing` allocation stride.
+The renderer selects an eligible visible world plane and constructs an independent camera reflected across that plane. It captures cached world surfaces, sky apertures and 3DO Things that are visible from the reflected camera, including eligible Things outside the main camera's view. Reflective Thing acquisition, portal traversal and frustum culling use the mirrored camera rather than the gameplay camera.
 
-- `SithWorld`: sector count at `+0x4c`, sector array at `+0x50`,
-  loaded Thing capacity at `+0xbc`, Thing table at `+0xc4`.
-- `SithSector`: stride `0x98`, first Thing at `+0x30`.
-- `SithThing`: owner sector `+0x5c`, next Thing `+0x60`,
-  signature `+0x74`, position `+0xb8`, rdThing at `+0xc4`.
-- `rdThing`: render type at `+0x00`, rdModel3 pointer at `+0x04`.
+The mirrored render target uses an HDR color image and depth buffer. Capture geometry is clipped against the reflecting plane, with corrected winding for the mirrored view. Material-specific color, normal maps, roughness, reflection strength and Fluid properties are applied when the world surface samples the completed image.
 
-Every read is bounded, cycles/duplicate nodes cause failure, and malformed
-lists fail closed. No writes to native state occur. Flag `0x2` (destroyed),
-`0x8` (level geometry), `0x10`, and `0x80000` (disabled) are excluded;
-camera-type Things are excluded from the model candidate list.
+`reflection_capture_resolution` determines the **shorter side** of the planar render target. The other dimension follows the gameplay camera's aspect ratio. Reflective captures are reused when their camera/plane state permits it; an asynchronous receiver-visibility query can skip capture work for an occluded plane.
 
-Set `experimental_planar_thing_discovery: true` to log diagnostic counts
-approximately every 120 frames. It **does NOT render** reflections.
+Normal maps can perturb the sampled reflection, with the material's roughness affecting the blur. Fog is applied consistently to avoid double fogging. Uncovered capture pixels may fall back to an available authored or generated EnvMap.
 
-The experimental diagnostic now also matches all-sector Things against the
-actual GPU 3DO node snapshot from the main camera, using Thing pointer plus
-signature (including with shadows and decals disabled). Matched Things may
-have multiple cached mesh nodes. The unmatched count is **not** strictly
-an offscreen count: native fallbacks and unloaded MATs can also be missing.
-`renderer/planar_reflection_workset.hpp` can prepare reflected model-view
-matrices for the matched nodes without touching JK's camera. The separate
-native-node path below handles Things not submitted for the main camera.
+## Scope and configuration
 
-## Independent native 3DO pose and GPU mesh acquisition (experimental)
+- Only eligible GPU-cached **world surfaces** use Planar as a receiver. Native fallback and 3DO receiver materials use their applicable fallback.
+- Captures have independent camera visibility and include sky and eligible animated 3DOs.
+- The capture omits unnecessary secondary postprocessing, shadow-map rendering and nested reflection capture.
+- Multiple independently updating mirror planes are not part of the current capture path.
+- Planar captures do not use the dedicated Hemi/Cube Thing-distance limit.
 
-`renderer/planar_reflection_native_nodes.hpp` validates the tested binary's
-rdModel3 node accessor, the Thing signature/model owner, the active geoset,
-the entire parent hierarchy, amputations and the current contiguous joint
-pose. The native rdModel3_GetMeshMatrix accessor refreshes a Thing's
-animation cache once; no native camera or draw callback is changed.
-Malformed parent cycles and stale poses fail closed without partial output.
-
-`renderer/main.cpp` now exposes `acquire_planar_reflection_offscreen_gpu`,
-which can snapshot previously unseen native rdMeshes using the same shared
-GPU geometry cache and material-readiness/warmup mechanisms as ordinary
-GPU 3DOs. This generates `gpu_3do_instance` entries with independent
-world-space joint transforms. The code remains on-demand and separate from
-the gameplay frame, shadows and native renderer. Initial capture lighting
-uses cheap baked/ambient values and no dynamic lights.
-
-When `experimental_planar_thing_discovery` is enabled, approximately every
-120 frames a rotating batch of at most 16 Things (including those partially submitted
-by the main camera) is probed independently, and
-`PLANAR discovery` logs pose, mesh snapshot, texture-readiness and node
-counts. These nodes are **not yet drawn**. Missing meshes, invalid poses or
-unready materials must not produce a partial reflection. Default is off.
-
-Independent GPU-ready mesh acquisition now feeds the debug capture.
-Animated Thing hierarchy completeness is checked before admission. The
-independent sector scan honors native ThingFlags `0x10` and `0x80000`, plus
-`SetThingCurGeoMode` values 0–2 (no filled hardware geometry), and the GPU
-acquisition rechecks both states immediately before pose refresh. This is
-independent of the primary camera's frustum/portal visibility; models outside
-its view must remain available to a mirror. GeoMode 3 is respected as solid
-color; 4 is fully textured. The runtime visuals still need in-game verification.
-
-## Experimental capture and debug view
-
-In `jkgm.json`:
+Example material definition:
 
 ```json
-"enable_reflection_probes": true,
-"planar_reflection_resolution_scale": 0.5
+{
+  "name": "mirror_water",
+  "reflection_mode": "planar",
+  "reflection_strength": 1.0,
+  "roughness": 0.08,
+  "normal_map": "ripples.png",
+  "replaces": ["water.mat"]
+}
 ```
 
-The scale is validated to `[0.125, 1.0]`, defaults to `0.5`, and applies to
-the game's internal screen resolution. At 1920x1080, the default target is
-960x540. The experimental capture is disabled by default and has no
-on-screen debug blit; test it through a reflective material in gameplay.
-
-The first version chooses the nearest eligible world plane whose material
-explicitly sets `"reflection_mode": "planar"`. Fluid blending alone never
-triggers planar reflection capture, including on passable-adjoin water.
-Passable-adjoin surfaces with an explicitly planar material remain eligible
-reflection RECEIVERS, even though such portal geometry is excluded from the
-mirrored SCENE render. The selector logs `planar_matches` and
-`passable_reflection_receivers` to diagnose which surfaces opted in.
-Without an explicit planar MAT no capture plane is selected.
-It stages live lighting and animated UVs for world surfaces visible to the
-**reflected** camera. The normal path builds its own sector and portal
-visibility from reflected-camera and visible-receiver evidence, applies
-conservative portal windows, and uses the resulting reachability mask to
-reduce reflected 3DO acquisition. If receiver seeds, topology, or traversal
-validation fail, it automatically stages the original full-world
-reflected-frustum candidate set. It never reuses the primary camera's
-visible-sector list as reflected visibility.
-The secondary capture uses a level-derived depth range, with CPU far-plane
-rejection disabled but side-frustum and portal clipping preserved.
-Captured world geometry is frustum-culled *before* material resolution, grouped
-by material/cel/GeoMode and submitted with multi-draw. Existing primary
-opaque/alpha draw lists do not receive offscreen-only geometry.
-The capture considers every reflected-visible 3DO Thing, without the
-former nearest-128 owner truncation (with primary GPU nodes as fallback). Cached 3DO mesh groups are independently
-culled against the reflected frustum before material resolution. Sky, HUD,
-projected decals, dynamic point/sun lighting, transparent Fluid blending,
-shadows, GGX, SSAO and postprocessing remain excluded. The capture now
-samples ordinary emissive factors and optional emissive textures. Zero-alpha
-emissive-only surfaces render in a depth-tested additive overlay after opaque
-geometry, without writing depth or occluding captured buildings. It restores
-GL framebuffer/texture/render state, including both material texture units,
-after the pass. Captures are full frame, not
-yet cropped to the planar surface. The periodic PLANAR log reports CPU phase
-durations (acquisition, world submission, model submission, mipmap generation)
-and cull/group counts; CPU times can include driver stalls. When
-`profile_renderer` is enabled, separate nonblocking GPU timestamp queries
-report `gpu_ms_world`, `gpu_ms_models`, `gpu_ms_mips` and sample/skip counts.
-Query results are read only after completion, without waiting on the GPU;
-the reported values may lag behind the current frame by several frames.
-
-**Visual parity and limits:** The lightweight capture now uses the
-GPU world shader's Gouraud/CMP/sector tint and global JK color-effect
-operations and applies reflected-camera fog ONLY to the optical leg after
-the water/mirror plane. The mirrored depth already includes the near leg,
-which the primary Fluid shader subsequently fogs. Capture fog is factored
-as (totalFog - nearFog) / (1 - nearFog), so sequential compositing reproduces
-the original total transmittance instead of double-fogging the near leg.
-Offscreen-only 3DOs read a live sector ambient/extra floor, but still lack full primary-camera Thing
-lighting overrides, colored dynamic lights, shadows and some CMP metadata.
-Normal-map distortion projects a finite point along the reflected ray from
-the water surface, instead of adding a fixed UV displacement. Roughness
-selects a generated capture mip level; standard mipmaps approximate, but
-do not fully prefilter, a physical specular BRDF. Very high-frequency normal
-maps and extreme grazing angles can push projected samples outside the target.
-The planar capture uses RGBA16F to preserve HDR emissive values. Those values
-still pass through the receiving material's Fresnel/strength and main scene's
-tonemapping; independent bloom processing is not run in the capture. Other
-translucent/additive/multiply effects and full exposure parity remain future
-work. The capture is scheduled before main-world rendering to avoid one-frame
-motion lag. It uses the existing Fluid absorption and material normal maps,
-and missing reflected sky/background uses a configured EnvMap where available.
-Native triangles and 3DO faces are not yet planar reflection receivers.
-Other omissions include reflected sky, alpha/VFX parity, projected receiver
-scissor cropping, multi-plane sharing, proper glossy BRDF filtering and
-independent GPU timing.
-
-### Receiver visibility / GPU occlusion query
-
-The reflected scene is only useful when at least one pixel of a reflective
-receiver is visible to the **main camera**. In levels whose buildings are
-opaque 3DOs, frustum culling alone still wastes a capture when the water
-surface is hidden behind interiors.
-
-The receiver now issues an asynchronous OpenGL 3.3
-`GL_ANY_SAMPLES_PASSED` query at the **end of the main opaque G-buffer pass**,
-after both world and 3DO depth have been written. It draws only the
-main-camera-staged reflective faces belonging to the selected capture plane,
-with no color or depth writes. Both normal and MSAA screen paths share their
-opaque depth with this pass. Results are consumed in later frames (never a
-blocking query read) to skip the entire secondary capture, including native
-Thing scanning and 3DO submissions, when no pixel survived depth testing.
-
-Unfinished/stale queries, changed levels, missing receiver-stage data and
-larger changes in camera pose **fail open** and render reflections normally.
-The previous capture image remains available while hidden, avoiding stale
-resource binding. This is necessarily a lagged visibility decision because
-the reflection image must exist BEFORE the current frame's water shader
-samples it. The log shows `PLANAR receiver_visibility=occluded` with query
-and skip counts when the pass is bypassed.
-
-### Capture performance caveat
-
-Even at `planar_reflection_resolution_scale: 0.125`, the secondary
-camera still visits native Thing lists and can refresh up to 128 Thing
-hierarchies every frame. Its cost is not proportional to rendered pixels.
-JK originally tests rdModel3's full model radius before animated joint
-matrix updates, then tests each posed rdMesh radius. The main GPU renderer
-retains the native model-radius rejection and performs its own native
-mesh-radius rejection before caching; the GPU draw phase also uses
-conservative per-batch AABB rejection.
-
-The reflection camera now applies the same two-stage sphere pruning:
-it reads the 3DO model's native radius at `rdModel3+0x5c`, testing against
-the reflected camera's frustum **before sorting/capping Thing candidates
-or refreshing poses**. After the visible Thing's pose is acquired, it checks
-each active mesh's radius and animated placement before mesh signature
-hashing and material lookup. Scaled/sheared placements are conservatively
-expanded and missing/invalid radii fail open (no accidental disappearances).
-`thing_radius_culled` and `mesh_radius_culled` report the savings.
-These checks are independent of main-camera sector/portal visibility and
-retain ThingFlags/CurGeoMode handling.
-
-Frustum and multi-draw improvements reduce world/model submissions but
-do not yet eliminate the cost of refreshing poses for Things whose
-overall model sphere overlaps the reflected frustum.
-The offscreen path now shares the ordinary 3DO mesh-revision fast path,
-hashing full source arrays only when their revision changes or a periodic
-32-frame audit is due (or once per frame if mutation tracking is disabled).
-`source_hashes`, `source_hash_skips`, `source_new_snapshots` and
-`source_untracked_changes` reveal whether it is working. A detected
-untracked modification disables the fast path. This avoids redundant
-geometry hashing, **not** hierarchy pose refreshes; radius culling now
-reduces the number of refreshed Things and processed meshes. Remaining
-work includes reusing complete primary-camera model instances where
-available, then capture cadence and selective LOD bias.
-
-## To-do: planar abyss/edge policy (not implemented)
-
-Water captures can expose dark discontinuities near the horizon or where
-normal-map distortion projects outside the mirrored camera's image. The
-current target already uses `GL_CLAMP_TO_EDGE`, but
-`world_planar_reflection()` rejects projected UVs outside `[0,1]`
-and returns zero coverage. Transparent black pixels **inside** the capture
-are a distinct case and cannot be repaired by clamping texture edges.
-
-**Deferred experiment, after mesh-revision testing:**
-
-1. Compare a shader-only clamp beyond the projection boundary against the
-   current zero-coverage behavior, without changing capture geometry.
-2. If confirmed, allow a bounded edge extension, then smoothly blend into
-   an available sky/environment fallback. Preserve alpha-based coverage for
-   uncovered pixels; avoid repeating/wrapping the image.
-3. Evaluate optional camera-projection overscan to provide real reflected
-   pixels for normal-map distortion, with matching receiver projection.
-4. Diagnose internal capture holes separately (alpha-aware dilation or sky
-   fallback, if necessary). Check horizon artifacts with and without
-   environment maps and at different water roughness/FOV settings.
-
-Do not unconditionally smear the last texel across an unbounded area or
-introduce additional full-screen passes without measuring their cost.
-
-## Capture contract
-
-- A source material selects planar reflections. Material effects (roughness,
-  specular strength, normal maps, fluid absorption, etc.) remain independent.
-- Surfaces that share an equivalent plane may reuse one reflected image.
-  Fluid blending alone does not imply planar reflection. A visible plane
-  with an explicit planar material must be selected before capture work.
-- A secondary `engine_camera` is reflected using the plane normal and
-  offset `dot(normal, world_position)==offset`.
-- `renderer/offscreen_capture_target.hpp` provides a reusable HDR/depth
-  framebuffer and scoped GL-state restoration for secondary camera consumers.
-- `renderer/offscreen_capture_projection.hpp` describes perspective and
-  orthographic projections without relying on native rdCamera state.
-  The planar renderer still uses its original perspective projection;
-  an arbitrary camera will accept FOV=0 for orthographic projection,
-  with a separately selected vertical world-space span.
-- `renderer/planar_reflection_camera.hpp` provides GL-free, tested world-to-view
-  matrix math matching the GPU-cached world and 3DO matrix layouts. Captures
-  must not modify JK's live rdCamera, and must not trust a mirrored camera's
-  SithSector to exist.
-- The reflection pass **must include cached 3DO models** from the existing
-  frame snapshot as well as GPU-cached world and sky. It must frustum-cull them
-  independently of the main camera's portal/sector visibility; otherwise
-  objects visible only to the reflection will disappear.
-- The mirrored basis reverses handedness. Restore front-face winding/culling
-  state after capture. Clip geometry against the water/mirror plane.
-- Render to a separate low-resolution color/depth target with simple lighting;
-  exclude nested reflections, unnecessary postprocessing, shadow-map
-  generation, expensive alpha effects, camera-HUD and decal passes.
-- Never sample the texture being rendered into. Keep the normal frame state,
-  texture-unit ownership and cached material data intact.
-- The initial usable version should work on horizontal water and vertical
-  flat mirrors. Models are required before it is declared feature-complete.
-- Only after correctness is verified should we add distance culling, 3DO LOD
-  bias, projected-water-area scissoring, periodic updates or multi-plane
-  scheduling. Record capture CPU and GPU timings independently.
-
-## Testing
-
-`tests/planar_reflection_camera.cpp` validates reflection geometry and 3DO
-native model-view compatibility, including nonunit and oblique plane normals.
-`tests/planar_reflection_camera.py` verifies mode registration and shader
-fallbacks; `tests/planar_reflection_render_math.cpp` verifies resolution and
-signed clip-plane computations; `tests/planar_reflection_capture.py` checks
-native offscreen/FBO/GL-state/shader/config integration. Automated tests do
-**not** establish correct live reflection visuals; verify through a planar
-material in Wine/Windows.
+See [reflection capture controls](offscreen_captures.md) and [configuration changes](config.md).
