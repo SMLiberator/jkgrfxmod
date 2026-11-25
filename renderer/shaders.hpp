@@ -74,6 +74,7 @@ namespace jkgm {
         class world_cache_preview_shader : public opengl_shader {
             gl::uniform_location_id view_right,view_forward,view_up,view_origin;
             gl::uniform_location_id projection;
+            gl::uniform_location_id world_surface_descriptor_mode,world_surface_descriptor_sampler;
             gl::uniform_location_id albedo_sampler,uv_scale,uv_scroll,material_tint,solid_color;
             gl::uniform_location_id albedo2_sampler,albedo_source,albedo_source2,albedo_transition;
             gl::uniform_location_id emissive_sampler,emissive_factor,emissive_scroll,has_emissive;
@@ -117,6 +118,7 @@ namespace jkgm {
         public:
             translucent_sun_uniforms translucent_sun;
             explicit world_cache_preview_shader(fs::path const &data_root);
+            void set_surface_descriptors(bool enabled);
             void set_view_matrix(point<4,float> right,point<4,float> forward,
                                  point<4,float> up,point<4,float> origin);
             void set_projection(point<4,float> params);

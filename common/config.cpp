@@ -147,6 +147,10 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             // Compatibility alias for the previous color-only toggle.
             j.at("enable_gbuffer_color_packing").get_to(rv->enable_gbuffer_packing);
         }
+        if(j.contains("experimental_world_surface_descriptors")) {
+            j.at("experimental_world_surface_descriptors").get_to(
+                rv->experimental_world_surface_descriptors);
+        }
         if(j.contains("world_cache_fluid_debug_mode")) {
             auto const &mode=j.at("world_cache_fluid_debug_mode");
             if(!mode.is_number_integer())

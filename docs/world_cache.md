@@ -60,6 +60,28 @@ The world and GPU-cached 3DO **pixel** paths use the editable formulas in
 load time. Per-pixel dynamic light calculations do not replace authored
 baked Gouraud colors; native non-cached geometry remains unaffected.
 
+## Experimental world-surface descriptors
+
+Set `experimental_world_surface_descriptors=true` to A/B against the original
+world cache. The 32-byte static vertex becomes a 24-byte XYZ + full FP32 UV +
+surface-index stream, with the constant surface normal stored once per face.
+Live sector tint, sector CMP tint and native SlideSurface offset are stored
+per surface in the same 48-byte RGBA32F descriptor (three texels). The only
+remaining live *vertex* streams are native Gouraud RGB and native light state.
+The surface descriptor is updated from successful, staged main and reflected
+camera faces before any draw, using exact last-uploaded shadows; hidden faces
+retain their previous GPU state until staged again. The main world shader and
+the independent planar/hemisphere capture shaders use the same lookup. Depth,
+shadow and occlusion shaders keep original full-precision XYZ/UV inputs.
+
+For a four-corner surface, nominal GPU vertex+descriptor storage is
+4*(24+12+12)+48 = 240 bytes, versus 4*(32+12+12+12+12+8) = 352 bytes
+before index buffers: roughly 32% less. This does not yet eliminate the
+original CPU-side vertex arrays or staging copies, nor guarantee an FPS
+improvement; vertex-stage texture fetch and GL driver overhead must be
+measured on Wine/OpenGL. On unsupported devices, the renderer retains its
+original 32-byte static and five live vertex-buffer layout.
+
 ## Live attribute upload change tracking
 
 The immutable world positions, base UVs and normals stay in static GPU

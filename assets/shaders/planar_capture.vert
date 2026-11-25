@@ -18,6 +18,8 @@ uniform int capture_sky_mode; // world aperture at far depth
 uniform int capture_unlit; // CameraToMatEx: skip native/JK baked lighting
 uniform int packed_vertex_format;
 uniform samplerBuffer gpu_3do_face_descriptors;
+uniform int world_surface_descriptor_mode;
+uniform samplerBuffer world_surface_descriptors;
 uniform vec4 clip_plane_view;
 uniform vec4 jk_color_filter,jk_color_tint,jk_color_add_fade;
 uniform float jk_light_limit;
@@ -60,14 +62,25 @@ void main() {
         capture_sky_mode!=0 && is_model==0
             ?p.y*(1.0-0.000002):-projection.z,p.y);
     capture_forward_depth=p.y;
-    pixel_uv=local_uv+(is_model!=0 ? vec2(0.0):native_uv_offset);
+    vec4 world_d0=vec4(0.0),world_d1=vec4(0.0),world_d2=vec4(0.0);
+    if(is_model==0 && world_surface_descriptor_mode!=0) {
+        // World cache attribute 8 is the face ID; model attribute 8 is RGB.
+        int world_id=int(native_vertex_rgb.x+0.5);
+        world_d0=texelFetch(world_surface_descriptors,3*world_id);
+        world_d1=texelFetch(world_surface_descriptors,3*world_id+1);
+        world_d2=texelFetch(world_surface_descriptors,3*world_id+2);
+    }
+    pixel_uv=local_uv+(is_model!=0 ? vec2(0.0):
+        world_surface_descriptor_mode!=0
+            ?vec2(world_d0.w,world_d1.w):native_uv_offset);
     if(capture_unlit!=0) {
         // Preserve material albedo/tint while ignoring world, vertex,
         // colormap and sector lighting (including ambient attenuation).
         baked_light=vec3(1.0);
     } else if(is_model==0) {
-        baked_light=jk_capture_color(native_light,native_cmp_or_mode,
-                                     native_sector_tint);
+        baked_light=jk_capture_color(native_light,
+            world_surface_descriptor_mode!=0?world_d2.xyz:native_cmp_or_mode,
+            world_surface_descriptor_mode!=0?world_d1.xyz:native_sector_tint);
     } else {
         // Model attributes 3,6,7,8 match gpu_3do_preview.vert. Preserve
         // its authored light-mode/ambient floor, without expensive point lights.

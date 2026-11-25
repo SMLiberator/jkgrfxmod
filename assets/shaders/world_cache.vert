@@ -9,6 +9,7 @@ layout(location=4) in vec3 native_light_state;
 layout(location=5) in vec3 native_sector_tint;
 layout(location=6) in vec2 native_uv_offset; // JK SlideSurface
 layout(location=7) in vec3 native_sector_cmp_tint; // owning SithSector.colormap, NOT tint
+layout(location=8) in float world_surface_id; // 24B descriptor stream only
 out vec2 material_uv;
 out vec3 cached_view_normal;
 out vec3 cached_lit_rgb;
@@ -21,6 +22,8 @@ out vec3 cached_world_normal;
 uniform vec4 view_right,view_forward,view_up,view_origin;
 uniform vec4 projection; // tan(half horizontal FOV), aspect, inverse far
 uniform int sky_mode; // 0=ordinary world, 1=horizon, 2=ceiling
+uniform int world_surface_descriptor_mode;
+uniform samplerBuffer world_surface_descriptors; // three RGBA32F texels per surface
 // Already neutralized native global palette: only COG/player effects remain.
 // The per-face sector tint is applied locally in the same color operation.
 uniform vec4 jk_color_filter,jk_color_tint,jk_color_add_fade;
@@ -49,7 +52,21 @@ vec3 world_jk_effect(vec3 raw,vec3 local_sector_tint,vec3 cmp_tint)
 }
 void main() {
     // Native texVertOffset adds in MAT pixels, before dimension scaling.
-    material_uv=native_uv+native_uv_offset;
+    vec3 surface_normal=native_normal;
+    vec3 surface_tint=native_sector_tint;
+    vec3 surface_cmp=native_sector_cmp_tint;
+    vec2 surface_uv_offset=native_uv_offset;
+    if(world_surface_descriptor_mode!=0) {
+        int id=int(world_surface_id+0.5);
+        vec4 d0=texelFetch(world_surface_descriptors,3*id);
+        vec4 d1=texelFetch(world_surface_descriptors,3*id+1);
+        vec4 d2=texelFetch(world_surface_descriptors,3*id+2);
+        surface_normal=d0.xyz;
+        surface_tint=d1.xyz;
+        surface_cmp=d2.xyz;
+        surface_uv_offset=vec2(d0.w,d1.w);
+    }
+    material_uv=native_uv+surface_uv_offset;
     // Gamma-correct per-vertex JK lighting must interpolate before texels.
     // RGB attribute will also support future MotS colored world lighting.
     // JK's palette tint changes vertex illumination, not the albedo.
@@ -57,15 +74,15 @@ void main() {
     // GPU path's gamma conversion and per-channel tint scaling.
     cached_raw_light_rgb=native_light_rgb;
     cached_lit_rgb=world_jk_effect(native_light_rgb,
-                                   native_sector_tint,native_sector_cmp_tint);
+                                   surface_tint,surface_cmp);
     cached_light_state=native_light_state;
-    cached_sector_tint=native_sector_tint;
-    cached_sector_cmp_tint=native_sector_cmp_tint;
+    cached_sector_tint=surface_tint;
+    cached_sector_cmp_tint=surface_cmp;
     cached_world_position=world_position;
-    cached_world_normal=native_normal;
-    vec3 vn=view_right.xyz*native_normal.x+
-            view_forward.xyz*native_normal.y+
-            view_up.xyz*native_normal.z;
+    cached_world_normal=surface_normal;
+    vec3 vn=view_right.xyz*surface_normal.x+
+            view_forward.xyz*surface_normal.y+
+            view_up.xyz*surface_normal.z;
     float sh=max(projection.x,0.0001);
     float sv=sh/max(projection.y,0.0001);
     cached_view_normal=normalize(vec3(vn.x*sh,vn.z*sv,vn.y));

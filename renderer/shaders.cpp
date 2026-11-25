@@ -343,6 +343,8 @@ jkgm::shaders::world_cache_preview_shader::world_cache_preview_shader(
     , view_up(gl::get_uniform_location(the_program,"view_up"))
     , view_origin(gl::get_uniform_location(the_program,"view_origin"))
     , projection(gl::get_uniform_location(the_program,"projection"))
+    , world_surface_descriptor_mode(gl::get_uniform_location(the_program,"world_surface_descriptor_mode"))
+    , world_surface_descriptor_sampler(gl::get_uniform_location(the_program,"world_surface_descriptors"))
     , albedo_sampler(gl::get_uniform_location(the_program,"albedo_map"))
     , uv_scale(gl::get_uniform_location(the_program,"uv_scale"))
     , uv_scroll(gl::get_uniform_location(the_program,"uv_scroll"))
@@ -451,6 +453,13 @@ jkgm::shaders::world_cache_preview_shader::world_cache_preview_shader(
             the_program,"light_color["+std::to_string(i)+"]"));
     }
 }
+void jkgm::shaders::world_cache_preview_shader::set_surface_descriptors(bool enabled)
+{
+    gl::set_uniform_integer(world_surface_descriptor_mode,enabled?1:0);
+    gl::set_uniform_integer(world_surface_descriptor_sampler,
+                            texture_units::forward_world_surface_descriptors);
+}
+
 void jkgm::shaders::world_cache_preview_shader::set_view_matrix(
     point<4,float> r,point<4,float> f,point<4,float> u,point<4,float> t)
 {

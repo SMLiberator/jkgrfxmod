@@ -3,6 +3,8 @@
 // Opt-in GPU-first opaque pass uses native depth-tested fallback.
 // Native JK portal visibility and HOM remain authoritative.
 #include "world_cache.hpp"
+#include "world_cache_descriptors.hpp"
+#include "texture_units.hpp"
 #include "world_cache_visibility.hpp"
 #include "world_cache_portals.hpp"
 #include "world_cache_lighting.hpp"
@@ -11,12 +13,26 @@
 #include "base/log.hpp"
 #include "glutil/buffer.hpp"
 #include "glutil/vertex_array.hpp"
+#include "glutil/texture.hpp"
+#include "glad/gl.h"
 #include <cstddef>
 #include <cstdint>
 #include <chrono>
+#include <optional>
 
 namespace jkgm {
 struct world_cache_gpu {
+    bool descriptors_requested=false,descriptors_enabled=false;
+    std::optional<gl::buffer> surface_descriptor_buffer;
+    std::optional<gl::texture> surface_descriptor_texture;
+    std::vector<world_cache_surface_descriptor> frame_surface_descriptors;
+    std::vector<world_cache_surface_descriptor> uploaded_surface_descriptors;
+    void bind_surface_descriptors() const {
+        if(!descriptors_enabled || !surface_descriptor_texture)return;
+        gl::set_active_texture_unit_raw(texture_units::forward_world_surface_descriptors);
+        gl::bind_texture_raw(GL_TEXTURE_BUFFER,surface_descriptor_texture->value());
+        gl::set_active_texture_unit_raw(0);
+    }
     gl::vertex_array vao;
     gl::buffer vertices,indices,lighting,light_state,sector_tint,sector_cmp_tint,uv_animation;
     std::vector<std::array<float,3>> frame_light_rgb,frame_light_state,frame_sector_tint,frame_sector_cmp_tint;
@@ -46,7 +62,8 @@ struct world_cache_gpu {
     uint64_t revision=0;
     bool ready=false;
 
-    world_cache_gpu()
+    explicit world_cache_gpu(bool request_descriptors=false)
+        :descriptors_requested(request_descriptors)
     {
         gl::bind_vertex_array(vao);
         gl::bind_buffer(gl::buffer_bind_target::array,vertices);
@@ -101,6 +118,11 @@ struct world_cache_gpu {
         frame_sector_tint.clear();
         frame_sector_cmp_tint.clear();
         frame_uv_offset.clear();
+        descriptors_enabled=false;
+        frame_surface_descriptors.clear();
+        uploaded_surface_descriptors.clear();
+        surface_descriptor_texture.reset();
+        surface_descriptor_buffer.reset();
         uploaded_light_rgb.clear();
         uploaded_light_state.clear();
         uploaded_sector_tint.clear();
@@ -130,11 +152,62 @@ struct world_cache_gpu {
             return false;
         }
         sector_seen_epochs.assign(world.surface_count,0U);
+        std::vector<world_cache_descriptor_vertex> compact_vertices;
+        std::vector<world_cache_surface_descriptor> compact_descriptors;
+        if(descriptors_requested) {
+            GLint combined_units=0,vertex_units=0,max_texels=0;
+            glGetIntegerv(GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS,&combined_units);
+            glGetIntegerv(GL_MAX_VERTEX_TEXTURE_IMAGE_UNITS,&vertex_units);
+            glGetIntegerv(GL_MAX_TEXTURE_BUFFER_SIZE,&max_texels);
+            if(vertex_units>0 &&
+               combined_units>texture_units::forward_world_surface_descriptors &&
+               build_world_cache_descriptors(mesh,compact_vertices,
+                                             compact_descriptors) &&
+               compact_descriptors.size()*3U<=size_t(std::max(max_texels,0))) {
+                descriptors_enabled=true;
+                frame_surface_descriptors=std::move(compact_descriptors);
+                uploaded_surface_descriptors=frame_surface_descriptors;
+            } else LOG_WARNING("WORLD CACHE surface descriptors unavailable; using legacy vertex layout");
+        }
         gl::bind_vertex_array(vao);
         gl::bind_buffer(gl::buffer_bind_target::array,vertices);
-        gl::buffer_data(gl::buffer_bind_target::array,
-            make_span(mesh.vertices).as_const_bytes(),
-            gl::buffer_usage::static_draw);
+        if(descriptors_enabled) {
+            gl::buffer_data(gl::buffer_bind_target::array,
+                make_span(compact_vertices).as_const_bytes(),
+                gl::buffer_usage::static_draw);
+            // Full FP32 XYZ and UVs stay at locations 0/1, which keeps
+            // capture, sun-shadow and occlusion depth shaders unchanged.
+            gl::vertex_attrib_pointer(0,3,gl::vertex_element_type::float32,
+                false,sizeof(world_cache_descriptor_vertex),
+                offsetof(world_cache_descriptor_vertex,position));
+            gl::vertex_attrib_pointer(1,2,gl::vertex_element_type::float32,
+                false,sizeof(world_cache_descriptor_vertex),
+                offsetof(world_cache_descriptor_vertex,uv));
+            glDisableVertexAttribArray(2);
+            gl::enable_vertex_attrib_array(8);
+            // Up to 250,000 surfaces: losslessly represented as float32 ID.
+            gl::vertex_attrib_pointer(8,1,gl::vertex_element_type::uint32,
+                false,sizeof(world_cache_descriptor_vertex),
+                offsetof(world_cache_descriptor_vertex,surface));
+            glDisableVertexAttribArray(5);
+            glDisableVertexAttribArray(6);
+            glDisableVertexAttribArray(7);
+        } else {
+            gl::buffer_data(gl::buffer_bind_target::array,
+                make_span(mesh.vertices).as_const_bytes(),
+                gl::buffer_usage::static_draw);
+            gl::vertex_attrib_pointer(0,3,gl::vertex_element_type::float32,
+                false,sizeof(world_cache_vertex),offsetof(world_cache_vertex,position));
+            gl::vertex_attrib_pointer(1,2,gl::vertex_element_type::float32,
+                false,sizeof(world_cache_vertex),offsetof(world_cache_vertex,uv));
+            gl::enable_vertex_attrib_array(2);
+            gl::vertex_attrib_pointer(2,3,gl::vertex_element_type::float32,
+                false,sizeof(world_cache_vertex),offsetof(world_cache_vertex,normal));
+            glDisableVertexAttribArray(8);
+            gl::enable_vertex_attrib_array(5);
+            gl::enable_vertex_attrib_array(6);
+            gl::enable_vertex_attrib_array(7);
+        }
         frame_light_rgb.assign(mesh.vertices.size(),{{1.0f,1.0f,1.0f}});
         uploaded_light_rgb=frame_light_rgb;
         gl::bind_buffer(gl::buffer_bind_target::array,lighting);
@@ -149,22 +222,43 @@ struct world_cache_gpu {
             gl::buffer_usage::stream_draw);
         frame_sector_tint.assign(mesh.vertices.size(),{{0.0f,0.0f,0.0f}});
         uploaded_sector_tint=frame_sector_tint;
-        gl::bind_buffer(gl::buffer_bind_target::array,sector_tint);
-        gl::buffer_data(gl::buffer_bind_target::array,
-            make_span(frame_sector_tint).as_const_bytes(),
-            gl::buffer_usage::stream_draw);
+        if(!descriptors_enabled) {
+            gl::bind_buffer(gl::buffer_bind_target::array,sector_tint);
+            gl::buffer_data(gl::buffer_bind_target::array,
+                make_span(frame_sector_tint).as_const_bytes(),
+                gl::buffer_usage::stream_draw);
+        }
         frame_sector_cmp_tint.assign(mesh.vertices.size(),{{1.0f,1.0f,1.0f}});
         uploaded_sector_cmp_tint=frame_sector_cmp_tint;
-        gl::bind_buffer(gl::buffer_bind_target::array,sector_cmp_tint);
-        gl::buffer_data(gl::buffer_bind_target::array,
-            make_span(frame_sector_cmp_tint).as_const_bytes(),
-            gl::buffer_usage::stream_draw);
+        if(!descriptors_enabled) {
+            gl::bind_buffer(gl::buffer_bind_target::array,sector_cmp_tint);
+            gl::buffer_data(gl::buffer_bind_target::array,
+                make_span(frame_sector_cmp_tint).as_const_bytes(),
+                gl::buffer_usage::stream_draw);
+        }
         frame_uv_offset.assign(mesh.vertices.size(),{{0.0f,0.0f}});
         uploaded_uv_offset=frame_uv_offset;
-        gl::bind_buffer(gl::buffer_bind_target::array,uv_animation);
-        gl::buffer_data(gl::buffer_bind_target::array,
-            make_span(frame_uv_offset).as_const_bytes(),
-            gl::buffer_usage::stream_draw);
+        if(!descriptors_enabled) {
+            gl::bind_buffer(gl::buffer_bind_target::array,uv_animation);
+            gl::buffer_data(gl::buffer_bind_target::array,
+                make_span(frame_uv_offset).as_const_bytes(),
+                gl::buffer_usage::stream_draw);
+        }
+        if(descriptors_enabled) {
+            surface_descriptor_buffer.emplace();
+            surface_descriptor_texture.emplace();
+            glBindBuffer(GL_TEXTURE_BUFFER,surface_descriptor_buffer->value());
+            glBufferData(GL_TEXTURE_BUFFER,
+                GLsizeiptr(frame_surface_descriptors.size()*sizeof(frame_surface_descriptors[0])),
+                frame_surface_descriptors.data(),GL_STREAM_DRAW);
+            gl::set_active_texture_unit_raw(texture_units::forward_world_surface_descriptors);
+            gl::bind_texture_raw(GL_TEXTURE_BUFFER,surface_descriptor_texture->value());
+            glTexBuffer(GL_TEXTURE_BUFFER,GL_RGBA32F,
+                        surface_descriptor_buffer->value());
+            gl::bind_texture_raw(GL_TEXTURE_BUFFER,0U);
+            gl::set_active_texture_unit_raw(0);
+            glBindBuffer(GL_TEXTURE_BUFFER,0U);
+        }
         gl::bind_buffer(gl::buffer_bind_target::element_array,indices);
         gl::buffer_data(gl::buffer_bind_target::element_array,
             make_span(mesh.indices).as_const_bytes(),
@@ -187,12 +281,21 @@ struct world_cache_gpu {
                  " lookup_entries=",cached_surface_lookup.size(),
                  " vertices=",mesh.vertices.size(),
                  " triangles=",mesh.indices.size()/3U,
-                 " bytes=",mesh.vertices.size()*sizeof(world_cache_vertex)+
+                 " bytes=",(descriptors_enabled
+                     ?mesh.vertices.size()*sizeof(world_cache_descriptor_vertex)+
+                      frame_surface_descriptors.size()*sizeof(world_cache_surface_descriptor)
+                     :mesh.vertices.size()*sizeof(world_cache_vertex))+
                            mesh.indices.size()*sizeof(uint32_t)+
                            (frame_light_rgb.size()+frame_light_state.size()+
-                            frame_sector_tint.size()+frame_sector_cmp_tint.size())*
-                               sizeof(std::array<float,3>),
-                 " uv_animation_bytes=",frame_uv_offset.size()*sizeof(std::array<float,2>),
+                            (descriptors_enabled?0U:frame_sector_tint.size()+
+                                frame_sector_cmp_tint.size()))*
+                               sizeof(std::array<float,3>)+
+                           (descriptors_enabled?0U:frame_uv_offset.size()*
+                               sizeof(std::array<float,2>)),
+                 " surface_descriptors=",descriptors_enabled?1:0,
+                 " surface_descriptor_count=",frame_surface_descriptors.size(),
+                 " uv_animation_bytes=",descriptors_enabled?0U:
+                     frame_uv_offset.size()*sizeof(std::array<float,2>),
                  " revision=",revision,
                  " build_us=",std::chrono::duration_cast<
                      std::chrono::microseconds>(

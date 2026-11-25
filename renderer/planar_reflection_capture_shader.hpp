@@ -19,6 +19,7 @@ class planar_reflection_capture_shader : public opengl_shader {
     gl::uniform_location_id fog_params_,fog_color_,jk_filter_,jk_tint_,jk_fade_,jk_limit_;
     gl::uniform_location_id model_ambient_,model_mode_,model_cmp_,model_sector_;
     gl::uniform_location_id packed_vertex_format_,face_descriptors_;
+    gl::uniform_location_id world_surface_descriptor_mode_,world_surface_descriptors_;
     gl::uniform_location_id emission_sampler_,emission_factor_,emission_scroll_;
     gl::uniform_location_id emission_enabled_,emission_only_;
     gl::uniform_location_id thing_opacity_,thing_mode_;
@@ -65,6 +66,8 @@ public:
          model_sector_(gl::get_uniform_location(the_program,"model_sector_tint")),
          packed_vertex_format_(gl::get_uniform_location(the_program,"packed_vertex_format")),
          face_descriptors_(gl::get_uniform_location(the_program,"gpu_3do_face_descriptors")),
+         world_surface_descriptor_mode_(gl::get_uniform_location(the_program,"world_surface_descriptor_mode")),
+         world_surface_descriptors_(gl::get_uniform_location(the_program,"world_surface_descriptors")),
          emission_sampler_(gl::get_uniform_location(the_program,"emissive_map")),
          emission_factor_(gl::get_uniform_location(the_program,"emissive_factor")),
          emission_scroll_(gl::get_uniform_location(the_program,"emissive_scroll")),
@@ -138,6 +141,11 @@ public:
     }
     void set_capture_unlit(bool unlit) {
         gl::set_uniform_integer(capture_unlit_,unlit?1:0);
+    }
+    void set_world_surface_descriptors(bool enabled) {
+        gl::set_uniform_integer(world_surface_descriptor_mode_,enabled?1:0);
+        gl::set_uniform_integer(world_surface_descriptors_,
+            texture_units::forward_world_surface_descriptors);
     }
     void set_modelview(gpu_3do_matrix34 const &m,bool model,int vertex_format=0) {
         model_uv_=model;
