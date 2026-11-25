@@ -67,6 +67,9 @@ struct profile_sample {
   // Profile-only, sampled candidate counts for cross-Thing 3DO instancing.
   // Conservative candidates are a subset of repeated live GPU identities.
   uint64_t gpu_instancing_audit_samples=0;
+  // Per-frame opaque instancing CPU work, separately from sampled audit.
+  uint64_t gpu_instancing_prepare_us=0,gpu_instancing_audit_us=0;
+  uint64_t gpu_instancing_schedule_us=0,gpu_instancing_reorder_us=0;
   uint64_t gpu_instancing_source_draws=0;
   uint64_t gpu_instancing_geometry_duplicates=0;
   uint64_t gpu_instancing_geometry_groups=0;
@@ -204,6 +207,10 @@ struct profile_sample {
     gpu_index_coalesced_ranges+=o.gpu_index_coalesced_ranges;
     gpu_index_coalesced_singles+=o.gpu_index_coalesced_singles;
     gpu_instancing_audit_samples+=o.gpu_instancing_audit_samples;
+    gpu_instancing_prepare_us+=o.gpu_instancing_prepare_us;
+    gpu_instancing_audit_us+=o.gpu_instancing_audit_us;
+    gpu_instancing_schedule_us+=o.gpu_instancing_schedule_us;
+    gpu_instancing_reorder_us+=o.gpu_instancing_reorder_us;
     gpu_instancing_source_draws+=o.gpu_instancing_source_draws;
     gpu_instancing_geometry_duplicates+=o.gpu_instancing_geometry_duplicates;
     gpu_instancing_geometry_groups+=o.gpu_instancing_geometry_groups;
