@@ -288,7 +288,9 @@ int main() {
     // Re-run to verify generation-stamped scratch never leaks prior owners.
     std::vector<gpu_3do_instancing_audit_record> stress;
     stress.reserve(512U*8U);
-    constexpr size_t owner_count=512U,material_count=7U;
+    // Static storage avoids MSVC treating the lambda's array bound as
+    // a captured automatic variable rather than a constant expression.
+    static constexpr size_t owner_count=512U,material_count=7U;
     for(size_t owner=0;owner<owner_count;++owner) {
         for(size_t material=0;material<material_count;++material) {
             auto item=record(a,shared->groups[0],
