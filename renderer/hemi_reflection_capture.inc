@@ -1132,7 +1132,8 @@
                     if(gpu_3do_gl_cache.size()>=8192U)return;
                     it=gpu_3do_gl_cache.emplace(inst.id,
                         std::make_unique<gpu_3do_gl_mesh>(
-                            the_config->experimental_packed_3do_vertices,
+                            (the_config->gpu_3do_vertex_format!=0),
+                            the_config->experimental_3do_index_u16,
                             *inst.geometry,
                             the_config->profile_renderer
                                 ?&packed_3do_upload_profile:nullptr)).first;
@@ -1179,7 +1180,8 @@
                             counts.push_back(GLsizei(group->index_count));
                             offsets.push_back(
                                 reinterpret_cast<void const *>(
-                                    group->index_offset_bytes));
+                                    it->second->index_offset(
+                                        group->index_offset_bytes/sizeof(uint32_t))));
                         }
                         if(profile_shared) {
                             auto &diag=shared_capture_profile_window;
@@ -1194,19 +1196,19 @@
                             if((diag.model_batches&31U)==0U) {
                                 auto const gl_started=profile_clock::now();
                                 glMultiDrawElements(GL_TRIANGLES,counts.data(),
-                                    GL_UNSIGNED_INT,offsets.data(),
+                                    it->second->raw_index_type(),offsets.data(),
                                     GLsizei(counts.size()));
                                 diag.sampled_gl_ns+=elapsed_profile_ns(
                                     gl_started,profile_clock::now());
                                 ++diag.sampled_gl_calls;
                             } else {
                                 glMultiDrawElements(GL_TRIANGLES,counts.data(),
-                                    GL_UNSIGNED_INT,offsets.data(),
+                                    it->second->raw_index_type(),offsets.data(),
                                     GLsizei(counts.size()));
                             }
                         } else {
                             glMultiDrawElements(GL_TRIANGLES,counts.data(),
-                                GL_UNSIGNED_INT,offsets.data(),
+                                it->second->raw_index_type(),offsets.data(),
                                 GLsizei(counts.size()));
                         }
                         model_drawn+=counts.size();

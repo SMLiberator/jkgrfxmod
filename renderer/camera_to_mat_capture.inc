@@ -351,7 +351,8 @@
                             if(gpu_3do_gl_cache.size()>=8192U)return;
                             it=gpu_3do_gl_cache.emplace(inst.id,
                                 std::make_unique<gpu_3do_gl_mesh>(
-                                    the_config->experimental_packed_3do_vertices,
+                                    (the_config->gpu_3do_vertex_format!=0),
+                                    the_config->experimental_3do_index_u16,
                                     *inst.geometry)).first;
                         }
                         shader.set_modelview(modelview,true,
@@ -385,9 +386,9 @@
                             else gl::set_cull_face_enabled(true);
                             gl::draw_elements(gl::element_type::triangles,
                                 GLsizei(group.count),
-                                gl::index_type::uint32,
+                                it->second->gl_index_type(),
                                 static_cast<ptrdiff_t>(
-                                    group.offset*sizeof(uint32_t)));
+                                    it->second->index_offset(group.offset)));
                         }
                     };
                     for(auto const &inst:offscreen.nodes)draw_model(inst);
