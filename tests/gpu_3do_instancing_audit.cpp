@@ -283,10 +283,64 @@ int main() {
     assert(schedule[4].source_index==3U && schedule[4].batch_id==0U);
     assert(schedule[5].source_index==5U && schedule[5].batch_id==0U);
 
+    // Large repeated-model workload: every exact material/policy group
+    // batches 512 distinct Things, while duplicate owner records do not.
+    // Re-run to verify generation-stamped scratch never leaks prior owners.
+    std::vector<gpu_3do_instancing_audit_record> stress;
+    stress.reserve(512U*8U);
+    constexpr size_t owner_count=512U,material_count=7U;
+    for(size_t owner=0;owner<owner_count;++owner) {
+        for(size_t material=0;material<material_count;++material) {
+            auto item=record(a,shared->groups[0],
+                uintptr_t(0x1000U+material*64U),
+                uintptr_t(0x10000U+owner),false,
+                material%2U?gpu_3do_alpha_mode::masked:
+                            gpu_3do_alpha_mode::solid);
+            stress.push_back(item);
+            if(owner%31U==0U)stress.push_back(item);
+        }
+    }
+    auto check_stress=[&]() {
+        auto const scheduled=schedule_gpu_3do_instancing(stress);
+        assert(scheduled.size()==stress.size());
+        std::vector<bool> seen(stress.size(),false);
+        std::array<size_t,material_count> batch_ids{};
+        std::array<size_t,material_count> batched{};
+        for(auto const &entry:scheduled) {
+            assert(entry.source_index<stress.size());
+            assert(!seen[entry.source_index]);
+            seen[entry.source_index]=true;
+            auto const &item=stress[entry.source_index];
+            auto const material_index=
+                (item.material-uintptr_t(0x1000U))/uintptr_t(64U);
+            assert(material_index<material_count);
+            if(entry.batch_id!=0U) {
+                ++batched[material_index];
+                if(batch_ids[material_index]==0U)
+                    batch_ids[material_index]=entry.batch_id;
+                else assert(batch_ids[material_index]==entry.batch_id);
+            }
+        }
+        for(bool v:seen)assert(v);
+        for(auto count:batched)assert(count==owner_count);
+        for(size_t i=0;i<material_count;++i)
+            for(size_t j=i+1;j<material_count;++j)
+                assert(batch_ids[i]!=batch_ids[j]);
+    };
+    check_stress();
+    check_stress();
+    stress.clear();
+    stress.push_back(record(a,shared->groups[0],0x1000U,0x11U));
+    assert(schedule_gpu_3do_instancing(stress)[0].batch_id==0U);
+
     // Window aggregation must add histograms slot-by-slot, including
     // both "all ranges" and the more relevant "repeat members" set.
     profile_sample frame{},window{};
     frame.gpu_instancing_rejected_ranges=1U;
+    frame.gpu_instancing_prepare_us=11U;
+    frame.gpu_instancing_audit_us=23U;
+    frame.gpu_instancing_schedule_us=37U;
+    frame.gpu_instancing_reorder_us=7U;
     frame.gpu_instancing_repeated_member_ranges=2U;
     frame.gpu_instancing_alpha_policies[
         static_cast<size_t>(gpu_3do_alpha_mode::masked)]=3U;
@@ -295,6 +349,10 @@ int main() {
     window.add(frame);
     window.add(frame);
     assert(window.gpu_instancing_rejected_ranges==2U);
+    assert(window.gpu_instancing_prepare_us==22U);
+    assert(window.gpu_instancing_audit_us==46U);
+    assert(window.gpu_instancing_schedule_us==74U);
+    assert(window.gpu_instancing_reorder_us==14U);
     assert(window.gpu_instancing_repeated_member_ranges==4U);
     assert(window.gpu_instancing_alpha_policies[
         static_cast<size_t>(gpu_3do_alpha_mode::masked)]==6U);
