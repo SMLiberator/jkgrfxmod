@@ -11,6 +11,7 @@
 #include <map>
 #include <set>
 #include <tuple>
+#include <unordered_set>
 #include <vector>
 
 namespace jkgm {
@@ -220,7 +221,11 @@ schedule_gpu_3do_instancing(
     using geometry_key=std::tuple<uint64_t,uintptr_t,uintptr_t,uintptr_t>;
     using batch_key=std::tuple<geometry_key,gpu_3do_alpha_mode,
                                std::array<uint32_t,11>>;
-    std::map<batch_key,std::vector<size_t>> groups;
+    struct batch_members {
+        std::vector<size_t> indices;
+        std::unordered_set<uintptr_t> owners;
+    };
+    std::map<batch_key,batch_members> groups;
     for(size_t i=0;i<records.size();++i) {
         auto const &r=records[i];
         if(!r.state_eligible || r.rejection_mask!=0U ||
@@ -229,21 +234,18 @@ schedule_gpu_3do_instancing(
         geometry_key const geometry{r.mesh_id,r.geometry,r.group,r.material};
         batch_key const key{geometry,r.policy,r.state};
         auto &members=groups[key];
-        bool repeated_owner=false;
-        for(size_t prev:members)
-            if(records[prev].instance==r.instance) {
-                repeated_owner=true;
-                break;
-            }
-        if(!repeated_owner)members.push_back(i);
+        // In repeated-model stress scenes, each material group can appear
+        // hundreds of times. Avoid a quadratic scan for duplicate Things.
+        if(members.owners.insert(r.instance).second)
+            members.indices.push_back(i);
     }
     std::vector<size_t> batch_of(records.size(),0U);
     std::vector<std::vector<size_t>> batches(1);
     for(auto const &entry:groups) {
-        if(entry.second.size()<2U)continue;
+        if(entry.second.indices.size()<2U)continue;
         size_t const batch_id=batches.size();
-        batches.push_back(entry.second);
-        for(size_t index:entry.second)batch_of[index]=batch_id;
+        batches.push_back(entry.second.indices);
+        for(size_t index:entry.second.indices)batch_of[index]=batch_id;
     }
     std::vector<bool> emitted(batches.size(),false);
     std::vector<gpu_3do_instancing_schedule_entry> ordered;
