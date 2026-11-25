@@ -218,26 +218,35 @@ inline std::vector<gpu_3do_instancing_schedule_entry>
 schedule_gpu_3do_instancing(
     std::vector<gpu_3do_instancing_audit_record> const &records)
 {
-    using geometry_key=std::tuple<uint64_t,uintptr_t,uintptr_t,uintptr_t>;
-    using batch_key=std::tuple<geometry_key,gpu_3do_alpha_mode,
-                               std::array<uint32_t,11>>;
-    struct batch_key_hash {
-        size_t operator()(batch_key const &key) const noexcept {
-            // Full key equality, not a hash or shared filename, is required
-            // before merging any two cached geometry groups.
+    // Classify the mesh and shared lighting state once per contiguous
+    // instance run. Only the smaller range key is hashed for each face
+    // group; full equality remains mandatory at both levels.
+    using mesh_key=std::tuple<uint64_t,uintptr_t,std::array<uint32_t,11>>;
+    using batch_key=std::tuple<size_t,uintptr_t,uintptr_t,gpu_3do_alpha_mode>;
+    struct mesh_key_hash {
+        size_t operator()(mesh_key const &key) const noexcept {
             size_t hash=0x9e3779b9U;
             auto mix=[&](uint64_t value) {
                 size_t const x=static_cast<size_t>(value) ^
                     static_cast<size_t>(value>>32U);
                 hash^=x+0x9e3779b9U+(hash<<6U)+(hash>>2U);
             };
-            auto const &geometry=std::get<0>(key);
-            mix(std::get<0>(geometry));
-            mix(std::get<1>(geometry));
-            mix(std::get<2>(geometry));
-            mix(std::get<3>(geometry));
-            mix(static_cast<uint32_t>(std::get<1>(key)));
+            mix(std::get<0>(key));
+            mix(std::get<1>(key));
             for(uint32_t value:std::get<2>(key))mix(value);
+            return hash;
+        }
+    };
+    struct batch_key_hash {
+        size_t operator()(batch_key const &key) const noexcept {
+            size_t hash=0x9e3779b9U;
+            auto mix=[&](size_t value) {
+                hash^=value+0x9e3779b9U+(hash<<6U)+(hash>>2U);
+            };
+            mix(std::get<0>(key));
+            mix(std::get<1>(key));
+            mix(std::get<2>(key));
+            mix(static_cast<size_t>(std::get<3>(key)));
             return hash;
         }
     };
@@ -247,6 +256,7 @@ schedule_gpu_3do_instancing(
         uint32_t stamp=0U;
     };
     struct workspace {
+        std::unordered_map<mesh_key,size_t,mesh_key_hash> mesh_lookup;
         std::unordered_map<batch_key,size_t,batch_key_hash> group_lookup;
         std::vector<std::vector<size_t>> group_indices;
         // Flat, generation-stamped open-addressed set for (group,Thing).
@@ -255,8 +265,13 @@ schedule_gpu_3do_instancing(
         uint32_t stamp=0U;
     };
     static thread_local workspace scratch;
+    scratch.mesh_lookup.clear();
     scratch.group_lookup.clear();
     size_t group_count=0U;
+    size_t mesh_count=0U;
+    mesh_key previous_mesh{};
+    uintptr_t previous_instance=0U;
+    size_t mesh_class=0U;
     if(++scratch.stamp==0U) {
         for(auto &slot:scratch.seen_owners)slot.stamp=0U;
         scratch.stamp=1U;
@@ -292,8 +307,21 @@ schedule_gpu_3do_instancing(
         if(!r.state_eligible || r.rejection_mask!=0U ||
            !r.mesh_id || !r.geometry || !r.group || !r.material ||
            !r.instance)continue;
-        geometry_key const geometry{r.mesh_id,r.geometry,r.group,r.material};
-        batch_key const key{geometry,r.policy,r.state};
+        // The public scheduler also accepts arbitrary record order and
+        // even inconsistent state for a repeated instance. Verify the
+        // complete key before reusing the previous classification.
+        if(previous_instance!=r.instance ||
+           std::get<0>(previous_mesh)!=r.mesh_id ||
+           std::get<1>(previous_mesh)!=r.geometry ||
+           std::get<2>(previous_mesh)!=r.state) {
+            previous_mesh=mesh_key{r.mesh_id,r.geometry,r.state};
+            previous_instance=r.instance;
+            auto const found=scratch.mesh_lookup.try_emplace(
+                previous_mesh,mesh_count);
+            mesh_class=found.first->second;
+            if(found.second)++mesh_count;
+        }
+        batch_key const key{mesh_class,r.group,r.material,r.policy};
         auto const found=scratch.group_lookup.try_emplace(key,group_count);
         size_t const group=found.first->second;
         if(found.second) {

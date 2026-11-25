@@ -264,6 +264,24 @@ int main() {
     schedule=schedule_gpu_3do_instancing(rows);
     for(auto const &item:schedule)assert(item.batch_id==0U);
 
+    // Contiguous records for one owner must still split on exact state,
+    // material and alpha policy; the mesh classification is not a
+    // substitute for complete range compatibility.
+    rows={first,record(differing,shared->groups[0],0x1000U,0x11U),
+          record(b,shared->groups[0],0x2000U,0x22U),
+          record(b,shared->groups[0],0x1000U,0x22U,false,
+                 gpu_3do_alpha_mode::masked),
+          record(b,shared->groups[0],0x1000U,0x22U)};
+    schedule=schedule_gpu_3do_instancing(rows);
+    assert(schedule.size()==5U);
+    assert(schedule[0].source_index==0U && schedule[0].batch_id!=0U);
+    assert(schedule[1].source_index==4U &&
+           schedule[1].batch_id==schedule[0].batch_id);
+    for(size_t i=2;i<schedule.size();++i) {
+        assert(schedule[i].source_index==i-1U);
+        assert(schedule[i].batch_id==0U);
+    }
+
     // Duplicate owner records stay separate, while distinct owners batch
     // in first-appearance order even when their records are interleaved.
     rows={record(a,shared->groups[0],0x1000U,0x11U),
