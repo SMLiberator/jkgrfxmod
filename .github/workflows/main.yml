@@ -16,6 +16,7 @@ jobs:
     - name: Enable Developer Command Prompt
       uses: ilammy/msvc-dev-cmd@v1
     - name: Build
+      id: runtime_build
       run: MSBuild.exe -t:Build -p:Configuration=Release -p:Platform=x86 -p:PlatformToolset=v143 jkgfxmod.sln
 
     - name: OpenGL texture unit registry and sampler collision guards
@@ -373,7 +374,11 @@ jobs:
       run: |
         python tests/test_bootstrap_patcher.py
         python tests/test_sprite_type_patcher.py
+    # Preserve downloadable runtime builds even when a later test fails.
+    # Never package failed builds or upload an incomplete/unverified package.
     - name: Package standalone test binaries
+      id: package_runtime
+      if: ${{ !cancelled() && steps.runtime_build.outcome == 'success' }}
       shell: pwsh
       run: |
         New-Item -ItemType Directory -Path test-build -Force | Out-Null
@@ -394,6 +399,8 @@ jobs:
         New-Item -ItemType Directory -Path 'test-build/jkgm/shaders' -Force | Out-Null
         Copy-Item -Path 'assets/shaders/*' -Destination 'test-build/jkgm/shaders/' -Recurse -Force
     - name: Verify standalone GLSL packaging
+      id: verify_runtime_package
+      if: ${{ !cancelled() && steps.package_runtime.outcome == 'success' }}
       shell: pwsh
       run: |
         $sourceShaders = @(Get-ChildItem -Path 'assets/shaders' -File)
@@ -416,6 +423,7 @@ jobs:
         }
         Write-Host "Verified $($sourceShaders.Count) packaged shaders against repository sources."
     - name: Upload standalone test build
+      if: ${{ !cancelled() && steps.verify_runtime_package.outcome == 'success' }}
       uses: actions/upload-artifact@v4
       with:
         name: jkgrfxmod-standalone
