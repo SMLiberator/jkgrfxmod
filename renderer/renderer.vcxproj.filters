@@ -293,6 +293,9 @@
     <ClInclude Include="gpu_3do_index_packing.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="gpu_3do_compact_vertex.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="gpu_3do_instancing_audit.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>

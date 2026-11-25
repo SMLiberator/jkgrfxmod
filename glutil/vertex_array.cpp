@@ -63,6 +63,7 @@ namespace jkgm::gl {
     static_assert(vertex_element_type::int32 == vertex_element_type(GL_INT));
     static_assert(vertex_element_type::uint32 == vertex_element_type(GL_UNSIGNED_INT));
     static_assert(vertex_element_type::float32 == vertex_element_type(GL_FLOAT));
+    static_assert(vertex_element_type::float16 == vertex_element_type(GL_HALF_FLOAT));
 
     static_assert(element_type::triangles == element_type(GL_TRIANGLES));
 

@@ -23,6 +23,7 @@ namespace jkgm::gl {
         int32 = 0x1404,
         uint32 = 0x1405,
         float32 = 0x1406,
+        float16 = 0x140B, // GL_HALF_FLOAT, core since GL 3.0
         uint_2_10_10_10_rev = 0x8368 // GL_UNSIGNED_INT_2_10_10_10_REV
     };
 

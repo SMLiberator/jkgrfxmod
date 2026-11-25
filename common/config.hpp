@@ -59,7 +59,7 @@ namespace jkgm {
         bool profile_renderer_verbose = false; // opt-in detailed renderer diagnostics
         bool profile_audio = false; // read-only A3D/DirectSound DLL diagnostics
         bool use_gpu_cache = true; // unified GPU 3DO, sprite, and SithWorld rendering
-        int gpu_3do_vertex_format = 1; // 0=original 80B; 1=packed 52B with per-mesh fallback
+        int gpu_3do_vertex_format = 1; // 0=80B; 1=52B; 2=40B half-attribute experiment, mesh fallback
         bool experimental_3do_index_u16 = false; // 16-bit 3DO indices when safe; 32-bit otherwise
         bool experimental_auto_3do_lod = false; // force native GeoSet 0; select automatically generated GPU mesh LODs
         float gpu_3do_auto_lod_lod1_radius_px = 90.0f; // enter generated LOD1 below this projected radius

@@ -11,6 +11,7 @@
 #include "cpu_render_workers.hpp"
 #include "gpu_3do_packed_vertex.hpp"
 #include "gpu_3do_index_packing.hpp"
+#include "gpu_3do_compact_vertex.hpp"
 #include "gpu_3do_auto_lod.hpp"
 #include "planar_reflection_things.hpp"
 #include "planar_reflection_workset.hpp"
@@ -419,6 +420,8 @@ namespace jkgm {
         unsigned num_indices = 0;
         uint64_t vertex_count = 0;
         bool packed_vertex_format = false;
+        int vertex_format = 0; // 0=80B, 1=52B, 2=40B
+        uint32_t compact_rejection_reason = 0;
         bool packed_index_format = false;
         gl::index_type index_format = gl::index_type::uint32;
         unsigned index_stride = sizeof(uint32_t);
@@ -429,23 +432,63 @@ namespace jkgm {
         uintptr_t index_offset(uint64_t first_index) const {
             return uintptr_t(first_index)*index_stride;
         }
-        explicit gpu_3do_gl_mesh(bool enable_packing,bool enable_index_packing,
+        explicit gpu_3do_gl_mesh(int requested_vertex_format,bool enable_index_packing,
                                  gpu_3do_geometry const &source,
                                  gpu_3do_pack_profile *pack_profile=nullptr)
         {
             num_indices=static_cast<unsigned>(source.indices.size());
             vertex_count=uint64_t(source.vertices.size());
             std::vector<gpu_3do_packed_vertex> packed_vertices;
+            std::vector<gpu_3do_compact_vertex> compact_vertices;
             uint32_t rejection_reasons=0;
-            packed_vertex_format=enable_packing &&
-                gpu_3do_pack_vertices(source.vertices,packed_vertices,
-                    pack_profile?&rejection_reasons:nullptr);
-            if(enable_packing && pack_profile)
+            if(requested_vertex_format>=2 &&
+               gpu_3do_pack_compact_vertices(source.vertices,compact_vertices,
+                                              &compact_rejection_reason))
+                vertex_format=2;
+            if(vertex_format!=2 && requested_vertex_format>=1 &&
+               gpu_3do_pack_vertices(source.vertices,packed_vertices,
+                   pack_profile?&rejection_reasons:nullptr))
+                vertex_format=1;
+            packed_vertex_format=vertex_format!=0;
+            if(requested_vertex_format>=1 && pack_profile)
                 pack_profile->record(packed_vertex_format,
                                      source.vertices.size(),rejection_reasons);
             gl::bind_vertex_array(vao);
             gl::bind_buffer(gl::buffer_bind_target::array,vertices);
-            if(packed_vertex_format) {
+            if(vertex_format==2) {
+                gl::buffer_data(gl::buffer_bind_target::array,
+                    make_span(compact_vertices).as_const_bytes(),
+                    gl::buffer_usage::static_draw);
+                constexpr auto stride=sizeof(gpu_3do_compact_vertex);
+                gl::enable_vertex_attrib_array(0U);
+                gl::vertex_attrib_pointer(0U,3U,gl::vertex_element_type::float32,
+                    false,stride,offsetof(gpu_3do_compact_vertex,x));
+                gl::enable_vertex_attrib_array(1U);
+                gl::vertex_attrib_pointer(1U,2U,gl::vertex_element_type::float16,
+                    false,stride,offsetof(gpu_3do_compact_vertex,u));
+                gl::enable_vertex_attrib_array(2U);
+                gl::vertex_attrib_pointer(2U,4U,
+                    gl::vertex_element_type::uint_2_10_10_10_rev,
+                    true,stride,offsetof(gpu_3do_compact_vertex,normal_mode));
+                gl::enable_vertex_attrib_array(3U);
+                gl::vertex_attrib_pointer(3U,1U,gl::vertex_element_type::float16,
+                    false,stride,offsetof(gpu_3do_compact_vertex,static_light));
+                gl::enable_vertex_attrib_array(4U);
+                gl::vertex_attrib_pointer(4U,4U,
+                    gl::vertex_element_type::uint_2_10_10_10_rev,
+                    true,stride,offsetof(gpu_3do_compact_vertex,light_normal));
+                gl::enable_vertex_attrib_array(5U);
+                gl::vertex_attrib_pointer(5U,3U,gl::vertex_element_type::float16,
+                    false,stride,offsetof(gpu_3do_compact_vertex,fax));
+                gl::enable_vertex_attrib_array(6U);
+                gl::vertex_attrib_pointer(6U,1U,gl::vertex_element_type::float16,
+                    false,stride,offsetof(gpu_3do_compact_vertex,face_extra));
+                // LightMode stays in the upper two normal bits, exactly
+                // as in vertex format 1. Location 7 remains disabled.
+                gl::enable_vertex_attrib_array(8U);
+                gl::vertex_attrib_pointer(8U,4U,gl::vertex_element_type::uint8,
+                    true,stride,offsetof(gpu_3do_compact_vertex,rgba));
+            } else if(packed_vertex_format) {
                 gl::buffer_data(gl::buffer_bind_target::array,
                     make_span(packed_vertices).as_const_bytes(),
                     gl::buffer_usage::static_draw);
@@ -1763,11 +1806,7 @@ namespace jkgm {
                                  ?(100U*packing.accepted_uploads)/attempted:0U,
                              " packed_vertices=",packing.packed_vertices,
                              " rejected_vertices=",packing.legacy_vertices,
-                             " upload_vertex_kib_saved=",
-                             (packing.packed_vertices*
-                                (sizeof(gpu_3do_vertex)-
-                                 sizeof(gpu_3do_packed_vertex)))/1024U,
-                             " NOTE=counts_uploads_since_renderer_creation_including_reuploads");
+                             " NOTE=counts_uploads_since_renderer_creation_including_reuploads_and_40B_meshes");
                     auto const &why=packing.reasons;
                     LOG_INFO("PERF gpu_3do packing_rejections empty=",
                              why[gpu_3do_pack_empty],
@@ -1785,17 +1824,28 @@ namespace jkgm {
                              " rgb_nonfinite=",why[gpu_3do_pack_rgb_nonfinite],
                              " rgb_out_of_range=",why[gpu_3do_pack_rgb_out_of_range],
                              " NOTE=reason_buckets_overlap_one_mesh_can_have_multiple_reasons");
-                    uint64_t live_packed=0,live_legacy=0;
+                    uint64_t live_compact=0,live_packed=0,live_legacy=0;
+                    uint64_t live_compact_vertices=0;
                     uint64_t live_packed_vertices=0,live_legacy_vertices=0;
+                    uint64_t compact_base_reject=0,compact_uv_reject=0;
+                    uint64_t compact_light_reject=0,compact_anchor_reject=0;
                     for(auto const &entry:gpu_3do_gl_cache) {
                         auto const &mesh=*entry.second;
-                        if(mesh.packed_vertex_format) {
+                        if(mesh.vertex_format==2) {
+                            ++live_compact;
+                            live_compact_vertices+=mesh.vertex_count;
+                        } else if(mesh.vertex_format==1) {
                             ++live_packed;
                             live_packed_vertices+=mesh.vertex_count;
                         } else {
                             ++live_legacy;
                             live_legacy_vertices+=mesh.vertex_count;
                         }
+                        uint32_t const why=mesh.compact_rejection_reason;
+                        if(why&gpu_3do_compact_base)++compact_base_reject;
+                        if(why&gpu_3do_compact_uv)++compact_uv_reject;
+                        if(why&gpu_3do_compact_light)++compact_light_reject;
+                        if(why&gpu_3do_compact_anchor)++compact_anchor_reject;
                     }
                     uint64_t index_u16=0,index_u32=0;
                     uint64_t index_bytes=0,index_bytes_saved=0;
@@ -1811,18 +1861,25 @@ namespace jkgm {
                         index_u16," live_u32=",index_u32,
                         " kib=",index_bytes/1024U,
                         " saved_kib=",index_bytes_saved/1024U);
-                    LOG_INFO("PERF gpu_3do packing_live_cache packed=",
-                             live_packed," legacy=",live_legacy,
-                             " vertex_kib=",
-                             (live_packed_vertices*
-                                  sizeof(gpu_3do_packed_vertex)+
-                              live_legacy_vertices*
-                                  sizeof(gpu_3do_vertex))/1024U,
-                             " vertex_kib_saved=",
-                             (live_packed_vertices*
-                                 (sizeof(gpu_3do_vertex)-
-                                  sizeof(gpu_3do_packed_vertex)))/1024U,
-                             " NOTE=current_GPU_mesh_cache_only_excludes_index_buffers");
+                    auto const vertex_bytes=
+                        live_compact_vertices*sizeof(gpu_3do_compact_vertex)+
+                        live_packed_vertices*sizeof(gpu_3do_packed_vertex)+
+                        live_legacy_vertices*sizeof(gpu_3do_vertex);
+                    auto const vertex_bytes_saved=
+                        live_compact_vertices*(sizeof(gpu_3do_vertex)-
+                                               sizeof(gpu_3do_compact_vertex))+
+                        live_packed_vertices*(sizeof(gpu_3do_vertex)-
+                                              sizeof(gpu_3do_packed_vertex));
+                    LOG_INFO("PERF gpu_3do packing_live_cache compact40=",
+                             live_compact," packed52=",live_packed,
+                             " legacy80=",live_legacy,
+                             " vertex_kib=",vertex_bytes/1024U,
+                             " vertex_kib_saved=",vertex_bytes_saved/1024U);
+                    LOG_INFO("PERF gpu_3do compact40_rejections base52=",
+                             compact_base_reject," half_uv=",compact_uv_reject,
+                             " half_light=",compact_light_reject,
+                             " half_anchor=",compact_anchor_reject,
+                             " NOTE=current_cache_only_rejections_overlap");
                 }
                 LOG_INFO("PERF gpu_3do CPU_us_avg=",profile_window.gpu_preview_cpu_us/frames,
                          " draws_avg=",profile_window.gpu_draw_calls/frames,
@@ -6006,7 +6063,7 @@ namespace jkgm {
                     auto it=gpu_3do_gl_cache.find(inst.id);
                     if(it==gpu_3do_gl_cache.end()) {
                         auto ptr=std::make_unique<gpu_3do_gl_mesh>(
-                            (the_config->gpu_3do_vertex_format!=0),
+                            the_config->gpu_3do_vertex_format,
                             the_config->experimental_3do_index_u16,
                             *inst.geometry,
                             the_config->profile_renderer
@@ -7176,7 +7233,7 @@ namespace jkgm {
                         }
                         mesh=gpu_3do_gl_cache.emplace(item.sprite_id,
                             std::make_unique<gpu_3do_gl_mesh>(
-                            (the_config->gpu_3do_vertex_format!=0),
+                            the_config->gpu_3do_vertex_format,
                             the_config->experimental_3do_index_u16,
                                 *item.sprite_geometry,
                             the_config->profile_renderer
@@ -8305,7 +8362,7 @@ namespace jkgm {
                 if(it==gpu_3do_gl_cache.end()) {
                     it=gpu_3do_gl_cache.emplace(instance.id,
                         std::make_unique<gpu_3do_gl_mesh>(
-                            (the_config->gpu_3do_vertex_format!=0),
+                            the_config->gpu_3do_vertex_format,
                             the_config->experimental_3do_index_u16,*instance.geometry,
                             the_config->profile_renderer
                                 ? &packed_3do_upload_profile : nullptr)).first;
@@ -8593,7 +8650,7 @@ namespace jkgm {
                     if(it==gpu_3do_gl_cache.end())
                         it=gpu_3do_gl_cache.emplace(inst->id,
                             std::make_unique<gpu_3do_gl_mesh>(
-                            (the_config->gpu_3do_vertex_format!=0),
+                            the_config->gpu_3do_vertex_format,
                             the_config->experimental_3do_index_u16,
                                 *inst->geometry,
                             the_config->profile_renderer
@@ -10019,7 +10076,7 @@ namespace jkgm {
                             if(mesh==gpu_3do_gl_cache.end())
                                 mesh=gpu_3do_gl_cache.emplace(inst.id,
                                     std::make_unique<gpu_3do_gl_mesh>(
-                            (the_config->gpu_3do_vertex_format!=0),
+                            the_config->gpu_3do_vertex_format,
                             the_config->experimental_3do_index_u16,
                                         *inst.geometry,
                             the_config->profile_renderer
@@ -10100,7 +10157,7 @@ namespace jkgm {
                     if(it==gpu_3do_gl_cache.end())
                         it=gpu_3do_gl_cache.emplace(instance.id,
                             std::make_unique<gpu_3do_gl_mesh>(
-                            (the_config->gpu_3do_vertex_format!=0),
+                            the_config->gpu_3do_vertex_format,
                             the_config->experimental_3do_index_u16,*instance.geometry,
                             the_config->profile_renderer
                                 ? &packed_3do_upload_profile : nullptr)).first;
@@ -10760,7 +10817,7 @@ namespace jkgm {
                     if(it==gpu_3do_gl_cache.end())
                         it=gpu_3do_gl_cache.emplace(inst.id,
                             std::make_unique<gpu_3do_gl_mesh>(
-                            (the_config->gpu_3do_vertex_format!=0),
+                            the_config->gpu_3do_vertex_format,
                             the_config->experimental_3do_index_u16,*inst.geometry,
                             the_config->profile_renderer
                                 ? &packed_3do_upload_profile : nullptr)).first;
@@ -14124,7 +14181,7 @@ namespace jkgm {
                     if(gpu_3do_gl_cache.size()>8192U)return;
                     glmesh=gpu_3do_gl_cache.emplace(inst.id,
                         std::make_unique<gpu_3do_gl_mesh>(
-                            (the_config->gpu_3do_vertex_format!=0),
+                            the_config->gpu_3do_vertex_format,
                             the_config->experimental_3do_index_u16,
                             *inst.geometry,
                             the_config->profile_renderer
@@ -14761,9 +14818,11 @@ namespace jkgm {
                             else ++s.expired;
                             auto const &mesh=*it->second;
                             s.estimated_bytes+=mesh.vertex_count*
-                                (mesh.packed_vertex_format
-                                    ?sizeof(gpu_3do_packed_vertex)
-                                    :sizeof(gpu_3do_vertex))+
+                                (mesh.vertex_format==2
+                                    ?sizeof(gpu_3do_compact_vertex)
+                                    :mesh.vertex_format==1
+                                        ?sizeof(gpu_3do_packed_vertex)
+                                        :sizeof(gpu_3do_vertex))+
                                 uint64_t(mesh.num_indices)*mesh.index_stride;
                             gpu_gl_recent_swept_ids[it->first]=
                                 gpu_3do_present_serial;
