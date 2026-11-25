@@ -79,6 +79,14 @@ void main() {
             surface_uv_offset=vec2(d0.w,d1.w);
         }
     }
+    // Sky apertures are not staged as regular lit world surfaces. Mode 2
+    // must not accidentally borrow the live tint/CMP from sector index 0.
+    // Match the neutral un-staged defaults of legacy and mode 1.
+    if(world_surface_descriptor_mode==2 && sky_mode!=0) {
+        surface_tint=vec3(0.0);
+        surface_cmp=vec3(1.0);
+        surface_uv_offset=vec2(0.0);
+    }
     material_uv=native_uv+surface_uv_offset;
     // Gamma-correct per-vertex JK lighting must interpolate before texels.
     // RGB attribute will also support future MotS colored world lighting.
