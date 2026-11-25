@@ -1588,7 +1588,7 @@ namespace jkgm {
                      " audit=",profile_window.gpu_instancing_audit_us/frames,
                      " schedule=",profile_window.gpu_instancing_schedule_us/frames,
                      " reorder=",profile_window.gpu_instancing_reorder_us/frames,
-                     " NOTE=CPU_us_per_frame;audit_sampled_every_30_frames");
+                     " NOTE=CPU_us_per_frame;audit_opt_in_sampled_every_30_frames");
             LOG_INFO("PERF gpu_3do_instancing enabled=",
                       the_config->enable_gpu_3do_instancing?1:0,
                       " calls_avg=",
@@ -5840,6 +5840,7 @@ namespace jkgm {
             // A sampled feasibility audit and actual opt-in opaque batching
             // share the same CloneModel-safe identity and rejection rules.
             bool const sample_instancing=gpu_profiling && prepare_both &&
+                the_config->profile_gpu_3do_instancing_audit &&
                 gpu_3do_present_serial%30U==0U;
             bool const submit_instancing=
                 the_config->enable_gpu_3do_instancing && prepare_both &&
@@ -5851,6 +5852,12 @@ namespace jkgm {
                     std::vector<gpu_3do_instancing_audit_record> records;
                 records.clear();
                 records.reserve(draws.size());
+                // These fields depend on the instance, not its material
+                // range. Opaque collection keeps each model contiguous.
+                // Cache only the previous instance, never across frames.
+                gpu_3do_instance const *state_instance=nullptr;
+                std::array<uint32_t,11> instance_state{};
+                bool valid_state=false;
                 for(auto const &draw:draws) {
                     auto const &inst=*draw.instance;
                     auto const &material=*draw.texture;
@@ -5903,10 +5910,18 @@ namespace jkgm {
                     record.material=reinterpret_cast<uintptr_t>(draw.texture);
                     record.instance=reinterpret_cast<uintptr_t>(draw.instance);
                     record.policy=draw.policy;
-                    bool const valid_state=gpu_3do_instancing_capture_state(
-                        inst,draw.context->reversed_winding,record.state);
-                    record.rejection_mask=gpu_3do_instancing_rejection_mask(
-                        inst,*draw.group,draw.policy,material_rejections,valid_state);
+                    if(state_instance!=draw.instance) {
+                        state_instance=draw.instance;
+                        instance_state={};
+                        valid_state=gpu_3do_instancing_capture_state(
+                            inst,draw.context->reversed_winding,instance_state);
+                    }
+                    record.state=instance_state;
+                    // The scheduler uses the same conservative predicate;
+                    // only the diagnostic audit needs every rejection bit.
+                    if(sample_instancing)
+                        record.rejection_mask=gpu_3do_instancing_rejection_mask(
+                            inst,*draw.group,draw.policy,material_rejections,valid_state);
                     record.state_eligible=
                         gpu_3do_instancing_conservative_candidate(
                             inst,*draw.group,draw.policy,view_dependent) &&

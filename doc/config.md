@@ -112,6 +112,7 @@ These additional options are also accepted by the configuration parser.
 | `restore_cmp_lights` | Restore indexed fullbright MAT pixels on compatible GPU-cached rendering paths. | `false` |
 | `enable_sector_crossing_lighting` | Apply local sector light, colormap and tint transitions to GPU 3DOs. | `false` |
 | `experimental_sector_crossing_vertex` | Select sector lighting per vertex rather than per fragment; requires sector crossing lighting. | `false` |
+| `profile_gpu_3do_instancing_audit` | Sample expensive 3DO instancing feasibility and rejection diagnostics every 30 frames when `profile_renderer` is enabled. Leave off for ordinary performance benchmarks; actual instanced draw and CPU timing counters remain available. | `false` |
 | `profile_renderer_verbose` | Enable detailed renderer diagnostics in addition to the regular performance counters. | `false` |
 
 HDR-aware bloom uses exposed linear scene luminance and composites before tone mapping.

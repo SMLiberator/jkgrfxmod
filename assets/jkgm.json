@@ -36,6 +36,7 @@
     "enable_posterized_lighting": false,
     "enable_vsync": false,
     "profile_renderer": false,
+    "profile_gpu_3do_instancing_audit": false,
     "profile_audio": false,
     "use_gpu_cache": true,
     "gpu_3do_vertex_format": 1,
