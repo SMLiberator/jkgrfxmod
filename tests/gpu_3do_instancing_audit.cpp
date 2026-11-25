@@ -264,6 +264,25 @@ int main() {
     schedule=schedule_gpu_3do_instancing(rows);
     for(auto const &item:schedule)assert(item.batch_id==0U);
 
+    // Duplicate owner records stay separate, while distinct owners batch
+    // in first-appearance order even when their records are interleaved.
+    rows={record(a,shared->groups[0],0x1000U,0x11U),
+          record(a,shared->groups[0],0x1000U,0x11U),
+          record(b,shared->groups[0],0x1000U,0x22U),
+          record(a,shared->groups[0],0x1000U,0x11U),
+          record(b,shared->groups[0],0x1000U,0x33U),
+          record(b,shared->groups[0],0x1000U,0x22U)};
+    schedule=schedule_gpu_3do_instancing(rows);
+    assert(schedule.size()==rows.size());
+    assert(schedule[0].source_index==0U && schedule[0].batch_id!=0U);
+    assert(schedule[1].source_index==2U &&
+           schedule[1].batch_id==schedule[0].batch_id);
+    assert(schedule[2].source_index==4U &&
+           schedule[2].batch_id==schedule[0].batch_id);
+    assert(schedule[3].source_index==1U && schedule[3].batch_id==0U);
+    assert(schedule[4].source_index==3U && schedule[4].batch_id==0U);
+    assert(schedule[5].source_index==5U && schedule[5].batch_id==0U);
+
     // Window aggregation must add histograms slot-by-slot, including
     // both "all ranges" and the more relevant "repeat members" set.
     profile_sample frame{},window{};
