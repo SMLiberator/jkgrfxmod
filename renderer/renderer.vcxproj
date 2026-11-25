@@ -138,6 +138,7 @@
     <ClInclude Include="gpu_3do_modelview.hpp" />
     <ClInclude Include="gpu_3do_preview.hpp" />
     <ClInclude Include="gpu_3do_index_coalescing.hpp" />
+    <ClInclude Include="gpu_3do_index_packing.hpp" />
     <ClInclude Include="gpu_3do_instancing_audit.hpp" />
     <ClInclude Include="gpu_3do_parallel_visibility.hpp" />
     <ClInclude Include="reflection_capture_parallel_visibility.hpp" />
