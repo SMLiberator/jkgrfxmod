@@ -257,10 +257,10 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("gpu_3do_vertex_format")) {
             auto const &v=j.at("gpu_3do_vertex_format");
             if(!v.is_number_integer())
-                throw std::runtime_error("gpu_3do_vertex_format must be 0, 1 or 2");
+                throw std::runtime_error("gpu_3do_vertex_format must be 0, 1, 2 or 3");
             int const format=v.get<int>();
-            if(format<0 || format>2)
-                throw std::runtime_error("gpu_3do_vertex_format must be 0, 1 or 2");
+            if(format<0 || format>3)
+                throw std::runtime_error("gpu_3do_vertex_format must be 0, 1, 2 or 3");
             rv->gpu_3do_vertex_format=format;
         } else if(j.contains("experimental_packed_3do_vertices")) {
             // Backward-compatible boolean alias for the former experimental

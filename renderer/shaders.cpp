@@ -834,6 +834,7 @@ jkgm::shaders::gpu_3do_preview_shader::gpu_3do_preview_shader(
     , procedural_sprite_light(gl::get_uniform_location(the_program,"procedural_sprite_light"))
     , projection(gl::get_uniform_location(the_program,"projection"))
     , packed_vertex_format(gl::get_uniform_location(the_program,"packed_vertex_format"))
+    , face_descriptors(gl::get_uniform_location(the_program,"gpu_3do_face_descriptors"))
     , albedo_sampler(gl::get_uniform_location(the_program,"albedo_map"))
     , emissive_sampler(gl::get_uniform_location(the_program,"emissive_map"))
     , uv_scale(gl::get_uniform_location(the_program,"uv_scale"))
@@ -1045,9 +1046,10 @@ void jkgm::shaders::gpu_3do_preview_shader::set_view_matrix(
     gl::set_uniform_vector(view_up,u);
     gl::set_uniform_vector(view_origin,t);
 }
-void jkgm::shaders::gpu_3do_preview_shader::set_packed_vertex_format(bool enabled)
+void jkgm::shaders::gpu_3do_preview_shader::set_packed_vertex_format(int format)
 {
-    gl::set_uniform_integer(packed_vertex_format,enabled?1:0);
+    gl::set_uniform_integer(packed_vertex_format,format);
+    gl::set_uniform_integer(face_descriptors,texture_units::forward_face_descriptors);
 }
 void jkgm::shaders::gpu_3do_preview_shader::set_procedural_sprite(
     bool enabled,point<4,float> uv,float extra_light,float light_mode)

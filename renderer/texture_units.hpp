@@ -11,6 +11,7 @@ constexpr int forward_decal_occlusion=11;
 constexpr int forward_spotlight_shadow=10;
 constexpr int forward_sun_near=16,forward_sun_far=17,forward_sun_dynamic=18;
 constexpr int forward_sector_buffer=19;
+constexpr int forward_face_descriptors=28; // 3DO vertex-stage samplerBuffer
 constexpr int opaque_sky_aperture=16;
 constexpr int forward_next_extended_unit=20; // never use sector's samplerBuffer
 constexpr int forward_next_extended_required_units=21; // GL fragment unit count
@@ -36,6 +37,7 @@ constexpr binding gpu_3do_preview[]={
     {"clearcoat_surface_map",26,sampler_kind::tex2d},
     {"clearcoat_normal_map",27,sampler_kind::tex2d},
     {"sector_crossing_planes",19,sampler_kind::buffer},
+    {"gpu_3do_face_descriptors",28,sampler_kind::buffer},
     {"translucent_shadow_image",10,sampler_kind::shadow},
     {"translucent_spotlight_image_0",12,sampler_kind::tex2d},
     {"translucent_spotlight_image_1",13,sampler_kind::tex2d},

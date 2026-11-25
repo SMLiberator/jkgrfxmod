@@ -12,6 +12,7 @@
 #include "gpu_3do_packed_vertex.hpp"
 #include "gpu_3do_index_packing.hpp"
 #include "gpu_3do_compact_vertex.hpp"
+#include "gpu_3do_descriptor_vertex.hpp"
 #include "gpu_3do_auto_lod.hpp"
 #include "planar_reflection_things.hpp"
 #include "planar_reflection_workset.hpp"
@@ -417,10 +418,26 @@ namespace jkgm {
         gl::vertex_array vao;
         gl::buffer vertices;
         gl::buffer indices;
+        // Descriptor mode uses separate GPU-only RGB8 and RGBA32F streams.
+        std::optional<gl::buffer> descriptor_colors;
+        std::optional<gl::buffer> descriptor_buffer;
+        std::optional<gl::texture> descriptor_texture;
+        uint64_t descriptor_count=0;
+        uint32_t descriptor_rejection_reason=0;
+        void bind_face_descriptors() const {
+            if(vertex_format!=3 || !descriptor_texture)return;
+            gl::set_active_texture_unit_raw(texture_units::forward_face_descriptors);
+            gl::bind_texture_raw(GL_TEXTURE_BUFFER,descriptor_texture->value());
+            gl::set_active_texture_unit_raw(0);
+        }
+        uint64_t descriptor_bytes() const {
+            return vertex_format==3
+                ?vertex_count*sizeof(uint32_t)+descriptor_count*32U:0U;
+        }
         unsigned num_indices = 0;
         uint64_t vertex_count = 0;
         bool packed_vertex_format = false;
-        int vertex_format = 0; // 0=80B, 1=52B, 2=40B
+        int vertex_format = 0; // 0=80B, 1=52B, 2=40B, 3=24B+RGB8+face descriptor
         uint32_t compact_rejection_reason = 0;
         bool packed_index_format = false;
         gl::index_type index_format = gl::index_type::uint32;
@@ -451,12 +468,27 @@ namespace jkgm {
             }
             std::vector<gpu_3do_packed_vertex> packed_vertices;
             std::vector<gpu_3do_compact_vertex> compact_vertices;
+            gpu_3do_face_descriptor_pack descriptor_pack;
+            if(requested_vertex_format>=3 && !source.vertices.empty()) {
+                GLint max_texels=0,combined_units=0,vertex_units=0;
+                glGetIntegerv(GL_MAX_TEXTURE_BUFFER_SIZE,&max_texels);
+                glGetIntegerv(GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS,&combined_units);
+                glGetIntegerv(GL_MAX_VERTEX_TEXTURE_IMAGE_UNITS,&vertex_units);
+                if(vertex_units>0 &&
+                   combined_units>texture_units::forward_face_descriptors &&
+                   gpu_3do_pack_descriptor_vertices(source.vertices,
+                       descriptor_pack,&descriptor_rejection_reason) &&
+                   descriptor_pack.count()*2U<=size_t(std::max(max_texels,0)))
+                    vertex_format=3;
+                else if(descriptor_rejection_reason==0U)
+                    descriptor_rejection_reason=gpu_3do_descriptor_capacity;
+            }
             uint32_t rejection_reasons=0;
-            if(requested_vertex_format>=2 &&
+            if(vertex_format!=3 && requested_vertex_format>=2 &&
                gpu_3do_pack_compact_vertices(source.vertices,compact_vertices,
                                               &compact_rejection_reason))
                 vertex_format=2;
-            if(vertex_format!=2 && requested_vertex_format>=1 &&
+            if(vertex_format!=3 && vertex_format!=2 && requested_vertex_format>=1 &&
                gpu_3do_pack_vertices(source.vertices,packed_vertices,
                    pack_profile?&rejection_reasons:nullptr))
                 vertex_format=1;
@@ -466,7 +498,51 @@ namespace jkgm {
                                      source.vertices.size(),rejection_reasons);
             gl::bind_vertex_array(vao);
             gl::bind_buffer(gl::buffer_bind_target::array,vertices);
-            if(vertex_format==2) {
+            if(vertex_format==3) {
+                descriptor_count=descriptor_pack.count();
+                gl::buffer_data(gl::buffer_bind_target::array,
+                    make_span(descriptor_pack.vertices).as_const_bytes(),
+                    gl::buffer_usage::static_draw);
+                constexpr auto stride=sizeof(gpu_3do_descriptor_vertex);
+                gl::enable_vertex_attrib_array(0U);
+                gl::vertex_attrib_pointer(0U,3U,gl::vertex_element_type::float32,
+                    false,stride,offsetof(gpu_3do_descriptor_vertex,x));
+                gl::enable_vertex_attrib_array(1U);
+                gl::vertex_attrib_pointer(1U,2U,gl::vertex_element_type::float16,
+                    false,stride,offsetof(gpu_3do_descriptor_vertex,u));
+                gl::enable_vertex_attrib_array(3U);
+                gl::vertex_attrib_pointer(3U,1U,gl::vertex_element_type::float16,
+                    false,stride,offsetof(gpu_3do_descriptor_vertex,static_light));
+                gl::enable_vertex_attrib_array(4U);
+                gl::vertex_attrib_pointer(4U,4U,
+                    gl::vertex_element_type::uint_2_10_10_10_rev,
+                    true,stride,offsetof(gpu_3do_descriptor_vertex,light_normal));
+                gl::enable_vertex_attrib_array(9U);
+                gl::vertex_attrib_pointer(9U,1U,gl::vertex_element_type::uint16,
+                    false,stride,offsetof(gpu_3do_descriptor_vertex,descriptor_index));
+                descriptor_colors.emplace();
+                gl::bind_buffer(gl::buffer_bind_target::array,*descriptor_colors);
+                gl::buffer_data(gl::buffer_bind_target::array,
+                    make_span(descriptor_pack.colors).as_const_bytes(),
+                    gl::buffer_usage::static_draw);
+                gl::enable_vertex_attrib_array(8U);
+                gl::vertex_attrib_pointer(8U,4U,gl::vertex_element_type::uint8,
+                    true,sizeof(uint32_t),0);
+                descriptor_buffer.emplace();
+                glBindBuffer(GL_TEXTURE_BUFFER,descriptor_buffer->value());
+                glBufferData(GL_TEXTURE_BUFFER,
+                    static_cast<GLsizeiptr>(descriptor_pack.texels.size()*
+                        sizeof(descriptor_pack.texels[0])),
+                    descriptor_pack.texels.data(),GL_STATIC_DRAW);
+                descriptor_texture.emplace();
+                gl::set_active_texture_unit_raw(texture_units::forward_face_descriptors);
+                gl::bind_texture_raw(GL_TEXTURE_BUFFER,descriptor_texture->value());
+                glTexBuffer(GL_TEXTURE_BUFFER,GL_RGBA32F,
+                            descriptor_buffer->value());
+                gl::bind_texture_raw(GL_TEXTURE_BUFFER,0U);
+                gl::set_active_texture_unit_raw(0);
+                glBindBuffer(GL_TEXTURE_BUFFER,0U);
+            } else if(vertex_format==2) {
                 gl::buffer_data(gl::buffer_bind_target::array,
                     make_span(compact_vertices).as_const_bytes(),
                     gl::buffer_usage::static_draw);
@@ -1835,14 +1911,21 @@ namespace jkgm {
                              " rgb_nonfinite=",why[gpu_3do_pack_rgb_nonfinite],
                              " rgb_out_of_range=",why[gpu_3do_pack_rgb_out_of_range],
                              " NOTE=reason_buckets_overlap_one_mesh_can_have_multiple_reasons");
-                    uint64_t live_compact=0,live_packed=0,live_legacy=0;
+                    uint64_t live_descriptor=0,live_compact=0,live_packed=0,live_legacy=0;
+                    uint64_t descriptor_vertices=0,descriptor_faces=0;
+                    uint64_t descriptor_aux_bytes=0,descriptor_fallbacks=0;
                     uint64_t live_compact_vertices=0;
                     uint64_t live_packed_vertices=0,live_legacy_vertices=0;
                     uint64_t compact_base_reject=0,compact_uv_reject=0;
                     uint64_t compact_light_reject=0,compact_anchor_reject=0;
                     for(auto const &entry:gpu_3do_gl_cache) {
                         auto const &mesh=*entry.second;
-                        if(mesh.vertex_format==2) {
+                        if(mesh.vertex_format==3) {
+                            ++live_descriptor;
+                            descriptor_vertices+=mesh.vertex_count;
+                            descriptor_faces+=mesh.descriptor_count;
+                            descriptor_aux_bytes+=mesh.descriptor_bytes();
+                        } else if(mesh.vertex_format==2) {
                             ++live_compact;
                             live_compact_vertices+=mesh.vertex_count;
                         } else if(mesh.vertex_format==1) {
@@ -1852,6 +1935,8 @@ namespace jkgm {
                             ++live_legacy;
                             live_legacy_vertices+=mesh.vertex_count;
                         }
+                        if(mesh.descriptor_rejection_reason)
+                            ++descriptor_fallbacks;
                         uint32_t const why=mesh.compact_rejection_reason;
                         if(why&gpu_3do_compact_base)++compact_base_reject;
                         if(why&gpu_3do_compact_uv)++compact_uv_reject;
@@ -1873,14 +1958,25 @@ namespace jkgm {
                         " kib=",index_bytes/1024U,
                         " saved_kib=",index_bytes_saved/1024U);
                     auto const vertex_bytes=
+                        descriptor_vertices*sizeof(gpu_3do_descriptor_vertex)+
+                        descriptor_aux_bytes+
                         live_compact_vertices*sizeof(gpu_3do_compact_vertex)+
                         live_packed_vertices*sizeof(gpu_3do_packed_vertex)+
                         live_legacy_vertices*sizeof(gpu_3do_vertex);
                     auto const vertex_bytes_saved=
-                        live_compact_vertices*(sizeof(gpu_3do_vertex)-
+                        int64_t(descriptor_vertices)*
+                            int64_t(sizeof(gpu_3do_vertex)-sizeof(gpu_3do_descriptor_vertex))-
+                        int64_t(descriptor_aux_bytes)+
+                        int64_t(live_compact_vertices*(sizeof(gpu_3do_vertex)-
                                                sizeof(gpu_3do_compact_vertex))+
                         live_packed_vertices*(sizeof(gpu_3do_vertex)-
-                                              sizeof(gpu_3do_packed_vertex));
+                                              sizeof(gpu_3do_packed_vertex)));
+                    LOG_INFO("PERF gpu_3do descriptor24 live=",live_descriptor,
+                             " vertices=",descriptor_vertices,
+                             " unique_face_descriptors=",descriptor_faces,
+                             " auxiliary_kib=",descriptor_aux_bytes/1024U,
+                             " fallback_meshes=",descriptor_fallbacks,
+                             " NOTE=24B_primary_plus_4B_RGB8_and_32B_per_face_descriptor");
                     LOG_INFO("PERF gpu_3do packing_live_cache compact40=",
                              live_compact," packed52=",live_packed,
                              " legacy80=",live_legacy,
@@ -6106,7 +6202,8 @@ namespace jkgm {
                                          make_point(m[6],m[7],m[8],0.0f),
                                          make_point(m[9],m[10],m[11],1.0f));
                     gl::bind_vertex_array(gpu_mesh.vao);
-                    prog.set_packed_vertex_format(gpu_mesh.packed_vertex_format);
+                    prog.set_packed_vertex_format(gpu_mesh.vertex_format);
+                    gpu_mesh.bind_face_descriptors();
                     auto const &quad=*inst.geometry;
                     prog.set_procedural_sprite(quad.procedural_sprite,
                         make_point(quad.procedural_sprite_uv[0],
@@ -14213,7 +14310,8 @@ namespace jkgm {
                                 ? &packed_3do_upload_profile : nullptr)).first;
                 }
                 shader.set_modelview(modelview,true,
-                    glmesh->second->packed_vertex_format);
+                    glmesh->second->vertex_format);
+                glmesh->second->bind_face_descriptors();
                 shader.set_thing_fade(inst.thing_opacity,
                     inst.thing_dither && inst.thing_opacity<0.999f?2:0);
                 shader.set_model_lighting(inst.ambient,inst.effective_light_mode,
@@ -14295,7 +14393,8 @@ namespace jkgm {
                     auto const it=gpu_3do_gl_cache.find(inst.id);
                     if(it==gpu_3do_gl_cache.end())continue;
                     shader.set_modelview(draw.modelview,true,
-                        it->second->packed_vertex_format);
+                        it->second->vertex_format);
+                    it->second->bind_face_descriptors();
                     shader.set_thing_fade(inst.thing_opacity,1);
                     shader.set_model_lighting(inst.ambient,inst.effective_light_mode,
                         make_point(inst.colormap_tint[0],inst.colormap_tint[1],
@@ -14343,7 +14442,8 @@ namespace jkgm {
                     auto const it=gpu_3do_gl_cache.find(batch.instance->id);
                     if(it==gpu_3do_gl_cache.end())continue;
                     shader.set_modelview(batch.modelview,true,
-                        it->second->packed_vertex_format);
+                        it->second->vertex_format);
+                    it->second->bind_face_descriptors();
                     auto const &inst=*batch.instance;
                     shader.set_thing_fade(inst.thing_opacity,0);
                     shader.set_model_lighting(
@@ -14843,12 +14943,15 @@ namespace jkgm {
                             else ++s.expired;
                             auto const &mesh=*it->second;
                             s.estimated_bytes+=mesh.vertex_count*
-                                (mesh.vertex_format==2
+                                (mesh.vertex_format==3
+                                    ?sizeof(gpu_3do_descriptor_vertex)
+                                    :mesh.vertex_format==2
                                     ?sizeof(gpu_3do_compact_vertex)
                                     :mesh.vertex_format==1
                                         ?sizeof(gpu_3do_packed_vertex)
                                         :sizeof(gpu_3do_vertex))+
-                                uint64_t(mesh.num_indices)*mesh.index_stride;
+                                uint64_t(mesh.num_indices)*mesh.index_stride+
+                                mesh.descriptor_bytes();
                             gpu_gl_recent_swept_ids[it->first]=
                                 gpu_3do_present_serial;
                         }

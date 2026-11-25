@@ -10,11 +10,13 @@ layout(location=5) in vec3 native_sector_tint; // world tint / model face anchor
 layout(location=6) in vec2 native_uv_offset; // world UV offset / model face extra
 layout(location=7) in vec3 native_cmp_or_mode; // world CMP / model light mode
 layout(location=8) in vec3 native_vertex_rgb; // 3DO only
+layout(location=9) in float local_face_descriptor;
 uniform vec4 view_right,view_forward,view_up,view_origin;
 uniform vec4 projection;
 uniform int is_model;
 uniform int capture_sky_mode; // world aperture at far depth
 uniform int packed_vertex_format;
+uniform samplerBuffer gpu_3do_face_descriptors;
 uniform vec4 clip_plane_view;
 uniform vec4 jk_color_filter,jk_color_tint,jk_color_add_fade;
 uniform float jk_light_limit;
@@ -58,12 +60,20 @@ void main() {
     } else {
         // Model attributes 3,6,7,8 match gpu_3do_preview.vert. Preserve
         // its authored light-mode/ambient floor, without expensive point lights.
-        float authored_mode=packed_vertex_format!=0
-            ?round(model_face_normal_mode.w*3.0):native_cmp_or_mode.x;
+        vec4 face0=vec4(0.0),face1=vec4(0.0);
+        if(packed_vertex_format==3) {
+            int face_id=int(local_face_descriptor+0.5);
+            face0=texelFetch(gpu_3do_face_descriptors,2*face_id);
+            face1=texelFetch(gpu_3do_face_descriptors,2*face_id+1);
+        }
+        float authored_mode=packed_vertex_format==3?face1.w:
+            (packed_vertex_format!=0
+                ?round(model_face_normal_mode.w*3.0):native_cmp_or_mode.x);
         float mode=min(authored_mode,model_effective_light_mode);
         if(mode>3.5)mode=1.0;
         float raw=clamp((mode>=2.5 ? native_light.x:0.0)+
-                        native_uv_offset.x,0.0,jk_light_limit);
+                        (packed_vertex_format==3?face0.w:native_uv_offset.x),
+                        0.0,jk_light_limit);
         float bright=mode<0.5 ? 1.0:max(raw,model_ambient);
         if(jk_light_limit<=1.0)bright=min(bright,1.0);
         vs_baked_light=jk_capture_color(

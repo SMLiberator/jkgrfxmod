@@ -11,7 +11,9 @@ layout(location=5) in vec3 local_face_anchor;
 layout(location=6) in float local_extra_light;
 layout(location=7) in float local_light_mode;
 layout(location=8) in vec3 local_vertex_rgb;
+layout(location=9) in float local_face_descriptor; // format 3 palette index
 uniform int packed_vertex_format;
+uniform samplerBuffer gpu_3do_face_descriptors; // two RGBA32F texels per descriptor
 uniform float ambient_light;
 uniform float jk_light_limit; // authored cap; 1 restores vanilla saturation
 uniform float effective_light_mode; // captured per Thing
@@ -155,6 +157,15 @@ void main() {
     vec3 sprite_vertex_rgb=local_vertex_rgb;
     float sprite_vertex_extra=local_extra_light;
     float sprite_vertex_static=local_static_light;
+    if(packed_vertex_format==3) {
+        int face_id=int(local_face_descriptor+0.5);
+        vec4 d0=texelFetch(gpu_3do_face_descriptors,face_id*2);
+        vec4 d1=texelFetch(gpu_3do_face_descriptors,face_id*2+1);
+        local_normal=d0.xyz;
+        sprite_vertex_anchor=d1.xyz;
+        sprite_vertex_extra=d0.w;
+        decoded_light_mode=d1.w;
+    }
     if(procedural_sprite!=0) {
         int corner=gl_VertexID & 3;
         bool right=(corner==1 || corner==2);
