@@ -147,7 +147,8 @@ inline gpu_3do_instancing_audit_stats audit_gpu_3do_instancing(
     std::vector<gpu_3do_instancing_audit_record> const &records)
 {
     using geometry_key=std::tuple<uint64_t,uintptr_t,uintptr_t,uintptr_t>;
-    using compatible_key=std::tuple<geometry_key,std::array<uint32_t,11>>;
+    using compatible_key=std::tuple<geometry_key,gpu_3do_alpha_mode,
+                                    std::array<uint32_t,11>>;
     std::map<geometry_key,std::set<uintptr_t>> geometric;
     std::map<geometry_key,std::set<uintptr_t>> eligible;
     std::map<compatible_key,std::set<uintptr_t>> compatible;
@@ -169,7 +170,7 @@ inline gpu_3do_instancing_audit_stats audit_gpu_3do_instancing(
         if(r.state_eligible) {
             ++result.conservative_draws;
             eligible[identity].insert(r.instance);
-            compatible[{identity,r.state}].insert(r.instance);
+            compatible[{identity,r.policy,r.state}].insert(r.instance);
         }
     }
     // Only geometry shared by distinct Things can benefit from cross-Thing
@@ -200,8 +201,8 @@ inline gpu_3do_instancing_audit_stats audit_gpu_3do_instancing(
             ++result.compatible_groups;
             result.compatible_repeated_draws+=entry.second.size()-1U;
         }
-    // Identical eligible geometry that differs in ambient/tints/winding
-    // cannot share the current strict per-draw state.
+    // Identical eligible geometry with different policy, ambient, tint or
+    // winding cannot share the current strict per-draw state.
     result.state_split_extras=
         result.eligible_repeat_extras-result.compatible_repeated_draws;
     return result;
@@ -217,7 +218,8 @@ schedule_gpu_3do_instancing(
     std::vector<gpu_3do_instancing_audit_record> const &records)
 {
     using geometry_key=std::tuple<uint64_t,uintptr_t,uintptr_t,uintptr_t>;
-    using batch_key=std::tuple<geometry_key,std::array<uint32_t,11>>;
+    using batch_key=std::tuple<geometry_key,gpu_3do_alpha_mode,
+                               std::array<uint32_t,11>>;
     std::map<batch_key,std::vector<size_t>> groups;
     for(size_t i=0;i<records.size();++i) {
         auto const &r=records[i];
@@ -225,7 +227,7 @@ schedule_gpu_3do_instancing(
            !r.mesh_id || !r.geometry || !r.group || !r.material ||
            !r.instance)continue;
         geometry_key const geometry{r.mesh_id,r.geometry,r.group,r.material};
-        batch_key const key{geometry,r.state};
+        batch_key const key{geometry,r.policy,r.state};
         auto &members=groups[key];
         bool repeated_owner=false;
         for(size_t prev:members)
