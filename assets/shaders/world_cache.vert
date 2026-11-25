@@ -23,7 +23,8 @@ uniform vec4 view_right,view_forward,view_up,view_origin;
 uniform vec4 projection; // tan(half horizontal FOV), aspect, inverse far
 uniform int sky_mode; // 0=ordinary world, 1=horizon, 2=ceiling
 uniform int world_surface_descriptor_mode;
-uniform samplerBuffer world_surface_descriptors; // three RGBA32F texels per surface
+uniform samplerBuffer world_surface_descriptors; // mode1: 3, mode2: 2 RGBA32F texels per surface
+uniform samplerBuffer world_sector_descriptors; // mode2: 2 RGBA32F texels per native SithSector
 // Already neutralized native global palette: only COG/player effects remain.
 // The per-face sector tint is applied locally in the same color operation.
 uniform vec4 jk_color_filter,jk_color_tint,jk_color_add_fade;
@@ -58,13 +59,25 @@ void main() {
     vec2 surface_uv_offset=native_uv_offset;
     if(world_surface_descriptor_mode!=0) {
         int id=int(world_surface_id+0.5);
-        vec4 d0=texelFetch(world_surface_descriptors,3*id);
-        vec4 d1=texelFetch(world_surface_descriptors,3*id+1);
-        vec4 d2=texelFetch(world_surface_descriptors,3*id+2);
-        surface_normal=d0.xyz;
-        surface_tint=d1.xyz;
-        surface_cmp=d2.xyz;
-        surface_uv_offset=vec2(d0.w,d1.w);
+        if(world_surface_descriptor_mode==2) {
+            vec4 d0=texelFetch(world_surface_descriptors,2*id);
+            vec4 d1=texelFetch(world_surface_descriptors,2*id+1);
+            int sector_id=int(d1.y+0.5);
+            vec4 sector_tint=texelFetch(world_sector_descriptors,2*sector_id);
+            vec4 sector_cmp=texelFetch(world_sector_descriptors,2*sector_id+1);
+            surface_normal=d0.xyz;
+            surface_tint=sector_tint.xyz;
+            surface_cmp=sector_cmp.xyz;
+            surface_uv_offset=vec2(d0.w,d1.x);
+        } else {
+            vec4 d0=texelFetch(world_surface_descriptors,3*id);
+            vec4 d1=texelFetch(world_surface_descriptors,3*id+1);
+            vec4 d2=texelFetch(world_surface_descriptors,3*id+2);
+            surface_normal=d0.xyz;
+            surface_tint=d1.xyz;
+            surface_cmp=d2.xyz;
+            surface_uv_offset=vec2(d0.w,d1.w);
+        }
     }
     material_uv=native_uv+surface_uv_offset;
     // Gamma-correct per-vertex JK lighting must interpolate before texels.

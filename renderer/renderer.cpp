@@ -11953,10 +11953,12 @@ namespace jkgm {
             // Share sector/CMP resolutions across the primary and reflected
             // cameras for this frame, not across COG simulation frames.
             world_cache_sector_frame_cache sector_frame_cache;
+            cache.staged_sector_indices.clear();
             std::vector<world_cache_draw_candidate> reflection_staged;
             auto stage_candidate=[&](world_cache_draw_candidate const &candidate,
                                       bool main_view)->bool {
                 world_cache_light_sample info{};
+                uint32_t native_sector_owner=0U;
                 char const *failure=nullptr;
                 if(!sample_world_cache_surface_light(
                        safe_read,cache.world.surfaces_addr,cache.mesh,
@@ -11966,7 +11968,7 @@ namespace jkgm {
                        pixel_lighting,global_extra,&cache.frame_sector_tint,
                        &cache.frame_sector_cmp_tint,identity_cmp,&failure,
                        the_config->enable_baked_overbright,
-                       &sector_frame_cache)) {
+                       &sector_frame_cache,&native_sector_owner)) {
                     ++light_fallback;
                     ++light_read_rejected;
                     log_stage_rejection(candidate,"lighting",failure,info);
@@ -11990,11 +11992,25 @@ namespace jkgm {
                     std::fill_n(cache.frame_sector_tint.begin()+first,count,
                         std::array<float,3>{{0.0f,0.0f,0.0f}});
                 }
-                if(cache.descriptors_enabled &&
-                   !stage_world_cache_surface_descriptor(
-                       cache.mesh,cache.cached_surface_lookup,candidate,
-                       cache.frame_sector_tint,cache.frame_sector_cmp_tint,
-                       cache.frame_uv_offset,cache.frame_surface_descriptors)) {
+                if(cache.descriptor_mode==2) {
+                    uint32_t staged_sector=0U;
+                    if(!stage_world_cache_sector_surface_descriptor(
+                           cache.mesh,cache.cached_surface_lookup,candidate,
+                           native_sector_owner,cache.sector_table,cache.sector_count,
+                           cache.frame_sector_tint,cache.frame_sector_cmp_tint,
+                           cache.frame_uv_offset,cache.frame_surface_sector_descriptors,
+                           cache.frame_sector_descriptors,&staged_sector)) {
+                        ++light_fallback;
+                        log_stage_rejection(candidate,"sector_descriptor",
+                                            "surface_sector_stage_invalid",info);
+                        return false;
+                    }
+                    cache.staged_sector_indices.push_back(staged_sector);
+                } else if(cache.descriptor_mode==1 &&
+                          !stage_world_cache_surface_descriptor(
+                              cache.mesh,cache.cached_surface_lookup,candidate,
+                              cache.frame_sector_tint,cache.frame_sector_cmp_tint,
+                              cache.frame_uv_offset,cache.frame_surface_descriptors)) {
                     ++light_fallback;
                     log_stage_rejection(candidate,"surface_descriptor",
                                         "surface_descriptor_stage_invalid",info);
@@ -12258,17 +12274,18 @@ namespace jkgm {
                 gpu_3do_present_serial%120U==0U;
             auto const stream_upload_started=stream_profile
                 ?profile_clock::now():profile_clock::time_point{};
-            std::array<size_t,6> uploaded_bytes{};
-            size_t uploaded_surface_descriptors=0;
+            std::array<size_t,7> uploaded_bytes{};
+            size_t uploaded_surface_descriptors=0,uploaded_sector_descriptors=0;
             size_t uploaded_vertices=0,upload_calls=0,unchanged_buffers=0;
             size_t full_buffers=0,partial_buffers=0;
             auto upload_live=[&](auto const &buffer,auto const &values,
-                                 auto &uploaded,size_t slot) {
+                                 auto &uploaded,size_t slot,
+                                 world_cache_stream_plan const &plan)->size_t {
                 auto const dirty=plan_world_cache_live_upload(
-                    values,uploaded,stream);
+                    values,uploaded,plan);
                 if(dirty.empty()) {
                     ++unchanged_buffers;
-                    return;
+                    return 0U;
                 }
                 gl::bind_buffer(gl::buffer_bind_target::array,buffer);
                 if(dirty.full) {
@@ -12292,57 +12309,48 @@ namespace jkgm {
                 uploaded_vertices+=dirty.uploaded_vertices;
                 uploaded_bytes[slot]=dirty.uploaded_vertices*
                     sizeof(values[0]);
+                return dirty.uploaded_vertices;
             };
             if(!stream_candidates.empty()) {
                 upload_live(cache.lighting,cache.frame_light_rgb,
-                            cache.uploaded_light_rgb,0U);
+                            cache.uploaded_light_rgb,0U,stream);
                 upload_live(cache.light_state,cache.frame_light_state,
-                            cache.uploaded_light_state,1U);
-                if(cache.descriptors_enabled) {
+                            cache.uploaded_light_state,1U,stream);
+                if(cache.descriptor_mode!=0) {
                     auto const desc_stream=plan_world_cache_descriptor_stream(
                         cache.mesh,cache.cached_surface_lookup,stream_candidates);
-                    auto const dirty=plan_world_cache_live_upload(
-                        cache.frame_surface_descriptors,
-                        cache.uploaded_surface_descriptors,desc_stream);
-                    if(dirty.empty()) {
-                        ++unchanged_buffers;
+                    if(cache.descriptor_mode==2) {
+                        uploaded_surface_descriptors=upload_live(
+                            *cache.surface_descriptor_buffer,
+                            cache.frame_surface_sector_descriptors,
+                            cache.uploaded_surface_sector_descriptors,5U,desc_stream);
+                        auto const sector_stream=plan_world_cache_sector_descriptor_stream(
+                            cache.frame_sector_descriptors.size(),
+                            cache.staged_sector_indices);
+                        uploaded_sector_descriptors=upload_live(
+                            *cache.sector_descriptor_buffer,
+                            cache.frame_sector_descriptors,
+                            cache.uploaded_sector_descriptors,6U,sector_stream);
                     } else {
-                        gl::bind_buffer(gl::buffer_bind_target::array,
-                                        *cache.surface_descriptor_buffer);
-                        if(dirty.full) {
-                            gl::buffer_data(gl::buffer_bind_target::array,
-                                make_span(cache.frame_surface_descriptors).as_const_bytes(),
-                                gl::buffer_usage::stream_draw);
-                            ++full_buffers;
-                            ++upload_calls;
-                        } else {
-                            for(auto const &range:dirty.ranges)
-                                gl::buffer_sub_data(gl::buffer_bind_target::array,
-                                    range.first_vertex*sizeof(world_cache_surface_descriptor),
-                                    make_span(cache.frame_surface_descriptors.data()+
-                                              range.first_vertex,range.count).as_const_bytes());
-                            ++partial_buffers;
-                            upload_calls+=dirty.ranges.size();
-                        }
-                        record_world_cache_live_upload(cache.frame_surface_descriptors,
-                            cache.uploaded_surface_descriptors,dirty);
-                        uploaded_surface_descriptors=dirty.uploaded_vertices;
-                        uploaded_bytes[5]=dirty.uploaded_vertices*
-                            sizeof(world_cache_surface_descriptor);
+                        uploaded_surface_descriptors=upload_live(
+                            *cache.surface_descriptor_buffer,
+                            cache.frame_surface_descriptors,
+                            cache.uploaded_surface_descriptors,5U,desc_stream);
                     }
                 } else {
                     upload_live(cache.sector_tint,cache.frame_sector_tint,
-                                cache.uploaded_sector_tint,2U);
+                                cache.uploaded_sector_tint,2U,stream);
                     upload_live(cache.sector_cmp_tint,cache.frame_sector_cmp_tint,
-                                cache.uploaded_sector_cmp_tint,3U);
+                                cache.uploaded_sector_cmp_tint,3U,stream);
                     upload_live(cache.uv_animation,cache.frame_uv_offset,
-                                cache.uploaded_uv_offset,4U);
+                                cache.uploaded_uv_offset,4U,stream);
                 }
             }
             if(stream_profile) {
                 size_t const transferred_bytes=
                     uploaded_bytes[0]+uploaded_bytes[1]+uploaded_bytes[2]+
-                    uploaded_bytes[3]+uploaded_bytes[4]+uploaded_bytes[5];
+                    uploaded_bytes[3]+uploaded_bytes[4]+uploaded_bytes[5]+
+                    uploaded_bytes[6];
                 size_t const old_vertices=stream_candidates.empty()?0U:
                     (stream.partial?stream.touched_vertices:live_vertices);
                 size_t const old_bytes=old_vertices*
@@ -12351,12 +12359,15 @@ namespace jkgm {
                 LOG_INFO("WORLD CACHE vertex streaming mode=",
                     stream_candidates.empty()?"none":
                     upload_calls==0U?"unchanged":
-                    full_buffers==(cache.descriptors_enabled?3U:5U)?"full":
-                    partial_buffers==(cache.descriptors_enabled?3U:5U)?"partial":"mixed",
+                    full_buffers==(cache.descriptor_mode==2?4U:
+                                    cache.descriptor_mode==1?3U:5U)?"full":
+                    partial_buffers==(cache.descriptor_mode==2?4U:
+                                       cache.descriptor_mode==1?3U:5U)?"partial":"mixed",
                     " visible_vertices=",stream.touched_vertices,
                     " uploaded_vertices=",uploaded_vertices,
                     " uploaded_surface_descriptors=",uploaded_surface_descriptors,
-                    " descriptor_mode=",cache.descriptors_enabled?1:0,
+                    " uploaded_sector_descriptors=",uploaded_sector_descriptors,
+                    " descriptor_mode=",cache.descriptor_mode,
                     " total_vertices=",live_vertices,
                     " merged_ranges=",stream.ranges.size(),
                     " gl_calls=",upload_calls,
@@ -12374,7 +12385,8 @@ namespace jkgm {
                     " bytes_sector_tint=",uploaded_bytes[2],
                     " bytes_cmp_tint=",uploaded_bytes[3],
                     " bytes_uv=",uploaded_bytes[4],
-                    " bytes_surface_descriptors=",uploaded_bytes[5]);
+                    " bytes_surface_descriptors=",uploaded_bytes[5],
+                    " bytes_sector_descriptors=",uploaded_bytes[6]);
             }
             std::sort(ordered.begin(),ordered.end(),
                 [](world_cache_draw_candidate const *a,
@@ -12394,7 +12406,7 @@ namespace jkgm {
                 });
             auto &shader=*ogs->world_cache_preview_program;
             shader.use_program();
-            shader.set_surface_descriptors(cache.descriptors_enabled);
+            shader.set_surface_descriptors(cache.descriptor_mode);
             cache.bind_surface_descriptors();
             bind_world_planar_reflection(shader);
             bind_world_shared_reflection(shader);
@@ -12811,7 +12823,7 @@ namespace jkgm {
                 });
             auto &shader=*ogs->world_cache_preview_program;
             shader.use_program();
-            shader.set_surface_descriptors(cache.descriptors_enabled);
+            shader.set_surface_descriptors(cache.descriptor_mode);
             cache.bind_surface_descriptors();
             bind_world_planar_reflection(shader);
             bind_world_shared_reflection(shader);
@@ -14233,7 +14245,7 @@ namespace jkgm {
                 setup.width,setup.height,setup.clip_view,true,true,false,
                 planar_reflection_sky_visibility.empty()?nullptr:
                     &planar_reflection_sky_visibility);
-            shader.set_world_surface_descriptors(cache.descriptors_enabled);
+            shader.set_world_surface_descriptors(cache.descriptor_mode);
             cache.bind_surface_descriptors();
             gl::bind_vertex_array(cache.vao);
             gl::set_front_face_raw(GL_CW); // reflected camera reverses handedness

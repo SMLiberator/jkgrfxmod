@@ -148,8 +148,17 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             j.at("enable_gbuffer_color_packing").get_to(rv->enable_gbuffer_packing);
         }
         if(j.contains("experimental_world_surface_descriptors")) {
-            j.at("experimental_world_surface_descriptors").get_to(
-                rv->experimental_world_surface_descriptors);
+            auto const &value=j.at("experimental_world_surface_descriptors");
+            // Retain compatibility with the old experimental bool option.
+            if(value.is_boolean())
+                rv->experimental_world_surface_descriptors=value.get<bool>()?1:0;
+            else if(value.is_number_integer()) {
+                int const mode=value.get<int>();
+                if(mode<0 || mode>2)
+                    throw std::runtime_error("experimental_world_surface_descriptors must be 0, 1 or 2");
+                rv->experimental_world_surface_descriptors=mode;
+            } else throw std::runtime_error(
+                "experimental_world_surface_descriptors must be 0, 1 or 2");
         }
         if(j.contains("world_cache_fluid_debug_mode")) {
             auto const &mode=j.at("world_cache_fluid_debug_mode");

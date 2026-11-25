@@ -345,6 +345,7 @@ jkgm::shaders::world_cache_preview_shader::world_cache_preview_shader(
     , projection(gl::get_uniform_location(the_program,"projection"))
     , world_surface_descriptor_mode(gl::get_uniform_location(the_program,"world_surface_descriptor_mode"))
     , world_surface_descriptor_sampler(gl::get_uniform_location(the_program,"world_surface_descriptors"))
+    , world_sector_descriptor_sampler(gl::get_uniform_location(the_program,"world_sector_descriptors"))
     , albedo_sampler(gl::get_uniform_location(the_program,"albedo_map"))
     , uv_scale(gl::get_uniform_location(the_program,"uv_scale"))
     , uv_scroll(gl::get_uniform_location(the_program,"uv_scroll"))
@@ -453,11 +454,13 @@ jkgm::shaders::world_cache_preview_shader::world_cache_preview_shader(
             the_program,"light_color["+std::to_string(i)+"]"));
     }
 }
-void jkgm::shaders::world_cache_preview_shader::set_surface_descriptors(bool enabled)
+void jkgm::shaders::world_cache_preview_shader::set_surface_descriptors(int mode)
 {
-    gl::set_uniform_integer(world_surface_descriptor_mode,enabled?1:0);
+    gl::set_uniform_integer(world_surface_descriptor_mode,mode);
     gl::set_uniform_integer(world_surface_descriptor_sampler,
                             texture_units::forward_world_surface_descriptors);
+    gl::set_uniform_integer(world_sector_descriptor_sampler,
+                            texture_units::forward_world_sector_descriptors);
 }
 
 void jkgm::shaders::world_cache_preview_shader::set_view_matrix(

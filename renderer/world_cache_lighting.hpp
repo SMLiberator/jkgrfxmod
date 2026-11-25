@@ -160,7 +160,8 @@ inline bool sample_world_cache_surface_light(
     std::vector<std::array<float,3>> *sector_cmp_tint=nullptr,
     uint32_t identity_cmp=0U,char const **failure_reason=nullptr,
     bool overbright=false,
-    world_cache_sector_frame_cache *sector_cache=nullptr)
+    world_cache_sector_frame_cache *sector_cache=nullptr,
+    uint32_t *owner_sector=nullptr)
 {
     // Optional diagnostic output, no extra reads or allocations on success.
     auto const reject=[&](char const *reason) {
@@ -168,6 +169,7 @@ inline bool sample_world_cache_surface_light(
         return false;
     };
     if(failure_reason)*failure_reason=nullptr;
+    if(owner_sector)*owner_sector=0U;
     if(!read || face.count<3U || face.count%3U!=0U ||
        uint64_t(face.first_index)+face.count>mesh.indices.size())
         return reject("candidate_triangle_range_invalid");
@@ -197,6 +199,7 @@ inline bool sample_world_cache_surface_light(
         if(!read_decal_u32(read,addr+0x08U,sector) ||
            !decal_native_address_ok(sector))return reject("native_sector_pointer_unreadable_or_invalid");
     }
+    if(owner_sector)*owner_sector=sector;
     float sector_floor=0.0f;
     if(sector_tint || sector_cmp_tint) {
         if((sector_tint && sector_tint->size()!=out.size()) ||

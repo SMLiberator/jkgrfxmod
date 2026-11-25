@@ -48,7 +48,7 @@ for prog in programs:
     mapping={n:(int(slot),kind) for n,slot,kind in entries}
     assert len(mapping)==len(entries),("duplicate",prog)
     source=expand(prog+".frag")
-    if prog=="gpu_3do_preview":
+    if prog in ("gpu_3do_preview","world_cache"):
         source+=expand(prog+".vert")
     validate(prog,mapping,source)
 # Ensure new, unregistered sampler declarations are rejected.

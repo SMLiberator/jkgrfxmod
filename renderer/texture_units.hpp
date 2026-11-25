@@ -13,6 +13,7 @@ constexpr int forward_sun_near=16,forward_sun_far=17,forward_sun_dynamic=18;
 constexpr int forward_sector_buffer=19;
 constexpr int forward_face_descriptors=28; // 3DO vertex-stage samplerBuffer
 constexpr int forward_world_surface_descriptors=29; // cached world vertex-stage samplerBuffer
+constexpr int forward_world_sector_descriptors=30; // shared SithSector tint/CMP samplerBuffer
 constexpr int opaque_sky_aperture=16;
 constexpr int forward_next_extended_unit=20; // never use sector's samplerBuffer
 constexpr int forward_next_extended_required_units=21; // GL fragment unit count
@@ -52,6 +53,7 @@ constexpr binding gpu_3do_preview[]={
 // GLSL world_cache.frag (including #include fragments)
 constexpr binding world_cache[]={
     {"world_surface_descriptors",29,sampler_kind::buffer},
+    {"world_sector_descriptors",30,sampler_kind::buffer},
     {"translucent_sun_sky_aperture_map",20,sampler_kind::texture_array},
     {"albedo_map",0,sampler_kind::tex2d},
     {"albedo_map2",6,sampler_kind::tex2d},

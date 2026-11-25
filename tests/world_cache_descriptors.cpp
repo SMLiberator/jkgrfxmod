@@ -71,6 +71,62 @@ int main() {
     a.count=3U;
     assert(!stage_world_cache_surface_descriptor(
         mesh,lookup,a,tint,cmp,uv,desc));
+    // Mode 2 deduplicates live sector state across two independent faces,
+    // and validates the native contiguous SithSector ownership mapping.
+    uint32_t sector=0U;
+    uintptr_t const sector_table=0x200000U;
+    assert(world_cache_sector_index(sector_table+0x98U,
+        sector_table,4U,sector) && sector==1U);
+    assert(world_cache_sector_index(sector_table+0x98U*3U,
+        sector_table,4U,sector) && sector==3U);
+    assert(!world_cache_sector_index(sector_table+0x98U*4U,
+        sector_table,4U,sector));
+    assert(!world_cache_sector_index(sector_table+0x99U,
+        sector_table,4U,sector));
+    assert(!world_cache_sector_index(0U,sector_table,4U,sector));
+    assert(!world_cache_sector_index(sector_table,sector_table,0U,sector));
+    std::vector<world_cache_surface_descriptor> base_desc;
+    assert(build_world_cache_descriptors(mesh,packed,base_desc));
+    std::vector<world_cache_surface_sector_descriptor> sdesc;
+    build_world_cache_sector_surface_descriptors(base_desc,sdesc);
+    std::vector<world_cache_sector_descriptor> sectors(4U),previous(4U);
+    uint32_t staged=99U;
+    a.surface_index=12U;a.first_index=12U;a.count=6U;
+    assert(stage_world_cache_sector_surface_descriptor(
+        mesh,lookup,a,sector_table+0x98U,sector_table,4U,
+        tint,cmp,uv,sdesc,sectors,&staged));
+    assert(staged==1U);
+    assert(sdesc[2].normal_scroll_x[3]==-17.0f);
+    assert(sdesc[2].scroll_y_sector[0]==99.25f);
+    assert(sdesc[2].scroll_y_sector[1]==1.0f);
+    assert(sectors[1].tint[0]==0.25f && sectors[1].cmp[2]==0.25f);
+    a.surface_index=13U;a.first_index=18U;
+    assert(stage_world_cache_sector_surface_descriptor(
+        mesh,lookup,a,sector_table+0x98U,sector_table,4U,
+        tint,cmp,uv,sdesc,sectors,&staged));
+    assert(staged==1U && sdesc[3].scroll_y_sector[1]==1.0f);
+    auto selected=plan_world_cache_sector_descriptor_stream(4U,{1U,1U});
+    assert(selected.valid && selected.touched_vertices==1U);
+    assert(selected.ranges.size()==1U && selected.ranges[0].first_vertex==1U);
+    auto changed=plan_world_cache_live_upload(sectors,previous,selected);
+    assert(!changed.empty());
+    record_world_cache_live_upload(sectors,previous,changed);
+    assert(previous[1].tint[1]==0.5f);
+    assert(plan_world_cache_live_upload(sectors,previous,selected).empty());
+    tint[12]={{0.75f,0.0f,0.0f}};
+    a.surface_index=12U;a.first_index=12U;
+    assert(stage_world_cache_sector_surface_descriptor(
+        mesh,lookup,a,sector_table+0x98U*2U,sector_table,4U,
+        tint,cmp,uv,sdesc,sectors,&staged));
+    assert(staged==2U && sdesc[2].scroll_y_sector[1]==2.0f);
+    assert(sectors[1].tint[0]==0.25f); // former sector intact
+    assert(sectors[2].tint[0]==0.75f);
+    a.surface_index=13U;a.first_index=18U;
+    assert(!stage_world_cache_sector_surface_descriptor(
+        mesh,lookup,a,sector_table+0x99U,sector_table,4U,
+        tint,cmp,uv,sdesc,sectors,&staged));
+    selected=plan_world_cache_sector_descriptor_stream(4U,{1U,4U});
+    assert(!selected.valid);
     auto bad=mesh;
     bad.vertices[7].normal={{1.0f,0.0f,0.0f}};
     assert(!build_world_cache_descriptors(bad,packed,desc));

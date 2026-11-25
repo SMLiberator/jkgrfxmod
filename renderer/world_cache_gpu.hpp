@@ -22,15 +22,29 @@
 
 namespace jkgm {
 struct world_cache_gpu {
-    bool descriptors_requested=false,descriptors_enabled=false;
+    int descriptors_requested=0,descriptor_mode=0;
+    bool descriptors_enabled=false; // descriptor_mode>0
     std::optional<gl::buffer> surface_descriptor_buffer;
     std::optional<gl::texture> surface_descriptor_texture;
+    std::optional<gl::buffer> sector_descriptor_buffer;
+    std::optional<gl::texture> sector_descriptor_texture;
+    uintptr_t sector_table=0;
+    uint32_t sector_count=0;
+    std::vector<world_cache_surface_sector_descriptor> frame_surface_sector_descriptors;
+    std::vector<world_cache_surface_sector_descriptor> uploaded_surface_sector_descriptors;
+    std::vector<world_cache_sector_descriptor> frame_sector_descriptors;
+    std::vector<world_cache_sector_descriptor> uploaded_sector_descriptors;
+    std::vector<uint32_t> staged_sector_indices;
     std::vector<world_cache_surface_descriptor> frame_surface_descriptors;
     std::vector<world_cache_surface_descriptor> uploaded_surface_descriptors;
     void bind_surface_descriptors() const {
         if(!descriptors_enabled || !surface_descriptor_texture)return;
         gl::set_active_texture_unit_raw(texture_units::forward_world_surface_descriptors);
         gl::bind_texture_raw(GL_TEXTURE_BUFFER,surface_descriptor_texture->value());
+        if(descriptor_mode==2 && sector_descriptor_texture) {
+            gl::set_active_texture_unit_raw(texture_units::forward_world_sector_descriptors);
+            gl::bind_texture_raw(GL_TEXTURE_BUFFER,sector_descriptor_texture->value());
+        }
         gl::set_active_texture_unit_raw(0);
     }
     gl::vertex_array vao;
@@ -62,7 +76,7 @@ struct world_cache_gpu {
     uint64_t revision=0;
     bool ready=false;
 
-    explicit world_cache_gpu(bool request_descriptors=false)
+    explicit world_cache_gpu(int request_descriptors=0)
         :descriptors_requested(request_descriptors)
     {
         gl::bind_vertex_array(vao);
@@ -119,6 +133,16 @@ struct world_cache_gpu {
         frame_sector_cmp_tint.clear();
         frame_uv_offset.clear();
         descriptors_enabled=false;
+        descriptor_mode=0;
+        sector_table=0;
+        sector_count=0;
+        frame_surface_sector_descriptors.clear();
+        uploaded_surface_sector_descriptors.clear();
+        frame_sector_descriptors.clear();
+        uploaded_sector_descriptors.clear();
+        staged_sector_indices.clear();
+        sector_descriptor_texture.reset();
+        sector_descriptor_buffer.reset();
         frame_surface_descriptors.clear();
         uploaded_surface_descriptors.clear();
         surface_descriptor_texture.reset();
@@ -154,20 +178,46 @@ struct world_cache_gpu {
         sector_seen_epochs.assign(world.surface_count,0U);
         std::vector<world_cache_descriptor_vertex> compact_vertices;
         std::vector<world_cache_surface_descriptor> compact_descriptors;
-        if(descriptors_requested) {
+        if(descriptors_requested>0) {
             GLint combined_units=0,vertex_units=0,max_texels=0;
             glGetIntegerv(GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS,&combined_units);
             glGetIntegerv(GL_MAX_VERTEX_TEXTURE_IMAGE_UNITS,&vertex_units);
             glGetIntegerv(GL_MAX_TEXTURE_BUFFER_SIZE,&max_texels);
-            if(vertex_units>0 &&
-               combined_units>texture_units::forward_world_surface_descriptors &&
-               build_world_cache_descriptors(mesh,compact_vertices,
-                                             compact_descriptors) &&
+            bool const compact_ready=vertex_units>0 &&
+                combined_units>texture_units::forward_world_surface_descriptors &&
+                build_world_cache_descriptors(mesh,compact_vertices,
+                                              compact_descriptors);
+            if(compact_ready && descriptors_requested>=2 &&
+               combined_units>texture_units::forward_world_sector_descriptors) {
+                uint32_t count=0,table=0;
+                if(read_decal_u32(read,address+0x4cU,count) &&
+                   read_decal_u32(read,address+0x50U,table) &&
+                   count>0 && count<=65536U &&
+                   decal_native_address_ok(table) &&
+                   uint64_t(table)+uint64_t(count)*0x98U<0x7ff00000U &&
+                   compact_descriptors.size()*2U<=
+                       size_t(std::max(max_texels,0)) &&
+                   uint64_t(count)*2U<=uint64_t(std::max(max_texels,0))) {
+                    descriptor_mode=2;
+                    sector_table=table;
+                    sector_count=count;
+                    build_world_cache_sector_surface_descriptors(
+                        compact_descriptors,frame_surface_sector_descriptors);
+                    uploaded_surface_sector_descriptors=frame_surface_sector_descriptors;
+                    frame_sector_descriptors.resize(count);
+                    uploaded_sector_descriptors=frame_sector_descriptors;
+                } else LOG_WARNING(
+                    "WORLD CACHE sector descriptors unsupported; falling back to per-surface mode");
+            }
+            if(compact_ready && descriptor_mode==0 &&
                compact_descriptors.size()*3U<=size_t(std::max(max_texels,0))) {
-                descriptors_enabled=true;
+                descriptor_mode=1;
                 frame_surface_descriptors=std::move(compact_descriptors);
                 uploaded_surface_descriptors=frame_surface_descriptors;
-            } else LOG_WARNING("WORLD CACHE surface descriptors unavailable; using legacy vertex layout");
+            }
+            descriptors_enabled=descriptor_mode!=0;
+            if(!descriptors_enabled)
+                LOG_WARNING("WORLD CACHE surface descriptors unavailable; using legacy vertex layout");
         }
         gl::bind_vertex_array(vao);
         gl::bind_buffer(gl::buffer_bind_target::array,vertices);
@@ -248,14 +298,37 @@ struct world_cache_gpu {
             surface_descriptor_buffer.emplace();
             surface_descriptor_texture.emplace();
             glBindBuffer(GL_TEXTURE_BUFFER,surface_descriptor_buffer->value());
-            glBufferData(GL_TEXTURE_BUFFER,
-                GLsizeiptr(frame_surface_descriptors.size()*sizeof(frame_surface_descriptors[0])),
-                frame_surface_descriptors.data(),GL_STREAM_DRAW);
+            if(descriptor_mode==2)
+                glBufferData(GL_TEXTURE_BUFFER,
+                    GLsizeiptr(frame_surface_sector_descriptors.size()*
+                              sizeof(frame_surface_sector_descriptors[0])),
+                    frame_surface_sector_descriptors.data(),GL_STREAM_DRAW);
+            else
+                glBufferData(GL_TEXTURE_BUFFER,
+                    GLsizeiptr(frame_surface_descriptors.size()*
+                              sizeof(frame_surface_descriptors[0])),
+                    frame_surface_descriptors.data(),GL_STREAM_DRAW);
             gl::set_active_texture_unit_raw(texture_units::forward_world_surface_descriptors);
             gl::bind_texture_raw(GL_TEXTURE_BUFFER,surface_descriptor_texture->value());
             glTexBuffer(GL_TEXTURE_BUFFER,GL_RGBA32F,
                         surface_descriptor_buffer->value());
             gl::bind_texture_raw(GL_TEXTURE_BUFFER,0U);
+            if(descriptor_mode==2) {
+                sector_descriptor_buffer.emplace();
+                sector_descriptor_texture.emplace();
+                glBindBuffer(GL_TEXTURE_BUFFER,sector_descriptor_buffer->value());
+                glBufferData(GL_TEXTURE_BUFFER,
+                    GLsizeiptr(frame_sector_descriptors.size()*
+                              sizeof(frame_sector_descriptors[0])),
+                    frame_sector_descriptors.data(),GL_STREAM_DRAW);
+                gl::set_active_texture_unit_raw(
+                    texture_units::forward_world_sector_descriptors);
+                gl::bind_texture_raw(GL_TEXTURE_BUFFER,
+                                      sector_descriptor_texture->value());
+                glTexBuffer(GL_TEXTURE_BUFFER,GL_RGBA32F,
+                            sector_descriptor_buffer->value());
+                gl::bind_texture_raw(GL_TEXTURE_BUFFER,0U);
+            }
             gl::set_active_texture_unit_raw(0);
             glBindBuffer(GL_TEXTURE_BUFFER,0U);
         }
@@ -283,7 +356,13 @@ struct world_cache_gpu {
                  " triangles=",mesh.indices.size()/3U,
                  " bytes=",(descriptors_enabled
                      ?mesh.vertices.size()*sizeof(world_cache_descriptor_vertex)+
-                      frame_surface_descriptors.size()*sizeof(world_cache_surface_descriptor)
+                      (descriptor_mode==2
+                       ?frame_surface_sector_descriptors.size()*
+                           sizeof(world_cache_surface_sector_descriptor)+
+                        frame_sector_descriptors.size()*
+                           sizeof(world_cache_sector_descriptor)
+                       :frame_surface_descriptors.size()*
+                           sizeof(world_cache_surface_descriptor))
                      :mesh.vertices.size()*sizeof(world_cache_vertex))+
                            mesh.indices.size()*sizeof(uint32_t)+
                            (frame_light_rgb.size()+frame_light_state.size()+
@@ -292,8 +371,11 @@ struct world_cache_gpu {
                                sizeof(std::array<float,3>)+
                            (descriptors_enabled?0U:frame_uv_offset.size()*
                                sizeof(std::array<float,2>)),
-                 " surface_descriptors=",descriptors_enabled?1:0,
-                 " surface_descriptor_count=",frame_surface_descriptors.size(),
+                 " descriptor_mode=",descriptor_mode,
+                 " surface_descriptor_count=",descriptor_mode==2
+                     ?frame_surface_sector_descriptors.size()
+                     :frame_surface_descriptors.size(),
+                 " sector_descriptor_count=",frame_sector_descriptors.size(),
                  " uv_animation_bytes=",descriptors_enabled?0U:
                      frame_uv_offset.size()*sizeof(std::array<float,2>),
                  " revision=",revision,

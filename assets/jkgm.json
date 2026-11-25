@@ -39,7 +39,7 @@
     "profile_audio": false,
     "use_gpu_cache": true,
     "gpu_3do_vertex_format": 1,
-    "experimental_world_surface_descriptors": false,
+    "experimental_world_surface_descriptors": 0,
     "experimental_3do_index_u16": false,
     "experimental_auto_3do_lod": false,
     "gpu_3do_auto_lod_lod1_radius_px": 90.0,

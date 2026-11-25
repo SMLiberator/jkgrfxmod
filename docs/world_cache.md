@@ -62,25 +62,36 @@ baked Gouraud colors; native non-cached geometry remains unaffected.
 
 ## Experimental world-surface descriptors
 
-Set `experimental_world_surface_descriptors=true` to A/B against the original
-world cache. The 32-byte static vertex becomes a 24-byte XYZ + full FP32 UV +
-surface-index stream, with the constant surface normal stored once per face.
-Live sector tint, sector CMP tint and native SlideSurface offset are stored
-per surface in the same 48-byte RGBA32F descriptor (three texels). The only
-remaining live *vertex* streams are native Gouraud RGB and native light state.
-The surface descriptor is updated from successful, staged main and reflected
-camera faces before any draw, using exact last-uploaded shadows; hidden faces
-retain their previous GPU state until staged again. The main world shader and
-the independent planar/hemisphere capture shaders use the same lookup. Depth,
-shadow and occlusion shaders keep original full-precision XYZ/UV inputs.
+`experimental_world_surface_descriptors` selects one of three layouts:
 
-For a four-corner surface, nominal GPU vertex+descriptor storage is
-4*(24+12+12)+48 = 240 bytes, versus 4*(32+12+12+12+12+8) = 352 bytes
-before index buffers: roughly 32% less. This does not yet eliminate the
-original CPU-side vertex arrays or staging copies, nor guarantee an FPS
-improvement; vertex-stage texture fetch and GL driver overhead must be
-measured on Wine/OpenGL. On unsupported devices, the renderer retains its
-original 32-byte static and five live vertex-buffer layout.
+- `0` (default): original 32-byte static world vertex plus five per-vertex
+  live attributes (Gouraud RGB, pixel-light state, sector tint, CMP tint,
+  SlideSurface offset).
+- `1`: 24-byte static XYZ + full FP32 UV + local surface-index vertex, with a
+  48-byte (three RGBA32F texels) surface descriptor storing the immutable
+  normal plus live sector tint, CMP tint and per-surface UV offset.
+- `2`: same 24-byte static vertex, but 32-byte (two RGBA32F texels) surface
+  descriptor storing normal, UV offset and **native owning-sector index**;
+  each native SithSector additionally has one 32-byte (two RGBA32F texels)
+  shared descriptor with live sector tint and CMP tint. The source ownership
+  index is resolved from the checked native SithWorld sector array and
+  refreshed for visible faces, so COG light/color changes are not frozen.
+
+Only genuine per-vertex Gouraud RGB and pixel-light state remain per-vertex
+in modes 1 and 2. Both descriptor modes update successful, staged main and
+reflected camera faces before rendering using exact GPU upload mirrors;
+hidden faces are refreshed when next staged. Planar/hemisphere captures use
+the same world buffers, while depth/shadow/occlusion keep unchanged FP32
+positions and UVs. Unsupported mode 2 falls back to 1; unsupported mode 1
+falls back to 0. Older JSON booleans are accepted as mode aliases.
+
+For a four-corner surface, nominal GPU vertex+attribute storage excluding
+indices is 352 bytes in mode 0, 240 bytes in mode 1, and 224 bytes plus
+32 bytes *per sector* in mode 2 (amortized across all faces of that sector).
+Actual FPS and GPU-memory gains need A/B measurements on Wine/OpenGL; this
+change does not yet eliminate the CPU-side native light-staging arrays.
+Use `profile_renderer` to compare live GPU upload sizes, descriptor counts,
+and effective mode.
 
 ## Live attribute upload change tracking
 

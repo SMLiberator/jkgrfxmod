@@ -19,6 +19,7 @@ uniform int packed_vertex_format;
 uniform samplerBuffer gpu_3do_face_descriptors;
 uniform int world_surface_descriptor_mode;
 uniform samplerBuffer world_surface_descriptors;
+uniform samplerBuffer world_sector_descriptors;
 uniform vec4 clip_plane_view;
 uniform vec4 jk_color_filter,jk_color_tint,jk_color_add_fade;
 uniform float jk_light_limit;
@@ -59,9 +60,21 @@ void main() {
     if(is_model==0 && world_surface_descriptor_mode!=0) {
         // World cache attribute 8 is the face ID; model attribute 8 is RGB.
         int world_id=int(native_vertex_rgb.x+0.5);
-        world_d0=texelFetch(world_surface_descriptors,3*world_id);
-        world_d1=texelFetch(world_surface_descriptors,3*world_id+1);
-        world_d2=texelFetch(world_surface_descriptors,3*world_id+2);
+        if(world_surface_descriptor_mode==2) {
+            world_d0=texelFetch(world_surface_descriptors,2*world_id);
+            world_d1=texelFetch(world_surface_descriptors,2*world_id+1);
+            int sector_id=int(world_d1.y+0.5);
+            vec4 sector_tint=texelFetch(world_sector_descriptors,2*sector_id);
+            vec4 sector_cmp=texelFetch(world_sector_descriptors,2*sector_id+1);
+            world_d2=sector_cmp;
+            float scroll_y=world_d1.x;
+            world_d1.xyz=sector_tint.xyz;
+            world_d1.w=scroll_y;
+        } else {
+            world_d0=texelFetch(world_surface_descriptors,3*world_id);
+            world_d1=texelFetch(world_surface_descriptors,3*world_id+1);
+            world_d2=texelFetch(world_surface_descriptors,3*world_id+2);
+        }
     }
     vs_pixel_uv=local_uv+(is_model!=0 ? vec2(0.0):
         world_surface_descriptor_mode!=0
