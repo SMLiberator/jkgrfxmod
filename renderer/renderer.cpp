@@ -5194,14 +5194,14 @@ namespace jkgm {
                     shaders::gpu_3do_preview_shader::max_sprite_instances> none{};
                 prog.set_sprite_instances(none,0);
             }
-            // With the JSON option OFF, set both sampler type and zero
-            // candidates once per pass, not once for every cached model.
-            if(!the_config->enable_sector_crossing_lighting)
-                prog.set_sector_crossing(nullptr,false,false,false);
             bool const crossing_buffer_ready=
                 the_config->enable_sector_crossing_lighting &&
                 !post_exempt && !decals_only &&
                 sector_crossing_plane_texture!=0U;
+            // No plane buffer (including a single-sector world): reset
+            // the persistent shader once per pass, not per instance.
+            if(!crossing_buffer_ready)
+                prog.set_sector_crossing(nullptr,false,false,false);
             if(crossing_buffer_ready) {
                 gl::set_active_texture_unit_raw(gpu_3do_sector_plane_texture_unit);
                 gl::bind_texture_raw(GL_TEXTURE_BUFFER,sector_crossing_plane_texture);
@@ -6314,9 +6314,9 @@ namespace jkgm {
                         ? inst.colormap_tint
                         : std::array<float,3>{{1.0f,1.0f,1.0f}});
                     // Zero sector count preserves the existing fast path.
-                    if(the_config->enable_sector_crossing_lighting)
+                    if(crossing_buffer_ready)
                         prog.set_sector_crossing(inst.crossing_lighting.get(),
-                            crossing_buffer_ready && allow_sector_effects &&
+                            allow_sector_effects &&
                             !inst.camera_hud && !inst.is_projected_decal &&
                             !inst.is_sprite_quad,
                             can_replace_sector_tint,
@@ -13584,7 +13584,8 @@ namespace jkgm {
                 glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS,&fragment_units);
             if(fragment_units<=gpu_3do_sector_plane_texture_unit) {
                 // Level changes still invalidate the cached sector data.
-                if(sector_crossing_plane_texture)reset_sector_crossing();
+                if(sector_crossing_world.world || sector_crossing_plane_texture)
+                    reset_sector_crossing();
                 return;
             }
             uint32_t world=0;
@@ -13610,12 +13611,25 @@ namespace jkgm {
                     reset_sector_crossing();return;
                 }
             }
-            if(sector_crossing_world.world!=world ||
-               sector_crossing_world_signature!=signature ||
-               !sector_crossing_plane_texture) {
+            if(!sector_crossing_cache_matches(
+                   sector_crossing_world,sector_crossing_world_signature,
+                   world,signature,sector_crossing_plane_texture!=0U)) {
                 reset_sector_crossing();
                 sector_crossing_snapshot snapshot{};
                 if(!sector_crossing_capture(read,world,snapshot))return;
+                // A single valid region cannot supply a second shading
+                // candidate. Cache this successful negative result even
+                // though no GL plane buffer is created.
+                if(sector_crossing_snapshot_needs_no_planes(snapshot)) {
+                    if(the_config->profile_renderer)
+                        LOG_INFO("SECTOR CROSSING snapshot world=",world,
+                            " sectors=",snapshot.sectors.size(),
+                            " valid=",snapshot.valid_count,
+                            " uploaded_planes=0 fast_path=single_valid_sector");
+                    sector_crossing_world=std::move(snapshot);
+                    sector_crossing_world_signature=signature;
+                    return;
+                }
                 std::vector<GLfloat> planes;
                 std::vector<sector_crossing_plane_range> ranges(
                     snapshot.sectors.size());

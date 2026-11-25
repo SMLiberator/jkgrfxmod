@@ -49,6 +49,7 @@ int main()
         snapshot.index_by_id.emplace(r.id,i);
         snapshot.sectors.push_back(r);
     }
+    snapshot.valid_count=snapshot.sectors.size();
     // Unconnected third sector AABB overlaps but never participates.
     std::vector<sector_crossing_plane_range> ranges{{0,1},{1,1},{2,1}};
     std::vector<uint8_t> memory(0x50000U,0);
@@ -76,6 +77,24 @@ int main()
         setFloat(c+4,0.9f);
         setFloat(c+8,0.7f);
     }
+    // One valid region, even with other invalid native sectors, must
+    // skip per-instance bounds/proof/candidate work and native reads.
+    auto single=snapshot;
+    single.valid_count=1;
+    single.sectors[1].valid=false;
+    single.sectors[2].valid=false;
+    single.index_by_id.erase(55U);
+    single.index_by_id.erase(99U);
+    sector_crossing_stage_stats single_stats{};
+    auto unexpected_read=[](uintptr_t,void *,size_t)->bool {
+        assert(false && "single-sector staging must not read native data");
+        return false;
+    };
+    assert(!sector_crossing_stage_instance(
+        single,ranges,instance,unexpected_read,true,0U,false,&single_stats));
+    assert(single_stats.considered==1U && single_stats.eligible==0U &&
+           single_stats.sphere_valid==0U && single_stats.staged==0U);
+
     auto state=sector_crossing_stage_instance(
         snapshot,ranges,instance,read,true);
     assert(state && state->count==2);

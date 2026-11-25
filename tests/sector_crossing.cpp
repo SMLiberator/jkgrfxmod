@@ -173,5 +173,46 @@ int main() {
     u32(surfaces+0x2c,0x7fffffffU);
     assert(sector_crossing_capture(read,world,extracted));
     assert(extracted.valid_count==1 && !extracted.sectors[0].valid);
+    // A successful negative cache entry needs no GL texture and survives
+    // repeated frames. Native table identity changes invalidate it even
+    // when SithWorld itself reuses the same address.
+    std::array<uint32_t,6> const signature{{2,sector_base,1,vertices,2,surfaces}};
+    assert(sector_crossing_snapshot_needs_no_planes(extracted));
+    assert(sector_crossing_cache_matches(
+        extracted,signature,world,signature,false));
+    for(size_t i=0;i<signature.size();++i) {
+        auto changed=signature;
+        ++changed[i];
+        assert(!sector_crossing_cache_matches(
+            extracted,signature,world,changed,false));
+    }
+    assert(!sector_crossing_cache_matches(
+        extracted,signature,world+4U,signature,false));
+    assert(!sector_crossing_cache_matches(
+        sector_crossing_snapshot{},signature,world,signature,false));
+
+    // Repair the sector geometry: a multisector snapshot still requires
+    // a successfully uploaded plane texture, not just a matching world.
+    u32(surfaces+0x2c,indices);
+    assert(sector_crossing_capture(read,world,extracted));
+    assert(extracted.valid_count==2);
+    assert(!sector_crossing_snapshot_needs_no_planes(extracted));
+    assert(!sector_crossing_cache_matches(
+        extracted,signature,world,signature,false));
+    assert(sector_crossing_cache_matches(
+        extracted,signature,world,signature,true));
+
+    // A genuine one-sector native world (no neighboring adjoin) also
+    // qualifies, while an unsuccessful capture does not.
+    u32(world+0x4c,1);
+    u32(sector_base+0x2c,0);
+    u32(surfaces+0x0c,0);
+    u32(surfaces+0x10,4);
+    assert(sector_crossing_capture(read,world,extracted));
+    assert(extracted.native_sector_count==1 && extracted.valid_count==1);
+    assert(sector_crossing_snapshot_needs_no_planes(extracted));
+    u32(surfaces+0x2c,0x7fffffffU);
+    assert(!sector_crossing_capture(read,world,extracted));
+    assert(!sector_crossing_snapshot_needs_no_planes(extracted));
     return 0;
 }

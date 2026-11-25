@@ -36,6 +36,25 @@ struct sector_crossing_snapshot {
     // Built on world capture; per-Thing lookup must never scan all sectors.
     std::unordered_map<uint32_t,uint32_t> index_by_id;
 };
+// A successfully captured world with fewer than two valid regions can
+// never stage a crossing descriptor. A failed/uninitialized capture is
+// not a cached negative result: retry it on a later frame.
+inline bool sector_crossing_snapshot_needs_no_planes(
+    sector_crossing_snapshot const &snapshot)
+{
+    return snapshot.world!=0U && snapshot.valid_count==1U;
+}
+inline bool sector_crossing_cache_matches(
+    sector_crossing_snapshot const &snapshot,
+    std::array<uint32_t,6> const &cached_signature,
+    uintptr_t world,std::array<uint32_t,6> const &signature,
+    bool plane_buffer_ready)
+{
+    return world!=0U && snapshot.world==world &&
+           cached_signature==signature &&
+           (plane_buffer_ready ||
+            sector_crossing_snapshot_needs_no_planes(snapshot));
+}
 inline bool sector_crossing_finite(sector_crossing_vec3 const &v) {
     return std::isfinite(v[0]) && std::isfinite(v[1]) && std::isfinite(v[2]);
 }

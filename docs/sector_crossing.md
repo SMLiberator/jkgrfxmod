@@ -1,5 +1,17 @@
 # Sector-crossing lighting: staged design
 
+## Single-valid-sector fast path
+
+After capturing a level with exactly one valid sector, the renderer caches
+the result without creating a plane texture/buffer. Repeated frames skip
+all per-instance crossing staging, while normal owner-sector ambient, tint
+and CMP lighting remain unchanged. The existing world pointer and six
+native table identity fields invalidate the cache on level changes.
+Failed captures and multi-sector plane-upload failures remain retryable.
+With no usable crossing buffer, the draw pass resets the crossing shader
+state once rather than for each model. With profiling enabled, the level
+snapshot log includes `fast_path=single_valid_sector` and `uploaded_planes=0`.
+
 ## Current behavior
 
 GPU-cached 3DOs inherit the ambient light, sector tint and CMP tint of

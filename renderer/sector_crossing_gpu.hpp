@@ -213,7 +213,9 @@ sector_crossing_stage_instance(
        instance.skybox_vertex_lighting ||
        instance.is_sprite_quad || instance.is_projected_decal ||
        instance.transient_procedural ||
-       snapshot.world==0 || plane_ranges.size()!=snapshot.sectors.size())
+       snapshot.world==0 ||
+       sector_crossing_snapshot_needs_no_planes(snapshot) ||
+       plane_ranges.size()!=snapshot.sectors.size())
         return {};
     if(stats)++stats->eligible;
     sector_crossing_vec3 origin{};
