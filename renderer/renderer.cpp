@@ -5877,7 +5877,12 @@ namespace jkgm {
                     reason(material.has_environment || material.has_environment2,
                            Reject::environment_map);
                     reason(material.has_matcap,Reject::matcap);
-                    reason(get<0>(material.clearcoat_params)>0.0f,
+                    // Clearcoat is absent from the shader when reflections
+                    // are disabled; its authored strength alone is not a
+                    // reason to reject an opaque instanced draw.
+                    reason(the_config->enable_reflections &&
+                               get<0>(material.clearcoat_params)>0.0f &&
+                               clearcoat_available(),
                            Reject::clearcoat);
                     reason(material.displacement_factor!=0.0f,
                            Reject::displacement);
