@@ -5889,6 +5889,7 @@ namespace jkgm {
                     record.group=reinterpret_cast<uintptr_t>(draw.group);
                     record.material=reinterpret_cast<uintptr_t>(draw.texture);
                     record.instance=reinterpret_cast<uintptr_t>(draw.instance);
+                    record.policy=draw.policy;
                     bool const valid_state=gpu_3do_instancing_capture_state(
                         inst,draw.context->reversed_winding,record.state);
                     record.rejection_mask=gpu_3do_instancing_rejection_mask(
