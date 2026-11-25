@@ -2029,6 +2029,17 @@ namespace jkgm {
                         " compatible_repeat_groups_per_sample=",
                         profile_window.gpu_instancing_compatible_groups/sample_count,
                         " NOTE=sampled_profile_only_no_instancing;identity=cache_snapshot_id+geometry+group+MAT;not_filename;range_savings_upper_bound_not_GL_calls");
+                    // Count actual opaque-pass alpha routing, rather than
+                    // inferring mode solely from authored MAT properties.
+                    auto const &alpha=profile_window.gpu_instancing_alpha_policies;
+                    LOG_INFO("PERF gpu_3do instancing_alpha_modes samples=",
+                        sample_count,
+                        " solid=",alpha[0]/sample_count,
+                        " masked=",alpha[2]/sample_count,
+                        " mixed=",alpha[1]/sample_count,
+                        " blend_only=",alpha[3]/sample_count,
+                        " dithered=",alpha[4]/sample_count,
+                        " NOTE=sampled_opaque_ranges_per_sample");
                     // Values in the histogram are raw totals over the
                     // sample_count audits, avoiding truncated rare reasons.
                     auto rejection_text=[&](std::array<uint64_t,32> const &counts) {
@@ -5891,6 +5902,9 @@ namespace jkgm {
                 if(sample_instancing) {
                 auto const audit=audit_gpu_3do_instancing(records);
                 ++profile_frame.gpu_instancing_audit_samples;
+                for(size_t i=0;i<audit.alpha_policy_ranges.size();++i)
+                    profile_frame.gpu_instancing_alpha_policies[i]+=
+                        audit.alpha_policy_ranges[i];
                 profile_frame.gpu_instancing_source_draws+=audit.source_draws;
                 profile_frame.gpu_instancing_geometry_duplicates+=
                     audit.geometry_repeated_draws;
