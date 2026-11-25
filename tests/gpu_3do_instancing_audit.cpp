@@ -257,12 +257,16 @@ int main() {
     profile_sample frame{},window{};
     frame.gpu_instancing_rejected_ranges=1U;
     frame.gpu_instancing_repeated_member_ranges=2U;
+    frame.gpu_instancing_alpha_policies[
+        static_cast<size_t>(gpu_3do_alpha_mode::masked)]=3U;
     frame.gpu_instancing_rejects_all[static_cast<size_t>(Reason::normal_map)]=1U;
     frame.gpu_instancing_rejects_repeated[static_cast<size_t>(Reason::normal_map)]=1U;
     window.add(frame);
     window.add(frame);
     assert(window.gpu_instancing_rejected_ranges==2U);
     assert(window.gpu_instancing_repeated_member_ranges==4U);
+    assert(window.gpu_instancing_alpha_policies[
+        static_cast<size_t>(gpu_3do_alpha_mode::masked)]==6U);
     assert(window.gpu_instancing_rejects_all[static_cast<size_t>(Reason::normal_map)]==2U);
     assert(window.gpu_instancing_rejects_repeated[static_cast<size_t>(Reason::normal_map)]==2U);
     return 0;
