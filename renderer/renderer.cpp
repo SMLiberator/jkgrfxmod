@@ -1583,6 +1583,12 @@ namespace jkgm {
                      " wall_us_avg=",profile_window.gpu_parallel_visibility_wall_us/frames,
                      " failures=",profile_window.gpu_parallel_visibility_failures,
                      " NOTE=main_camera_CPU_group_cull_prepass;included_in_collect_cpu;serial_below_threshold");
+            LOG_INFO("PERF gpu_3do instancing_CPU_us_avg prep=",
+                     profile_window.gpu_instancing_prepare_us/frames,
+                     " audit=",profile_window.gpu_instancing_audit_us/frames,
+                     " schedule=",profile_window.gpu_instancing_schedule_us/frames,
+                     " reorder=",profile_window.gpu_instancing_reorder_us/frames,
+                     " NOTE=CPU_us_per_frame;audit_sampled_every_30_frames");
             LOG_INFO("PERF gpu_3do_instancing enabled=",
                       the_config->enable_gpu_3do_instancing?1:0,
                       " calls_avg=",
@@ -5839,6 +5845,8 @@ namespace jkgm {
                 the_config->enable_gpu_3do_instancing && prepare_both &&
                 !transparent && !post_exempt && !decals_only;
             if(sample_instancing || submit_instancing) {
+                auto const prep_begin=gpu_profiling
+                    ?profile_clock::now():profile_clock::time_point{};
                 static thread_local
                     std::vector<gpu_3do_instancing_audit_record> records;
                 records.clear();
@@ -5905,8 +5913,14 @@ namespace jkgm {
                         valid_state;
                     records.push_back(record);
                 }
+                if(gpu_profiling)
+                    profile_frame.gpu_instancing_prepare_us+=elapsed_profile_us(
+                        prep_begin,profile_clock::now());
                 if(sample_instancing) {
+                auto const audit_begin=profile_clock::now();
                 auto const audit=audit_gpu_3do_instancing(records);
+                profile_frame.gpu_instancing_audit_us+=elapsed_profile_us(
+                    audit_begin,profile_clock::now());
                 ++profile_frame.gpu_instancing_audit_samples;
                 for(size_t i=0;i<audit.alpha_policy_ranges.size();++i)
                     profile_frame.gpu_instancing_alpha_policies[i]+=
@@ -5942,7 +5956,14 @@ namespace jkgm {
                 }
                 }
                 if(submit_instancing) {
+                    auto const schedule_begin=gpu_profiling
+                        ?profile_clock::now():profile_clock::time_point{};
                     auto const order=schedule_gpu_3do_instancing(records);
+                    if(gpu_profiling)
+                        profile_frame.gpu_instancing_schedule_us+=elapsed_profile_us(
+                            schedule_begin,profile_clock::now());
+                    auto const reorder_begin=gpu_profiling
+                        ?profile_clock::now():profile_clock::time_point{};
                     static thread_local std::vector<pending_draw> reordered;
                     reordered.clear();
                     reordered.reserve(draws.size());
@@ -5952,6 +5973,9 @@ namespace jkgm {
                         reordered.push_back(next);
                     }
                     draws.swap(reordered);
+                    if(gpu_profiling)
+                        profile_frame.gpu_instancing_reorder_us+=elapsed_profile_us(
+                            reorder_begin,profile_clock::now());
                 }
             }
             if(transparent && !(post_exempt &&
