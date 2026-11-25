@@ -11,7 +11,7 @@
 #include <map>
 #include <set>
 #include <tuple>
-#include <unordered_set>
+#include <unordered_map>
 #include <vector>
 
 namespace jkgm {
@@ -221,11 +221,72 @@ schedule_gpu_3do_instancing(
     using geometry_key=std::tuple<uint64_t,uintptr_t,uintptr_t,uintptr_t>;
     using batch_key=std::tuple<geometry_key,gpu_3do_alpha_mode,
                                std::array<uint32_t,11>>;
-    struct batch_members {
-        std::vector<size_t> indices;
-        std::unordered_set<uintptr_t> owners;
+    struct batch_key_hash {
+        size_t operator()(batch_key const &key) const noexcept {
+            // Full key equality, not a hash or shared filename, is required
+            // before merging any two cached geometry groups.
+            size_t hash=0x9e3779b9U;
+            auto mix=[&](uint64_t value) {
+                size_t const x=static_cast<size_t>(value) ^
+                    static_cast<size_t>(value>>32U);
+                hash^=x+0x9e3779b9U+(hash<<6U)+(hash>>2U);
+            };
+            auto const &geometry=std::get<0>(key);
+            mix(std::get<0>(geometry));
+            mix(std::get<1>(geometry));
+            mix(std::get<2>(geometry));
+            mix(std::get<3>(geometry));
+            mix(static_cast<uint32_t>(std::get<1>(key)));
+            for(uint32_t value:std::get<2>(key))mix(value);
+            return hash;
+        }
     };
-    std::map<batch_key,batch_members> groups;
+    struct owner_slot {
+        size_t group=0U;
+        uintptr_t instance=0U;
+        uint32_t stamp=0U;
+    };
+    struct workspace {
+        std::unordered_map<batch_key,size_t,batch_key_hash> group_lookup;
+        std::vector<std::vector<size_t>> group_indices;
+        // Flat, generation-stamped open-addressed set for (group,Thing).
+        // Avoid a separate heap allocation for every repeated model owner.
+        std::vector<owner_slot> seen_owners;
+        uint32_t stamp=0U;
+    };
+    static thread_local workspace scratch;
+    scratch.group_lookup.clear();
+    size_t group_count=0U;
+    if(++scratch.stamp==0U) {
+        for(auto &slot:scratch.seen_owners)slot.stamp=0U;
+        scratch.stamp=1U;
+    }
+    // <=50% occupancy for short probe chains, power-of-two capacity.
+    // Slots persist across frames; their generation stamps prevent stale
+    // owners from contaminating the next frame or a different world.
+    size_t table_size=16U;
+    while(table_size<=records.size()*2U)table_size*=2U;
+    if(scratch.seen_owners.size()<table_size)
+        scratch.seen_owners.resize(table_size);
+    size_t const owner_mask=scratch.seen_owners.size()-1U;
+    auto first_owner=[&](size_t group,uintptr_t instance) {
+        size_t hash=static_cast<size_t>(instance);
+        hash^=group+0x9e3779b9U+(hash<<6U)+(hash>>2U);
+        hash^=hash>>16U;
+        hash*=0x7feb352dU;
+        hash^=hash>>15U;
+        hash*=0x846ca68bU;
+        hash^=hash>>16U;
+        for(size_t offset=hash&owner_mask;;offset=(offset+1U)&owner_mask) {
+            auto &slot=scratch.seen_owners[offset];
+            if(slot.stamp!=scratch.stamp) {
+                slot={group,instance,scratch.stamp};
+                return true;
+            }
+            if(slot.group==group && slot.instance==instance)
+                return false;
+        }
+    };
     for(size_t i=0;i<records.size();++i) {
         auto const &r=records[i];
         if(!r.state_eligible || r.rejection_mask!=0U ||
@@ -233,30 +294,38 @@ schedule_gpu_3do_instancing(
            !r.instance)continue;
         geometry_key const geometry{r.mesh_id,r.geometry,r.group,r.material};
         batch_key const key{geometry,r.policy,r.state};
-        auto &members=groups[key];
-        // In repeated-model stress scenes, each material group can appear
-        // hundreds of times. Avoid a quadratic scan for duplicate Things.
-        if(members.owners.insert(r.instance).second)
-            members.indices.push_back(i);
+        auto const found=scratch.group_lookup.try_emplace(key,group_count);
+        size_t const group=found.first->second;
+        if(found.second) {
+            ++group_count;
+            if(scratch.group_indices.size()<group_count)
+                scratch.group_indices.emplace_back();
+            scratch.group_indices[group].clear();
+        }
+        if(first_owner(group,r.instance))
+            scratch.group_indices[group].push_back(i);
     }
+    // Batch IDs are temporary grouping tags; draw order is determined by
+    // source order, never by the hash bucket layout.
     std::vector<size_t> batch_of(records.size(),0U);
-    std::vector<std::vector<size_t>> batches(1);
-    for(auto const &entry:groups) {
-        if(entry.second.indices.size()<2U)continue;
+    std::vector<std::vector<size_t> const *> batches(1U,nullptr);
+    for(size_t group=0;group<group_count;++group) {
+        auto const &indices=scratch.group_indices[group];
+        if(indices.size()<2U)continue;
         size_t const batch_id=batches.size();
-        batches.push_back(entry.second.indices);
-        for(size_t index:entry.second.indices)batch_of[index]=batch_id;
+        batches.push_back(&indices);
+        for(size_t index:indices)batch_of[index]=batch_id;
     }
     std::vector<bool> emitted(batches.size(),false);
     std::vector<gpu_3do_instancing_schedule_entry> ordered;
     ordered.reserve(records.size());
     for(size_t i=0;i<records.size();++i) {
-        size_t const id=batch_of[i];
-        if(id==0U)ordered.push_back({i,0U});
-        else if(!emitted[id]) {
-            for(size_t index:batches[id])
-                ordered.push_back({index,id});
-            emitted[id]=true;
+        size_t const batch_id=batch_of[i];
+        if(batch_id==0U)ordered.push_back({i,0U});
+        else if(!emitted[batch_id]) {
+            for(size_t index:*batches[batch_id])
+                ordered.push_back({index,batch_id});
+            emitted[batch_id]=true;
         }
     }
     return ordered;
