@@ -5417,6 +5417,70 @@ namespace jkgm {
             bool const collect_sprite_batches=
                 the_config->enable_gpu_sprite_instancing &&
                 !transparent && !post_exempt && !decals_only;
+            bool const sample_instancing=gpu_profiling && prepare_both &&
+                the_config->profile_gpu_3do_instancing_audit &&
+                gpu_3do_present_serial%30U==0U;
+            bool const submit_instancing=
+                the_config->enable_gpu_3do_instancing && prepare_both &&
+                !transparent && !post_exempt && !decals_only;
+            // The expensive audit needs the original source-order records.
+            // Sampled audit frames keep the legacy collector and scheduler.
+            bool const collect_model_batches=submit_instancing &&
+                the_config->experimental_gpu_3do_indexed_instancing &&
+                !sample_instancing;
+            struct indexed_model_member {
+                size_t instance_index;
+                submission_context *context;
+                size_t order;
+            };
+            static thread_local gpu_3do_indexed_instancing_collector<
+                indexed_model_member> model_collector;
+            size_t model_extra_members=0U;
+            if(collect_model_batches)model_collector.reset();
+            auto instancing_material_rejections=[&](
+                gpu_3do_instance const &inst,gpu_3do_texture const &material) {
+                bool const default_spec_eligible=
+                    !inst.camera_hud && !inst.is_projected_decal &&
+                    !inst.is_sprite_quad && !inst.world_lighting_exempt &&
+                    !material.solid_fullbright &&
+                    !material.emissive_only &&
+                    material.albedo_source!=0 &&
+                    material.blend!=material_blend_mode::additive &&
+                    material.blend!=material_blend_mode::multiply;
+                bool const specular_view_dependent=
+                    the_config->enable_reflections &&
+                    gpu_specular_parameters(material,
+                        default_spec_eligible).first>0.0f &&
+                    (sun_active || material.has_environment ||
+                     material.has_environment2 ||
+                     effective_capture_reflection_mode(
+                        material.reflection_mode)>=5);
+                // Classify each material blocker independently without
+                // changing the original conservative eligibility test.
+                using Reject=gpu_3do_instancing_rejection;
+                uint32_t material_rejections=0U;
+                auto reason=[&](bool active,Reject cause) {
+                    if(active)material_rejections|=
+                        gpu_3do_instancing_rejection_bit(cause);
+                };
+                reason(specular_view_dependent,Reject::specular);
+                reason(material.has_normal || material.has_normal2,
+                       Reject::normal_map);
+                reason(material.has_surface,Reject::surface_map);
+                reason(material.has_environment || material.has_environment2,
+                       Reject::environment_map);
+                reason(material.has_matcap,Reject::matcap);
+                // Clearcoat is absent from the shader when reflections
+                // are disabled; its authored strength alone is not a
+                // reason to reject an opaque instanced draw.
+                reason(the_config->enable_reflections &&
+                           get<0>(material.clearcoat_params)>0.0f &&
+                           clearcoat_available(),
+                       Reject::clearcoat);
+                reason(material.displacement_factor!=0.0f,
+                       Reject::displacement);
+                return material_rejections;
+            };
             // Candidate pointers must be stable until the last draw. At
             // most one context is appended per source instance, and the
             // ordinary vector is NOT cleared before the alpha reuse pass.
@@ -5581,6 +5645,17 @@ namespace jkgm {
                 auto const &submission=inst.geometry->cached_group_submissions();
                 auto const *opaque_order=transparent ? nullptr
                     : &inst.geometry->cached_opaque_group_order();
+                size_t model_class=0U;
+                // The shared state is captured once, before visiting groups.
+                // The strict candidate predicate is still checked for each
+                // visible range before it may enter a slot.
+                std::array<uint32_t,11> model_state{};
+                bool const indexed_state_valid=collect_model_batches &&
+                    inst.id!=0U && !inst.is_sprite_quad &&
+                    !inst.camera_hud && !inst.is_projected_decal &&
+                    gpu_3do_instancing_capture_state(
+                        inst,context.reversed_winding,model_state);
+                bool model_class_ready=false;
                 size_t const instance_order_base=next_draw_order;
                 if(opaque_order) next_draw_order+=groups.size();
                 for(size_t group_visit=0;group_visit<groups.size();++group_visit) {
@@ -5788,6 +5863,33 @@ namespace jkgm {
                         candidate.sprite_batch_group=index+1U;
                         sprite_buckets[index].draws.push_back(
                             std::move(candidate));
+                    } else if(indexed_state_valid &&
+                        gpu_3do_instancing_conservative_candidate(
+                            inst,group,policy,false)) {
+                        // A compatible class shares the exact snapshot,
+                        // geometry and draw-wide lighting state. Resolve
+                        // material eligibility only for a new range variant.
+                        if(!model_class_ready) {
+                            model_class=model_collector.classify(
+                                inst.id,reinterpret_cast<uintptr_t>(
+                                    inst.geometry.get()),model_state,groups.size());
+                            model_class_ready=true;
+                        }
+                        size_t const slot=model_collector.find_range(
+                            model_class,group_index,
+                            reinterpret_cast<uintptr_t>(&tex),policy,[&] {
+                                return instancing_material_rejections(inst,tex)==0U;
+                            });
+                        if(model_collector.append(slot,
+                            {instance_index,&context,source_order})) {
+                            // The first visible member is the source-order
+                            // anchor; subsequent members need only their
+                            // instance/context/order, not full draw records.
+                            if(model_collector.range(slot).members.size()==1U) {
+                                candidate.model_batch_group=slot;
+                                draws.push_back(std::move(candidate));
+                            } else ++model_extra_members;
+                        } else draws.push_back(std::move(candidate));
                     } else draws.push_back(std::move(candidate));
                 }
             }
@@ -5805,6 +5907,35 @@ namespace jkgm {
                     elapsed_profile_us(collect_begin,profile_clock::now());
             auto const sort_begin=gpu_profiling
                 ?profile_clock::now():profile_clock::time_point{};
+            if(collect_model_batches) {
+                auto const reorder_begin=gpu_profiling
+                    ?profile_clock::now():profile_clock::time_point{};
+                // Preserve first-appearance order exactly as the scheduler
+                // does. Expand only at the existing submission boundary;
+                // the 32-matrix shader and ordinary alpha path stay intact.
+                merged_draws.clear();
+                merged_draws.reserve(draws.size()+model_extra_members);
+                for(auto const &anchor:draws) {
+                    if(anchor.model_batch_group==0U) {
+                        merged_draws.push_back(anchor);
+                        continue;
+                    }
+                    auto const &slot=model_collector.range(
+                        anchor.model_batch_group);
+                    for(auto const &member:slot.members) {
+                        auto item=anchor;
+                        item.instance=&instances[member.instance_index];
+                        item.context=member.context;
+                        item.order=member.order;
+                        if(slot.members.size()==1U)item.model_batch_group=0U;
+                        merged_draws.push_back(item);
+                    }
+                }
+                draws.swap(merged_draws);
+                if(gpu_profiling)
+                    profile_frame.gpu_instancing_reorder_us+=elapsed_profile_us(
+                        reorder_begin,profile_clock::now());
+            }
             if(!transparent) {
                 // Every Thing's opaque ranges are already in the exact
                 // previous material/cel/face-state order. No per-frame
@@ -5839,13 +5970,7 @@ namespace jkgm {
             }
             // A sampled feasibility audit and actual opt-in opaque batching
             // share the same CloneModel-safe identity and rejection rules.
-            bool const sample_instancing=gpu_profiling && prepare_both &&
-                the_config->profile_gpu_3do_instancing_audit &&
-                gpu_3do_present_serial%30U==0U;
-            bool const submit_instancing=
-                the_config->enable_gpu_3do_instancing && prepare_both &&
-                !transparent && !post_exempt && !decals_only;
-            if(sample_instancing || submit_instancing) {
+            if(sample_instancing || (submit_instancing && !collect_model_batches)) {
                 auto const prep_begin=gpu_profiling
                     ?profile_clock::now():profile_clock::time_point{};
                 static thread_local
@@ -5861,46 +5986,8 @@ namespace jkgm {
                 for(auto const &draw:draws) {
                     auto const &inst=*draw.instance;
                     auto const &material=*draw.texture;
-                    bool const default_spec_eligible=
-                        !inst.camera_hud && !inst.is_projected_decal &&
-                        !inst.is_sprite_quad && !inst.world_lighting_exempt &&
-                        !material.solid_fullbright &&
-                        !material.emissive_only &&
-                        material.albedo_source!=0 &&
-                        material.blend!=material_blend_mode::additive &&
-                        material.blend!=material_blend_mode::multiply;
-                    bool const specular_view_dependent=
-                        the_config->enable_reflections &&
-                        gpu_specular_parameters(material,
-                            default_spec_eligible).first>0.0f &&
-                        (sun_active || material.has_environment ||
-                         material.has_environment2 ||
-                         effective_capture_reflection_mode(
-                            material.reflection_mode)>=5);
-                    // Classify each material blocker independently without
-                    // changing the original conservative eligibility test.
-                    using Reject=gpu_3do_instancing_rejection;
-                    uint32_t material_rejections=0U;
-                    auto reason=[&](bool active,Reject cause) {
-                        if(active)material_rejections|=
-                            gpu_3do_instancing_rejection_bit(cause);
-                    };
-                    reason(specular_view_dependent,Reject::specular);
-                    reason(material.has_normal || material.has_normal2,
-                           Reject::normal_map);
-                    reason(material.has_surface,Reject::surface_map);
-                    reason(material.has_environment || material.has_environment2,
-                           Reject::environment_map);
-                    reason(material.has_matcap,Reject::matcap);
-                    // Clearcoat is absent from the shader when reflections
-                    // are disabled; its authored strength alone is not a
-                    // reason to reject an opaque instanced draw.
-                    reason(the_config->enable_reflections &&
-                               get<0>(material.clearcoat_params)>0.0f &&
-                               clearcoat_available(),
-                           Reject::clearcoat);
-                    reason(material.displacement_factor!=0.0f,
-                           Reject::displacement);
+                    uint32_t const material_rejections=
+                        instancing_material_rejections(inst,material);
                     bool const view_dependent=material_rejections!=0U;
                     gpu_3do_instancing_audit_record record{};
                     record.mesh_id=inst.id;

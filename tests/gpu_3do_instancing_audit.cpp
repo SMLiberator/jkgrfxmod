@@ -282,6 +282,51 @@ int main() {
         assert(schedule[i].batch_id==0U);
     }
 
+    // Direct collector: exact mesh/state classification, indexed group
+    // slots, material/policy variants, duplicate guard and frame reset.
+    {
+        struct member { size_t instance_index; };
+        gpu_3do_indexed_instancing_collector<member> collector;
+        collector.reset();
+        size_t const mesh=collector.classify(
+            first.mesh_id,first.geometry,first.state,2U);
+        assert(collector.classify(first.mesh_id,first.geometry,first.state,2U)==mesh);
+        auto alternate_state=first.state;
+        ++alternate_state[0];
+        size_t const other=collector.classify(
+            first.mesh_id,first.geometry,alternate_state,2U);
+        assert(other!=mesh);
+        assert(collector.classify(first.mesh_id+1U,first.geometry,first.state,2U)!=mesh);
+        assert(collector.classify(first.mesh_id,first.geometry+1U,first.state,2U)!=mesh);
+        size_t evaluations=0U;
+        auto yes=[&] { ++evaluations; return true; };
+        auto no=[&] { ++evaluations; return false; };
+        auto const solid=gpu_3do_alpha_mode::solid;
+        auto const masked=gpu_3do_alpha_mode::masked;
+        size_t const slot=collector.find_range(mesh,0U,0x1000U,solid,yes);
+        assert(collector.find_range(mesh,0U,0x1000U,solid,no)==slot);
+        assert(evaluations==1U);
+        assert(collector.append(slot,{1U}));
+        assert(!collector.append(slot,{1U}));
+        assert(collector.append(slot,{3U}));
+        assert(!collector.append(slot,{2U}));
+        assert(collector.range(slot).members.size()==2U);
+        assert(collector.find_range(mesh,1U,0x1000U,solid,yes)!=slot);
+        assert(collector.find_range(mesh,0U,0x2000U,solid,yes)!=slot);
+        assert(collector.find_range(mesh,0U,0x1000U,masked,yes)!=slot);
+        assert(collector.find_range(other,0U,0x1000U,solid,yes)!=slot);
+        size_t const rejected=collector.find_range(mesh,0U,0x3000U,solid,no);
+        assert(!collector.append(rejected,{4U}));
+        assert(collector.find_range(mesh,0U,0x3000U,solid,yes)==rejected);
+        assert(!collector.append(rejected,{5U}));
+        assert(collector.find_range(mesh,0U,0x1000U,solid,yes)==slot);
+        collector.reset();
+        auto const fresh=collector.classify(first.mesh_id,first.geometry,first.state,2U);
+        auto const fresh_slot=collector.find_range(fresh,0U,0x1000U,solid,yes);
+        assert(collector.range(fresh_slot).members.empty());
+        assert(collector.append(fresh_slot,{0U}));
+    }
+
     // Duplicate owner records stay separate, while distinct owners batch
     // in first-appearance order even when their records are interleaved.
     rows={record(a,shared->groups[0],0x1000U,0x11U),

@@ -358,4 +358,76 @@ schedule_gpu_3do_instancing(
     }
     return ordered;
 }
+// Main-camera collector: classify a mesh once per source instance, then
+// address its immutable group slots directly. All slot IDs are frame-local;
+// zero is the empty sentinel. Exact material/policy variants get distinct
+// slots even when they share the same geometry and group index.
+template<class Member>
+class gpu_3do_indexed_instancing_collector {
+    using mesh_key=std::tuple<uint64_t,uintptr_t,std::array<uint32_t,11>>;
+    struct mesh_class {
+        std::vector<size_t> heads;
+    };
+public:
+    struct range_slot {
+        uintptr_t material=0U;
+        gpu_3do_alpha_mode policy=gpu_3do_alpha_mode::solid;
+        size_t next=0U;
+        bool eligible=false;
+        std::vector<Member> members;
+    };
+private:
+    std::map<mesh_key,size_t> lookup;
+    std::vector<mesh_class> classes;
+    std::vector<range_slot> slots;
+    size_t used_classes=0U,used_slots=0U;
+public:
+    void reset() {
+        lookup.clear();
+        used_classes=0U;
+        used_slots=0U;
+    }
+    size_t classify(uint64_t mesh_id,uintptr_t geometry,
+                    std::array<uint32_t,11> const &state,size_t group_count) {
+        auto const found=lookup.try_emplace(
+            mesh_key{mesh_id,geometry,state},used_classes);
+        if(found.second) {
+            if(classes.size()<=used_classes)classes.emplace_back();
+            classes[used_classes++].heads.assign(group_count,0U);
+        }
+        return found.first->second;
+    }
+    template<class IsEligible>
+    size_t find_range(size_t mesh,size_t group,uintptr_t material,
+                      gpu_3do_alpha_mode policy,IsEligible &&is_eligible) {
+        auto &head=classes[mesh].heads[group];
+        for(size_t id=head;id!=0U;id=slots[id-1U].next) {
+            auto const &slot=slots[id-1U];
+            if(slot.material==material && slot.policy==policy)return id;
+        }
+        size_t const id=++used_slots;
+        if(slots.size()<id)slots.emplace_back();
+        auto &slot=slots[id-1U];
+        slot.material=material;
+        slot.policy=policy;
+        slot.next=head;
+        slot.eligible=is_eligible();
+        slot.members.clear();
+        head=id;
+        return id;
+    }
+    range_slot &range(size_t id) { return slots[id-1U]; }
+    range_slot const &range(size_t id) const { return slots[id-1U]; }
+    // The renderer visits each source instance once, in ascending order.
+    // Fail open for an accidental repeated or out-of-order member, leaving
+    // that draw on the ordinary list instead of duplicating a batch owner.
+    bool append(size_t id,Member const &member) {
+        auto &slot=range(id);
+        if(!slot.eligible || (!slot.members.empty() &&
+           slot.members.back().instance_index>=member.instance_index))
+            return false;
+        slot.members.push_back(member);
+        return true;
+    }
+};
 } // namespace jkgm
