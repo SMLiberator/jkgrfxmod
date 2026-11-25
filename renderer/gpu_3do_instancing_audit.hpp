@@ -23,6 +23,14 @@ enum class gpu_3do_instancing_rejection : uint32_t {
     camera_hud, skybox_lighting, dither, opacity, per_thing_lights,
     crossing_lighting, nonrigid_lighting, invalid_state, count
 };
+// Masked fragments discard by cutoff and write depth in the opaque pass.
+// Mixed-alpha, blended and dithered materials retain conservative handling.
+inline constexpr bool gpu_3do_instancing_opaque_policy(
+    gpu_3do_alpha_mode policy) {
+    return policy==gpu_3do_alpha_mode::solid ||
+           policy==gpu_3do_alpha_mode::masked;
+}
+inline constexpr size_t gpu_3do_instancing_alpha_policy_count=5U;
 inline constexpr size_t gpu_3do_instancing_rejection_count=
     static_cast<size_t>(gpu_3do_instancing_rejection::count);
 static_assert(gpu_3do_instancing_rejection_count<=32U,
@@ -42,6 +50,7 @@ inline constexpr std::array<char const *,
 struct gpu_3do_instancing_audit_record {
     uint64_t mesh_id=0;
     uintptr_t geometry=0,group=0,material=0,instance=0;
+    gpu_3do_alpha_mode policy=gpu_3do_alpha_mode::solid;
     std::array<uint32_t,11> state{};
     bool state_eligible=false;
     uint32_t rejection_mask=0U;
@@ -56,21 +65,21 @@ struct gpu_3do_instancing_audit_stats {
     uint64_t eligible_repeat_extras=0,state_split_extras=0;
     std::array<uint64_t,gpu_3do_instancing_rejection_count> rejects_all{};
     std::array<uint64_t,gpu_3do_instancing_rejection_count> rejects_repeated{};
+    std::array<uint64_t,gpu_3do_instancing_alpha_policy_count> alpha_policy_ranges{};
 };
 inline uint32_t gpu_3do_instancing_float_bits(float x) {
     uint32_t bits=0;
     std::memcpy(&bits,&x,sizeof(bits));
     return bits;
 }
-// Only full, opaque, unmodified model draws without per-Thing lights or
-// view-dependent fragment state. This predicate is intentionally stricter
-// than final instancing will need to be; it is not used for actual draws.
+// Solid or masked opaque model draws without per-Thing lights or
+// view-dependent state. The live scheduler also uses this strict predicate.
 inline bool gpu_3do_instancing_conservative_candidate(
     gpu_3do_instance const &inst,gpu_3do_group const &group,
     gpu_3do_alpha_mode policy,bool material_view_dependent)
 {
     return inst.id!=0 && !!inst.geometry &&
-        policy==gpu_3do_alpha_mode::solid &&
+        gpu_3do_instancing_opaque_policy(policy) &&
         (group.face_type&0x2U)==0U &&
         !material_view_dependent &&
         !inst.shadow_only && !inst.is_projected_decal &&
@@ -81,8 +90,7 @@ inline bool gpu_3do_instancing_conservative_candidate(
         inst.num_lights==0U && !inst.crossing_lighting &&
         !inst.nonrigid_light_transform;
 }
-// The strict eligibility predicate above is intentionally unchanged.
-// The mask mirrors every rule and distinguishes individual material features.
+// The rejection mask mirrors eligibility and distinguishes material features.
 // material_rejections must be computed from the resolved material.
 inline uint32_t gpu_3do_instancing_rejection_mask(
     gpu_3do_instance const &inst,gpu_3do_group const &group,
@@ -94,7 +102,7 @@ inline uint32_t gpu_3do_instancing_rejection_mask(
         if(test)result|=gpu_3do_instancing_rejection_bit(reason);
     };
     reject(inst.id==0U || !inst.geometry,R::missing_geometry);
-    reject(policy!=gpu_3do_alpha_mode::solid,R::alpha_policy);
+    reject(!gpu_3do_instancing_opaque_policy(policy),R::alpha_policy);
     reject((group.face_type&0x2U)!=0U,R::cutout_face);
     reject(inst.shadow_only,R::shadow_only);
     reject(inst.is_projected_decal,R::projected_decal);
@@ -145,6 +153,9 @@ inline gpu_3do_instancing_audit_stats audit_gpu_3do_instancing(
         if(!r.mesh_id || !r.geometry || !r.group || !r.material ||
            !r.instance)continue;
         ++result.source_draws;
+        size_t const alpha_index=static_cast<size_t>(r.policy);
+        if(alpha_index<result.alpha_policy_ranges.size())
+            ++result.alpha_policy_ranges[alpha_index];
         geometry_key const identity{
             r.mesh_id,r.geometry,r.group,r.material};
         geometric[identity].insert(r.instance);
