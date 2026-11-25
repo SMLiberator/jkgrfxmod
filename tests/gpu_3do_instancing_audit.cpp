@@ -9,7 +9,8 @@ using namespace jkgm;
 
 static gpu_3do_instancing_audit_record record(
     gpu_3do_instance const &inst,gpu_3do_group const &group,
-    uintptr_t material,uintptr_t owner,bool view_dependent=false)
+    uintptr_t material,uintptr_t owner,bool view_dependent=false,
+    gpu_3do_alpha_mode policy=gpu_3do_alpha_mode::solid)
 {
     gpu_3do_instancing_audit_record r{};
     r.mesh_id=inst.id;
@@ -17,12 +18,13 @@ static gpu_3do_instancing_audit_record record(
     r.group=reinterpret_cast<uintptr_t>(&group);
     r.material=material;
     r.instance=owner;
+    r.policy=policy;
     bool const valid_state=
         gpu_3do_instancing_capture_state(inst,false,r.state);
     r.state_eligible=gpu_3do_instancing_conservative_candidate(
-        inst,group,gpu_3do_alpha_mode::solid,view_dependent) && valid_state;
+        inst,group,policy,view_dependent) && valid_state;
     r.rejection_mask=gpu_3do_instancing_rejection_mask(
-        inst,group,gpu_3do_alpha_mode::solid,
+        inst,group,policy,
         view_dependent?gpu_3do_instancing_rejection_bit(
             gpu_3do_instancing_rejection::specular):0U,valid_state);
     assert((r.rejection_mask==0U)==r.state_eligible);
@@ -48,6 +50,65 @@ int main() {
     assert(metrics.geometry_repeated_draws==1U);
     assert(metrics.compatible_repeated_draws==1U);
     assert(metrics.compatible_groups==1U);
+
+    // Alpha masking stays in the opaque depth-writing pass, and permits
+    // instancing of identical geometry, preserving shader cutoff behavior.
+    assert(gpu_3do_instancing_opaque_policy(gpu_3do_alpha_mode::solid));
+    assert(gpu_3do_instancing_opaque_policy(gpu_3do_alpha_mode::masked));
+    assert(gpu_3do_draws_in_pass(gpu_3do_alpha_mode::masked,false));
+    assert(!gpu_3do_draws_in_pass(gpu_3do_alpha_mode::masked,true));
+    assert(gpu_3do_fragment_visible(
+        gpu_3do_alpha_mode::masked,false,0.6f,0.5f));
+    assert(!gpu_3do_fragment_visible(
+        gpu_3do_alpha_mode::masked,false,0.4f,0.5f));
+    for(auto policy:{gpu_3do_alpha_mode::mixed,
+                     gpu_3do_alpha_mode::blend_only,
+                     gpu_3do_alpha_mode::dithered}) {
+        auto const rejected=record(
+            a,shared->groups[0],0x1000U,0x11U,false,policy);
+        assert(!gpu_3do_instancing_opaque_policy(policy));
+        assert(!rejected.state_eligible);
+        assert((rejected.rejection_mask&
+            gpu_3do_instancing_rejection_bit(
+                gpu_3do_instancing_rejection::alpha_policy))!=0U);
+    }
+    auto const masked_first=record(
+        a,shared->groups[0],0x1000U,0x11U,false,
+        gpu_3do_alpha_mode::masked);
+    auto const masked_second=record(
+        b,shared->groups[0],0x1000U,0x22U,false,
+        gpu_3do_alpha_mode::masked);
+    assert(masked_first.state_eligible && masked_second.state_eligible);
+    rows={masked_first,masked_second};
+    metrics=audit_gpu_3do_instancing(rows);
+    assert(metrics.compatible_repeated_draws==1U);
+    assert(metrics.alpha_policy_ranges[
+        static_cast<size_t>(gpu_3do_alpha_mode::masked)]==2U);
+    auto masked_schedule=schedule_gpu_3do_instancing(rows);
+    assert(masked_schedule.size()==2U);
+    assert(masked_schedule[0].batch_id!=0U);
+    assert(masked_schedule[1].batch_id==masked_schedule[0].batch_id);
+    // JK's translucent face bit remains an independent blocker.
+    gpu_3do_group translucent_face=shared->groups[0];
+    translucent_face.face_type=0x2U;
+    assert(!gpu_3do_instancing_conservative_candidate(
+        a,translucent_face,gpu_3do_alpha_mode::masked,false));
+    assert(!gpu_3do_instancing_conservative_candidate(
+        a,shared->groups[0],gpu_3do_alpha_mode::masked,true));
+    rows={record(a,shared->groups[0],0x1000U,0x11U,false,
+                 gpu_3do_alpha_mode::solid),
+          record(a,shared->groups[0],0x1000U,0x12U,false,
+                 gpu_3do_alpha_mode::mixed),
+          masked_first,
+          record(a,shared->groups[0],0x1000U,0x13U,false,
+                 gpu_3do_alpha_mode::blend_only),
+          record(a,shared->groups[0],0x1000U,0x14U,false,
+                 gpu_3do_alpha_mode::dithered)};
+    metrics=audit_gpu_3do_instancing(rows);
+    assert(metrics.source_draws==5U);
+    for(auto count:metrics.alpha_policy_ranges)assert(count==1U);
+    rows={record(a,shared->groups[0],0x1000U,0x11U),
+          record(b,shared->groups[0],0x1000U,0x22U)};
 
     // Same filename, different immutable snapshot ID: never merge.
     auto clone=std::make_shared<gpu_3do_geometry>();
