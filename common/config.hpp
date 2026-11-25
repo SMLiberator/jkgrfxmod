@@ -48,7 +48,7 @@ namespace jkgm {
         bool enable_sector_crossing_lighting = false; // experimental 3DO sector light/CMP/tint
         bool experimental_sector_crossing_vertex = false; // A/B: vertex instead of fragment sector selection
         bool enable_ssao = true;
-        bool enable_gbuffer_packing = false; // A/B compact color, emission, oct normals/light, and pigment
+        bool enable_gbuffer_packing = true; // consolidated compact G-buffer; false=legacy A/B (restart required)
         bool retain_hom_pixels = true; // vanilla JK HOM default; false = Clear Display
         bool enable_parallax = true;
         bool enable_texture_filtering = true;
@@ -59,7 +59,8 @@ namespace jkgm {
         bool profile_renderer_verbose = false; // opt-in detailed renderer diagnostics
         bool profile_audio = false; // read-only A3D/DirectSound DLL diagnostics
         bool use_gpu_cache = true; // unified GPU 3DO, sprite, and SithWorld rendering
-        bool experimental_packed_3do_vertices = false; // opt-in 52-byte compressed GPU 3DO vertices
+        int gpu_3do_vertex_format = 1; // 0=original 80B; 1=packed 52B with per-mesh fallback
+        bool experimental_3do_index_u16 = false; // 16-bit 3DO indices when safe; 32-bit otherwise
         bool experimental_auto_3do_lod = false; // force native GeoSet 0; select automatically generated GPU mesh LODs
         float gpu_3do_auto_lod_lod1_radius_px = 90.0f; // enter generated LOD1 below this projected radius
         float gpu_3do_auto_lod_lod2_radius_px = 28.0f; // enter generated LOD2 below this projected radius

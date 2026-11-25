@@ -10,6 +10,7 @@
 #include "reflection_capture_parallel_visibility.hpp"
 #include "cpu_render_workers.hpp"
 #include "gpu_3do_packed_vertex.hpp"
+#include "gpu_3do_index_packing.hpp"
 #include "gpu_3do_auto_lod.hpp"
 #include "planar_reflection_things.hpp"
 #include "planar_reflection_workset.hpp"
@@ -418,7 +419,17 @@ namespace jkgm {
         unsigned num_indices = 0;
         uint64_t vertex_count = 0;
         bool packed_vertex_format = false;
-        explicit gpu_3do_gl_mesh(bool enable_packing,
+        bool packed_index_format = false;
+        gl::index_type index_format = gl::index_type::uint32;
+        unsigned index_stride = sizeof(uint32_t);
+        gl::index_type gl_index_type() const { return index_format; }
+        GLenum raw_index_type() const {
+            return packed_index_format?GL_UNSIGNED_SHORT:GL_UNSIGNED_INT;
+        }
+        uintptr_t index_offset(uint64_t first_index) const {
+            return uintptr_t(first_index)*index_stride;
+        }
+        explicit gpu_3do_gl_mesh(bool enable_packing,bool enable_index_packing,
                                  gpu_3do_geometry const &source,
                                  gpu_3do_pack_profile *pack_profile=nullptr)
         {
@@ -509,9 +520,21 @@ namespace jkgm {
                                           offsetof(gpu_3do_vertex,cr));
             }
             gl::bind_buffer(gl::buffer_bind_target::element_array,indices);
-            gl::buffer_data(gl::buffer_bind_target::element_array,
-                            make_span(source.indices).as_const_bytes(),
-                            gl::buffer_usage::static_draw);
+            std::vector<uint16_t> packed_indices;
+            packed_index_format=enable_index_packing &&
+                gpu_3do_pack_indices_u16(
+                    source.indices,source.vertices.size(),packed_indices);
+            if(packed_index_format) {
+                index_format=gl::index_type::uint16;
+                index_stride=sizeof(uint16_t);
+                gl::buffer_data(gl::buffer_bind_target::element_array,
+                    make_span(packed_indices).as_const_bytes(),
+                    gl::buffer_usage::static_draw);
+            } else {
+                gl::buffer_data(gl::buffer_bind_target::element_array,
+                    make_span(source.indices).as_const_bytes(),
+                    gl::buffer_usage::static_draw);
+            }
         }
     };
 
@@ -1727,7 +1750,8 @@ namespace jkgm {
                          " CPU_us_avg=",
                          (profile_window.gpu_mutation_ns/1000)/frames,
                          " NOTE=no_cache_wide_scan_full_edits_hash_on_next_use");
-                if(the_config->experimental_packed_3do_vertices) {
+                if(the_config->gpu_3do_vertex_format!=0 ||
+                   the_config->experimental_3do_index_u16) {
                     auto const &packing=packed_3do_upload_profile;
                     uint64_t const attempted=packing.accepted_uploads+
                                              packing.rejected_uploads;
@@ -1773,6 +1797,20 @@ namespace jkgm {
                             live_legacy_vertices+=mesh.vertex_count;
                         }
                     }
+                    uint64_t index_u16=0,index_u32=0;
+                    uint64_t index_bytes=0,index_bytes_saved=0;
+                    for(auto const &entry:gpu_3do_gl_cache) {
+                        auto const &mesh=*entry.second;
+                        if(mesh.packed_index_format)++index_u16;
+                        else ++index_u32;
+                        index_bytes+=uint64_t(mesh.num_indices)*mesh.index_stride;
+                        index_bytes_saved+=uint64_t(mesh.num_indices)*
+                            (sizeof(uint32_t)-mesh.index_stride);
+                    }
+                    LOG_INFO("PERF gpu_3do index_packing live_u16=",
+                        index_u16," live_u32=",index_u32,
+                        " kib=",index_bytes/1024U,
+                        " saved_kib=",index_bytes_saved/1024U);
                     LOG_INFO("PERF gpu_3do packing_live_cache packed=",
                              live_packed," legacy=",live_legacy,
                              " vertex_kib=",
@@ -5968,7 +6006,8 @@ namespace jkgm {
                     auto it=gpu_3do_gl_cache.find(inst.id);
                     if(it==gpu_3do_gl_cache.end()) {
                         auto ptr=std::make_unique<gpu_3do_gl_mesh>(
-                            the_config->experimental_packed_3do_vertices,
+                            (the_config->gpu_3do_vertex_format!=0),
+                            the_config->experimental_3do_index_u16,
                             *inst.geometry,
                             the_config->profile_renderer
                                 ? &packed_3do_upload_profile : nullptr);
@@ -6380,18 +6419,19 @@ namespace jkgm {
                         std::max(sprite_batch_count,model_batch_count);
                     prog.set_sprite_instances(sprite_models,count);
                     glDrawElementsInstanced(GL_TRIANGLES,
-                        static_cast<GLsizei>(group.count),GL_UNSIGNED_INT,
+                        static_cast<GLsizei>(group.count),
+                        gpu_mesh.raw_index_type(),
                         reinterpret_cast<void const *>(
-                            uintptr_t(group.offset)*sizeof(uint32_t)),
+                            gpu_mesh.index_offset(group.offset)),
                         static_cast<GLsizei>(count));
                     prog.set_sprite_instances(sprite_models,0);
                     // Restore the normal per-Thing uniform path.
                     active_instance=nullptr;
                 } else if(draw_end==draw_start+1) {
                     gl::draw_elements(gl::element_type::triangles,group.count,
-                                      gl::index_type::uint32,
+                                      gpu_mesh.gl_index_type(),
                                       static_cast<ptrdiff_t>(
-                                          group.offset*sizeof(uint32_t)));
+                                          gpu_mesh.index_offset(group.offset)));
                 } else {
                     // MultiDraw groups share one VAO and state. Preserve
                     // authored index order (including alpha depth order) as
@@ -6407,9 +6447,9 @@ namespace jkgm {
                     if(index_runs.size()==1U) {
                         auto const &run=index_runs.front();
                         gl::draw_elements(gl::element_type::triangles,run.count,
-                            gl::index_type::uint32,
+                            gpu_mesh.gl_index_type(),
                             static_cast<ptrdiff_t>(
-                                uint64_t(run.first_index)*sizeof(uint32_t)));
+                                gpu_mesh.index_offset(run.first_index)));
                     } else {
                         multidraw_counts.clear();
                         multidraw_offsets.clear();
@@ -6420,10 +6460,10 @@ namespace jkgm {
                                 static_cast<GLsizei>(run.count));
                             multidraw_offsets.push_back(
                                 reinterpret_cast<void const *>(
-                                    uintptr_t(run.first_index)*sizeof(uint32_t)));
+                                    gpu_mesh.index_offset(run.first_index)));
                         }
                         glMultiDrawElements(GL_TRIANGLES,multidraw_counts.data(),
-                                            GL_UNSIGNED_INT,multidraw_offsets.data(),
+                                            gpu_mesh.raw_index_type(),multidraw_offsets.data(),
                                             static_cast<GLsizei>(multidraw_counts.size()));
                     }
                 }
@@ -7136,7 +7176,8 @@ namespace jkgm {
                         }
                         mesh=gpu_3do_gl_cache.emplace(item.sprite_id,
                             std::make_unique<gpu_3do_gl_mesh>(
-                            the_config->experimental_packed_3do_vertices,
+                            (the_config->gpu_3do_vertex_format!=0),
+                            the_config->experimental_3do_index_u16,
                                 *item.sprite_geometry,
                             the_config->profile_renderer
                                 ? &packed_3do_upload_profile : nullptr)).first;
@@ -7156,7 +7197,8 @@ namespace jkgm {
                 if(item.sprite) {
                     program.set_sprite_pose(item.sprite_pose);
                     gl::bind_vertex_array(sprite_mesh->vao);
-                    glDrawElements(GL_TRIANGLES,6,GL_UNSIGNED_INT,nullptr);
+                    glDrawElements(GL_TRIANGLES,6,
+                        sprite_mesh->raw_index_type(),nullptr);
                     gpu_3do_last_drawn[item.sprite_id]=gpu_3do_present_serial;
                 } else {
                     gl::bind_vertex_array_raw(thing_occlusion_proxy_vao);
@@ -7401,7 +7443,8 @@ namespace jkgm {
                     if(sprite==gpu_3do_gl_cache.end())continue;
                     program.set_sprite_pose(item.sprite_pose);
                     gl::bind_vertex_array(sprite->second->vao);
-                    glDrawElements(GL_TRIANGLES,6,GL_UNSIGNED_INT,nullptr);
+                    glDrawElements(GL_TRIANGLES,6,
+                        sprite->second->raw_index_type(),nullptr);
                     gpu_3do_last_drawn[item.sprite_id]=gpu_3do_present_serial;
                 } else {
                     gl::bind_vertex_array_raw(thing_occlusion_proxy_vao);
@@ -8262,7 +8305,8 @@ namespace jkgm {
                 if(it==gpu_3do_gl_cache.end()) {
                     it=gpu_3do_gl_cache.emplace(instance.id,
                         std::make_unique<gpu_3do_gl_mesh>(
-                            the_config->experimental_packed_3do_vertices,*instance.geometry,
+                            (the_config->gpu_3do_vertex_format!=0),
+                            the_config->experimental_3do_index_u16,*instance.geometry,
                             the_config->profile_renderer
                                 ? &packed_3do_upload_profile : nullptr)).first;
                     if(the_config->profile_renderer)
@@ -8300,9 +8344,9 @@ namespace jkgm {
                         (caster.cutout?1.0f:caster.texture.opacity),
                     caster.texture.masked);
                 gl::draw_elements(gl::element_type::triangles,group.count,
-                                  gl::index_type::uint32,
+                                  it->second->gl_index_type(),
                                   static_cast<ptrdiff_t>(
-                                      group.offset*sizeof(uint32_t)));
+                                      it->second->index_offset(group.offset)));
             }
             // World draw state above stays double-sided for historical
             // sector winding; 3DOs explicitly honor their backfaces.
@@ -8549,7 +8593,8 @@ namespace jkgm {
                     if(it==gpu_3do_gl_cache.end())
                         it=gpu_3do_gl_cache.emplace(inst->id,
                             std::make_unique<gpu_3do_gl_mesh>(
-                            the_config->experimental_packed_3do_vertices,
+                            (the_config->gpu_3do_vertex_format!=0),
+                            the_config->experimental_3do_index_u16,
                                 *inst->geometry,
                             the_config->profile_renderer
                                 ? &packed_3do_upload_profile : nullptr)).first;
@@ -8612,8 +8657,8 @@ namespace jkgm {
                                 (cutout?1.0f:tex.opacity),tex.masked);
                         gl::bind_vertex_array(it->second->vao);
                         gl::draw_elements(gl::element_type::triangles,g.count,
-                            gl::index_type::uint32,static_cast<ptrdiff_t>(
-                                g.offset*sizeof(uint32_t)));
+                            it->second->gl_index_type(),static_cast<ptrdiff_t>(
+                                it->second->index_offset(g.offset)));
                         if(!part_drawn) {
                             gpu_3do_last_drawn[inst->id]=gpu_3do_present_serial;
                             part_drawn=true;
@@ -9974,7 +10019,8 @@ namespace jkgm {
                             if(mesh==gpu_3do_gl_cache.end())
                                 mesh=gpu_3do_gl_cache.emplace(inst.id,
                                     std::make_unique<gpu_3do_gl_mesh>(
-                            the_config->experimental_packed_3do_vertices,
+                            (the_config->gpu_3do_vertex_format!=0),
+                            the_config->experimental_3do_index_u16,
                                         *inst.geometry,
                             the_config->profile_renderer
                                 ? &packed_3do_upload_profile : nullptr)).first;
@@ -10011,9 +10057,10 @@ namespace jkgm {
                             }
                             prog.set_instanced_models(transforms,amount);
                             glDrawElementsInstanced(GL_TRIANGLES,
-                                static_cast<GLsizei>(g.count),GL_UNSIGNED_INT,
+                                static_cast<GLsizei>(g.count),
+                                mesh->second->raw_index_type(),
                                 reinterpret_cast<void const *>(
-                                    uintptr_t(g.offset)*sizeof(uint32_t)),
+                                    mesh->second->index_offset(g.offset)),
                                 static_cast<GLsizei>(amount));
                             gpu_3do_last_drawn[inst.id]=gpu_3do_present_serial;
                             ++gl_calls;
@@ -10053,7 +10100,8 @@ namespace jkgm {
                     if(it==gpu_3do_gl_cache.end())
                         it=gpu_3do_gl_cache.emplace(instance.id,
                             std::make_unique<gpu_3do_gl_mesh>(
-                            the_config->experimental_packed_3do_vertices,*instance.geometry,
+                            (the_config->gpu_3do_vertex_format!=0),
+                            the_config->experimental_3do_index_u16,*instance.geometry,
                             the_config->profile_renderer
                                 ? &packed_3do_upload_profile : nullptr)).first;
                     auto const &m=instance.transform;
@@ -10086,9 +10134,9 @@ namespace jkgm {
                         draw.texture.masked);
                     if(last==first+1) {
                         gl::draw_elements(gl::element_type::triangles,
-                            group.count,gl::index_type::uint32,
+                            group.count,it->second->gl_index_type(),
                             static_cast<ptrdiff_t>(
-                                group.offset*sizeof(uint32_t)));
+                                it->second->index_offset(group.offset)));
                     } else {
                         batch_counts.clear();
                         batch_offsets.clear();
@@ -10096,10 +10144,10 @@ namespace jkgm {
                             auto const &g=*scheduled[k]->group;
                             batch_counts.push_back(static_cast<GLsizei>(g.count));
                             batch_offsets.push_back(reinterpret_cast<void const *>(
-                                uintptr_t(g.offset)*sizeof(uint32_t)));
+                                it->second->index_offset(g.offset)));
                         }
                         glMultiDrawElements(GL_TRIANGLES,batch_counts.data(),
-                            GL_UNSIGNED_INT,batch_offsets.data(),
+                            it->second->raw_index_type(),batch_offsets.data(),
                             static_cast<GLsizei>(batch_counts.size()));
                         ++multi_calls;
                     }
@@ -10712,7 +10760,8 @@ namespace jkgm {
                     if(it==gpu_3do_gl_cache.end())
                         it=gpu_3do_gl_cache.emplace(inst.id,
                             std::make_unique<gpu_3do_gl_mesh>(
-                            the_config->experimental_packed_3do_vertices,*inst.geometry,
+                            (the_config->gpu_3do_vertex_format!=0),
+                            the_config->experimental_3do_index_u16,*inst.geometry,
                             the_config->profile_renderer
                                 ? &packed_3do_upload_profile : nullptr)).first;
                     auto const &m=inst.transform;
@@ -10724,9 +10773,9 @@ namespace jkgm {
                     set_water_color(draw.texture);
                     gl::bind_vertex_array(it->second->vao);
                     gl::draw_elements(gl::element_type::triangles,
-                        group.count,gl::index_type::uint32,
-                        static_cast<ptrdiff_t>(group.offset*
-                                              sizeof(uint32_t)));
+                        group.count,it->second->gl_index_type(),
+                        static_cast<ptrdiff_t>(
+                            it->second->index_offset(group.offset)));
                     gpu_3do_last_drawn[inst.id]=gpu_3do_present_serial;
                 }
                 map.signatures[cascade]=signatures[cascade];
@@ -14075,7 +14124,8 @@ namespace jkgm {
                     if(gpu_3do_gl_cache.size()>8192U)return;
                     glmesh=gpu_3do_gl_cache.emplace(inst.id,
                         std::make_unique<gpu_3do_gl_mesh>(
-                            the_config->experimental_packed_3do_vertices,
+                            (the_config->gpu_3do_vertex_format!=0),
+                            the_config->experimental_3do_index_u16,
                             *inst.geometry,
                             the_config->profile_renderer
                                 ? &packed_3do_upload_profile : nullptr)).first;
@@ -14133,9 +14183,9 @@ namespace jkgm {
                     } else gl::set_cull_face_enabled(true);
                     gl::draw_elements(gl::element_type::triangles,
                         static_cast<GLsizei>(group.count),
-                        gl::index_type::uint32,
+                        glmesh->second->gl_index_type(),
                         static_cast<ptrdiff_t>(
-                            group.offset*sizeof(uint32_t)));
+                            glmesh->second->index_offset(group.offset)));
                     if(!mesh_drawn) {
                         gpu_3do_last_drawn[inst.id]=gpu_3do_present_serial;
                         mesh_drawn=true;
@@ -14177,9 +14227,9 @@ namespace jkgm {
                     if(!submit_material(draw.material,draw.solid))continue;
                     gl::draw_elements(gl::element_type::triangles,
                         static_cast<GLsizei>(draw.group->count),
-                        gl::index_type::uint32,
+                        it->second->gl_index_type(),
                         static_cast<ptrdiff_t>(
-                            draw.group->offset*sizeof(uint32_t)));
+                            it->second->index_offset(draw.group->offset)));
                     gpu_3do_last_drawn[inst.id]=gpu_3do_present_serial;
                     ++model_drawn;
                 }
@@ -14227,9 +14277,9 @@ namespace jkgm {
                     if(!submit_material(batch.material,batch.solid))continue;
                     gl::draw_elements(gl::element_type::triangles,
                         static_cast<GLsizei>(batch.group->count),
-                        gl::index_type::uint32,
+                        it->second->gl_index_type(),
                         static_cast<ptrdiff_t>(
-                            batch.group->offset*sizeof(uint32_t)));
+                            it->second->index_offset(batch.group->offset)));
                     gpu_3do_last_drawn[inst.id]=gpu_3do_present_serial;
                     ++model_drawn;
                 }
@@ -14714,7 +14764,7 @@ namespace jkgm {
                                 (mesh.packed_vertex_format
                                     ?sizeof(gpu_3do_packed_vertex)
                                     :sizeof(gpu_3do_vertex))+
-                                uint64_t(mesh.num_indices)*sizeof(uint32_t);
+                                uint64_t(mesh.num_indices)*mesh.index_stride;
                             gpu_gl_recent_swept_ids[it->first]=
                                 gpu_3do_present_serial;
                         }

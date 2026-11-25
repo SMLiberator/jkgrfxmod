@@ -254,10 +254,26 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("use_gpu_cache")) {
             j.at("use_gpu_cache").get_to(rv->use_gpu_cache);
         }
-        if(j.contains("experimental_packed_3do_vertices")) {
-            j.at("experimental_packed_3do_vertices").get_to(
-                rv->experimental_packed_3do_vertices);
+        if(j.contains("gpu_3do_vertex_format")) {
+            auto const &v=j.at("gpu_3do_vertex_format");
+            if(!v.is_number_integer())
+                throw std::runtime_error("gpu_3do_vertex_format must be 0 or 1");
+            int const format=v.get<int>();
+            if(format<0 || format>1)
+                throw std::runtime_error("gpu_3do_vertex_format must be 0 or 1");
+            rv->gpu_3do_vertex_format=format;
+        } else if(j.contains("experimental_packed_3do_vertices")) {
+            // Backward-compatible boolean alias for the former experimental
+            // setting. The canonical config is now the vertex format ID.
+            bool enabled=false;
+            j.at("experimental_packed_3do_vertices").get_to(enabled);
+            rv->gpu_3do_vertex_format=enabled?1:0;
+            LOG_WARNING("Deprecated experimental_packed_3do_vertices; ",
+                        "use gpu_3do_vertex_format (0=80B, 1=52B)");
         }
+        if(j.contains("experimental_3do_index_u16"))
+            j.at("experimental_3do_index_u16").get_to(
+                rv->experimental_3do_index_u16);
                 if(j.contains("experimental_3do_occlusion_culling")) {
             j.at("experimental_3do_occlusion_culling").get_to(
                 rv->experimental_3do_occlusion_culling);
