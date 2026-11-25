@@ -31,6 +31,9 @@ inline constexpr bool gpu_3do_instancing_opaque_policy(
            policy==gpu_3do_alpha_mode::masked;
 }
 inline constexpr size_t gpu_3do_instancing_alpha_policy_count=5U;
+static_assert(static_cast<size_t>(gpu_3do_alpha_mode::dithered)+1U==
+                  gpu_3do_instancing_alpha_policy_count,
+              "Update 3DO instancing alpha histogram when modes change");
 inline constexpr size_t gpu_3do_instancing_rejection_count=
     static_cast<size_t>(gpu_3do_instancing_rejection::count);
 static_assert(gpu_3do_instancing_rejection_count<=32U,
