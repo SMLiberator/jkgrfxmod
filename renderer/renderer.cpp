@@ -5431,11 +5431,9 @@ namespace jkgm {
             struct indexed_model_member {
                 size_t instance_index;
                 submission_context *context;
-                size_t order;
             };
             static thread_local gpu_3do_indexed_instancing_collector<
                 indexed_model_member> model_collector;
-            size_t model_extra_members=0U;
             if(collect_model_batches)model_collector.reset();
             auto instancing_material_rejections=[&](
                 gpu_3do_instance const &inst,gpu_3do_texture const &material) {
@@ -5881,14 +5879,14 @@ namespace jkgm {
                                 return instancing_material_rejections(inst,tex)==0U;
                             });
                         if(model_collector.append(slot,
-                            {instance_index,&context,source_order})) {
+                            {instance_index,&context})) {
                             // The first visible member is the source-order
                             // anchor; subsequent members need only their
                             // instance/context/order, not full draw records.
                             if(model_collector.range(slot).members.size()==1U) {
                                 candidate.model_batch_group=slot;
                                 draws.push_back(std::move(candidate));
-                            } else ++model_extra_members;
+                            }
                         } else draws.push_back(std::move(candidate));
                     } else draws.push_back(std::move(candidate));
                 }
@@ -5907,35 +5905,15 @@ namespace jkgm {
                     elapsed_profile_us(collect_begin,profile_clock::now());
             auto const sort_begin=gpu_profiling
                 ?profile_clock::now():profile_clock::time_point{};
-            if(collect_model_batches) {
-                auto const reorder_begin=gpu_profiling
-                    ?profile_clock::now():profile_clock::time_point{};
-                // Preserve first-appearance order exactly as the scheduler
-                // does. Expand only at the existing submission boundary;
-                // the 32-matrix shader and ordinary alpha path stay intact.
-                merged_draws.clear();
-                merged_draws.reserve(draws.size()+model_extra_members);
-                for(auto const &anchor:draws) {
-                    if(anchor.model_batch_group==0U) {
-                        merged_draws.push_back(anchor);
-                        continue;
-                    }
-                    auto const &slot=model_collector.range(
-                        anchor.model_batch_group);
-                    for(auto const &member:slot.members) {
-                        auto item=anchor;
-                        item.instance=&instances[member.instance_index];
-                        item.context=member.context;
-                        item.order=member.order;
-                        if(slot.members.size()==1U)item.model_batch_group=0U;
-                        merged_draws.push_back(item);
-                    }
-                }
-                draws.swap(merged_draws);
-                if(gpu_profiling)
-                    profile_frame.gpu_instancing_reorder_us+=elapsed_profile_us(
-                        reorder_begin,profile_clock::now());
-            }
+            // Single-member slots are ordinary draws and may coalesce
+            // exactly as before. Multi-member slots remain compact through
+            // submission; no per-member pending_draw expansion.
+            if(collect_model_batches)
+                for(auto &anchor:draws)
+                    if(anchor.model_batch_group!=0U &&
+                       model_collector.range(anchor.model_batch_group).
+                           members.size()==1U)
+                        anchor.model_batch_group=0U;
             if(!transparent) {
                 // Every Thing's opaque ranges are already in the exact
                 // previous material/cel/face-state order. No per-frame
@@ -6202,8 +6180,21 @@ namespace jkgm {
             auto const submit_begin=gpu_profiling
                 ?profile_clock::now():profile_clock::time_point{};
             auto submit_draws=[&] {
+            size_t compact_offset=0U;
             for(size_t draw_start=0;draw_start<draws.size();) {
-                auto const &draw=draws[draw_start];
+                // An indexed anchor represents one complete range bucket.
+                // Materialize only the leading draw of the current shader
+                // chunk, taking matrices directly from compact membership.
+                auto draw=draws[draw_start];
+                auto const *compact_members=collect_model_batches &&
+                    draw.model_batch_group!=0U
+                    ? &model_collector.range(draw.model_batch_group).members
+                    : nullptr;
+                if(compact_members) {
+                    auto const &member=(*compact_members)[compact_offset];
+                    draw.instance=&instances[member.instance_index];
+                    draw.context=member.context;
+                }
                 auto const &material=*draw.texture;
                 // Never bias post-exempt camera HUD geometry.
                 material_depth_offset.set(post_exempt?0.0f:material.depth_bias);
@@ -6231,7 +6222,11 @@ namespace jkgm {
                     gpu_specular_parameters(material,false).first<=0.0f;
                 size_t sprite_batch_count=0;
                 size_t model_batch_count=0;
-                if(draw.model_batch_group!=0U && !transparent) {
+                if(compact_members) {
+                    model_batch_count=std::min(
+                        compact_members->size()-compact_offset,
+                        size_t(shaders::gpu_3do_preview_shader::max_sprite_instances));
+                } else if(draw.model_batch_group!=0U && !transparent) {
                     size_t end=draw_start+1;
                     while(end<draws.size() &&
                           end-draw_start<
@@ -6291,10 +6286,11 @@ namespace jkgm {
                 // so the painter order, alpha blending and depth tests are
                 // unchanged. Never reorder alpha ranges by material as in
                 // the opaque path.
-                while(sprite_batch_count==0 && model_batch_count==0 &&
+                while(!compact_members && sprite_batch_count==0 && model_batch_count==0 &&
                       draw_end<draws.size()) {
                     auto const &other=draws[draw_end];
-                    if(other.instance!=draw.instance ||
+                    if((collect_model_batches && other.model_batch_group!=0U) ||
+                       other.instance!=draw.instance ||
                        other.group->material!=group.material ||
                        other.group->cel!=group.cel ||
                        other.group->face_type!=group.face_type ||
@@ -6736,8 +6732,13 @@ namespace jkgm {
                     std::array<std::array<float,12>,
                         shaders::gpu_3do_preview_shader::max_sprite_instances>
                             sprite_models{};
-                    for(size_t n=draw_start;n<draw_end;++n)
-                        sprite_models[n-draw_start]=draws[n].context->modelview;
+                    if(compact_members) {
+                        for(size_t n=0;n<model_batch_count;++n)
+                            sprite_models[n]=(*compact_members)[compact_offset+n].context->modelview;
+                    } else {
+                        for(size_t n=draw_start;n<draw_end;++n)
+                            sprite_models[n-draw_start]=draws[n].context->modelview;
+                    }
                     size_t const count=
                         std::max(sprite_batch_count,model_batch_count);
                     prog.set_sprite_instances(sprite_models,count);
@@ -6819,20 +6820,22 @@ namespace jkgm {
                 }
                 if(the_config->profile_renderer) {
                     ++profile_frame.gpu_draw_calls;
-                    profile_frame.gpu_draw_ranges+=draw_end-draw_start;
+                    size_t const source_count=compact_members
+                        ?model_batch_count:draw_end-draw_start;
+                    profile_frame.gpu_draw_ranges+=source_count;
                     profile_frame.gpu_index_subdraws+=emitted_subranges;
-                    if(sprite_batch_count==0U && draw_end>draw_start+1U) {
+                    if(sprite_batch_count==0U && source_count>1U) {
                         profile_frame.gpu_index_coalesced_ranges+=
-                            draw_end-draw_start-emitted_subranges;
+                            source_count-emitted_subranges;
                         if(emitted_subranges==1U)
                             ++profile_frame.gpu_index_coalesced_singles;
                     }
                     if(transparent) {
                         ++profile_frame.gpu_transparent_draw_calls;
-                        profile_frame.gpu_transparent_draw_ranges+=draw_end-draw_start;
+                        profile_frame.gpu_transparent_draw_ranges+=source_count;
                     } else {
                         ++profile_frame.gpu_opaque_draw_calls;
-                        profile_frame.gpu_opaque_draw_ranges+=draw_end-draw_start;
+                        profile_frame.gpu_opaque_draw_ranges+=source_count;
                     }
                     if(draw.sprite_batch_group!=0U || sprite_batch_eligible)
                         profile_frame.gpu_sprite_instancing_eligible+=
@@ -6848,7 +6851,10 @@ namespace jkgm {
                             sprite_batch_count;
                     } else if(emitted_subranges>1U)
                         ++profile_frame.gpu_multidraw_calls;
-                    for(size_t n=draw_start;n<draw_end;n++) {
+                    if(compact_members) {
+                        profile_frame.gpu_draw_triangles+=
+                            uint64_t(group.count/3U)*source_count;
+                    } else for(size_t n=draw_start;n<draw_end;n++) {
                         auto const &item=draws[n];
                         profile_frame.gpu_draw_triangles+=item.group->count/3;
                         if(post_exempt || decals_only)continue;
@@ -6864,6 +6870,11 @@ namespace jkgm {
                             ++profile_frame.gpu_opaque_cutout_sprite_ranges;
                         }
                     }
+                }
+                if(compact_members) {
+                    compact_offset+=model_batch_count;
+                    if(compact_offset<compact_members->size())continue;
+                    compact_offset=0U;
                 }
                 draw_start=draw_end;
             }
