@@ -88,6 +88,18 @@ int main() {
     assert(masked_schedule.size()==2U);
     assert(masked_schedule[0].batch_id!=0U);
     assert(masked_schedule[1].batch_id==masked_schedule[0].batch_id);
+    // Both are eligible independently, but must never share a draw:
+    // fragment alpha cutoff is a draw-wide shader uniform.
+    rows={record(a,shared->groups[0],0x1000U,0x11U,false,
+                 gpu_3do_alpha_mode::solid),masked_second};
+    metrics=audit_gpu_3do_instancing(rows);
+    assert(metrics.geometry_repeated_draws==1U);
+    assert(metrics.conservative_draws==2U);
+    assert(metrics.compatible_repeated_draws==0U);
+    masked_schedule=schedule_gpu_3do_instancing(rows);
+    assert(masked_schedule.size()==2U);
+    assert(masked_schedule[0].batch_id==0U);
+    assert(masked_schedule[1].batch_id==0U);
     // JK's translucent face bit remains an independent blocker.
     gpu_3do_group translucent_face=shared->groups[0];
     translucent_face.face_type=0x2U;
