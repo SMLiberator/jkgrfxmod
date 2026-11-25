@@ -113,7 +113,7 @@ int main() {
     record_world_cache_live_upload(sectors,previous,changed);
     assert(previous[1].tint[1]==0.5f);
     assert(plan_world_cache_live_upload(sectors,previous,selected).empty());
-    tint[12]={{0.75f,0.0f,0.0f}};
+    tint[8]={{0.75f,0.0f,0.0f}}; // surface 12 begins at vertex 8
     a.surface_index=12U;a.first_index=12U;
     assert(stage_world_cache_sector_surface_descriptor(
         mesh,lookup,a,sector_table+0x98U*2U,sector_table,4U,
