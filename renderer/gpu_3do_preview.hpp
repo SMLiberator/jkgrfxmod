@@ -133,6 +133,11 @@ namespace jkgm {
         bool native_translucent=false;
     };
     struct gpu_3do_geometry {
+        // A procedural SPR carries only face/MAT metadata, not 3DO vertices.
+        bool procedural_sprite=false;
+        std::array<float,4> procedural_sprite_uv{{0,1,0,1}}; // left,right,top,bottom (MAT pixels)
+        float procedural_sprite_extra_light=0.0f;
+        float procedural_sprite_light_mode=0.0f;
         std::vector<gpu_3do_face_plane> face_planes;
         std::vector<gpu_3do_vertex> vertices;
         std::vector<uint32_t> indices;
@@ -314,6 +319,10 @@ namespace jkgm {
         float thing_opacity=1.0f; // GetThingOpacity; per-Thing, not mesh state
         bool thing_dither=false; // opaque-pass screen-door fade
         uintptr_t sprite_occlusion_resource=0; // native rdSprite pointer; 0 when not a Thing-owned SPR
+        // The existing occlusion shader consumes vertex attributes. Share a
+        // single native-layout proxy for procedural quads only when enabled.
+        uint64_t sprite_occlusion_quad_id=0;
+        std::shared_ptr<gpu_3do_geometry const> sprite_occlusion_quad;
         // Stable identity of the model mesh this instance came from.
         // Used by moving decals; zero when not captured or not an eligible
         // moving receiver. Never infer ownership from shared mesh pointers.

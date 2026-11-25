@@ -39,6 +39,8 @@ jobs:
         sprite_orientation_test.exe
         cl.exe /nologo /EHsc /std:c++17 /I. tests\\sprite_gpu_depth_offset.cpp /Fe:sprite_gpu_depth_offset_test.exe || exit /b 1
         sprite_gpu_depth_offset_test.exe || exit /b 1
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\sprite_procedural_quad.cpp /Fe:sprite_procedural_quad_test.exe || exit /b 1
+        sprite_procedural_quad_test.exe || exit /b 1
         cl.exe /nologo /EHsc /std:c++17 /I. tests\gpu_3do_index_packing.cpp /Fe:gpu_3do_index_packing_test.exe || exit /b 1
         gpu_3do_index_packing_test.exe || exit /b 1
 

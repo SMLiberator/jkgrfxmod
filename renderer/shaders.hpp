@@ -314,6 +314,8 @@ namespace jkgm {
         class gpu_3do_preview_shader : public opengl_shader {
             gl::uniform_location_id view_right,view_forward,view_up,view_origin;
             gl::uniform_location_id sprite_instance_count,sprite_instance_matrix;
+            gl::uniform_location_id procedural_sprite,procedural_sprite_uv,
+                                    procedural_sprite_light;
             gl::uniform_location_id projection;
             gl::uniform_location_id packed_vertex_format;
             gl::uniform_location_id albedo_sampler,emissive_sampler,uv_scale,has_texture,
@@ -401,6 +403,8 @@ namespace jkgm {
                 size_t count);
             void set_projection(point<4,float> projection_params);
             void set_packed_vertex_format(bool enabled);
+            void set_procedural_sprite(bool enabled,point<4,float> uv,
+                                       float extra_light,float light_mode);
             void set_surface(int albedo_source,float width,float height,bool transparent,
                              int blend,int alpha_policy,float cutoff,float face_opacity,
                              point<4,float> tint,point<2,float> scroll,

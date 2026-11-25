@@ -829,6 +829,9 @@ jkgm::shaders::gpu_3do_preview_shader::gpu_3do_preview_shader(
           the_program,"sprite_instance_count"))
     , sprite_instance_matrix(gl::get_uniform_location(
           the_program,"sprite_instance_matrix[0]"))
+    , procedural_sprite(gl::get_uniform_location(the_program,"procedural_sprite"))
+    , procedural_sprite_uv(gl::get_uniform_location(the_program,"procedural_sprite_uv"))
+    , procedural_sprite_light(gl::get_uniform_location(the_program,"procedural_sprite_light"))
     , projection(gl::get_uniform_location(the_program,"projection"))
     , packed_vertex_format(gl::get_uniform_location(the_program,"packed_vertex_format"))
     , albedo_sampler(gl::get_uniform_location(the_program,"albedo_map"))
@@ -1045,6 +1048,15 @@ void jkgm::shaders::gpu_3do_preview_shader::set_view_matrix(
 void jkgm::shaders::gpu_3do_preview_shader::set_packed_vertex_format(bool enabled)
 {
     gl::set_uniform_integer(packed_vertex_format,enabled?1:0);
+}
+void jkgm::shaders::gpu_3do_preview_shader::set_procedural_sprite(
+    bool enabled,point<4,float> uv,float extra_light,float light_mode)
+{
+    gl::set_uniform_integer(procedural_sprite,enabled?1:0);
+    if(!enabled)return;
+    gl::set_uniform_vector(procedural_sprite_uv,uv);
+    gl::set_uniform_vector(procedural_sprite_light,
+                           make_point(extra_light,light_mode));
 }
 void jkgm::shaders::gpu_3do_preview_shader::set_sprite_instances(
     std::array<std::array<float,12>,max_sprite_instances> const &models,

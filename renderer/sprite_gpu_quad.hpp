@@ -47,6 +47,34 @@ inline std::shared_ptr<gpu_3do_geometry const> make_gpu_sprite_quad(
     g->indices={0,1,2,0,2,3};
     return g;
 }
+
+// GPU-only sprite shape. Material/UV/light metadata is enough to render a
+// native-sized quad: gl_VertexID generates all positions and attributes.
+inline std::shared_ptr<gpu_3do_geometry const> make_gpu_sprite_procedural_quad(
+    uintptr_t mat,sprite_decal_texture_coords const &uv,uint32_t flags,
+    bool solid_color=false,int32_t cel=-1,
+    uint32_t light_mode=0U,float extra_light=0.0f)
+{
+    if(!mat || !valid_sprite_decal_texture_coords(uv) || (flags&~3U) ||
+       light_mode>3U || !std::isfinite(extra_light))return {};
+    auto g=std::make_shared<gpu_3do_geometry>();
+    g->procedural_sprite=true;
+    g->procedural_sprite_uv={{uv.left,uv.right,uv.top,uv.bottom}};
+    g->procedural_sprite_extra_light=extra_light;
+    // Identical to the old cached quad: light modes 2/3 approximate 1.
+    g->procedural_sprite_light_mode=light_mode==0U?0.0f:1.0f;
+    gpu_3do_group group{};
+    group.material=mat;group.cel=cel;
+    group.face_type=flags|1U;group.count=6U;
+    group.solid_color=solid_color;
+    group.bounds_min={{-1,0,-1}};
+    group.bounds_max={{1,0,1}};
+    g->groups.push_back(group);
+    if(solid_color)g->solid_material_refs.emplace_back(mat,cel);
+    else g->material_refs.emplace_back(mat,cel);
+    return g;
+}
+
 // Build a separate light-facing caster, independent of the view camera.
 // Reuse the same dimensions/roll/SPR offsets and immutable quad as the
 // visible sprite. A fixed SPR also faces the sun in this depth-only pass:

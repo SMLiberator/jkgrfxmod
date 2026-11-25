@@ -67,6 +67,7 @@
     "ssr_ray_thickness": 0.6,
     "ssr_max_distance": 64.0,
     "enable_gpu_sprite_instancing": true,
+    "experimental_procedural_sprite_quads": false,
     "experimental_half_res_fluid_sprites": false,
     "fluid_sprite_layer_budget": 0,
     "enable_saber_trails": true,

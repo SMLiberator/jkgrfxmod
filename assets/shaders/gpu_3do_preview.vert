@@ -48,6 +48,9 @@ uniform int sprite_instance_count;
 uniform vec4 sprite_instance_matrix[128]; // 32 instances * (right, forward, up, origin)
 uniform vec4 projection; // tan(half horizontal FOV), aspect, inverse far
 uniform float sprite_depth_bias; // authored Y, affects clip-space Z only
+uniform int procedural_sprite;
+uniform vec4 procedural_sprite_uv; // native pixel left,right,top,bottom
+uniform vec2 procedural_sprite_light; // face extra light, effective light mode
 out vec2 pixel_uv;
 out vec3 view_normal;
 // Decals reuse the existing light-anchor (xyz) and extra-light (w)
@@ -146,19 +149,41 @@ void main() {
         model_up=sprite_instance_matrix[base+2];
         model_origin=sprite_instance_matrix[base+3];
     }
+    vec3 sprite_vertex_position=local_position;
+    vec2 sprite_vertex_uv=local_uv;
+    vec3 sprite_vertex_anchor=local_face_anchor;
+    vec3 sprite_vertex_rgb=local_vertex_rgb;
+    float sprite_vertex_extra=local_extra_light;
+    float sprite_vertex_static=local_static_light;
+    if(procedural_sprite!=0) {
+        int corner=gl_VertexID & 3;
+        bool right=(corner==1 || corner==2);
+        bool top=corner>=2;
+        sprite_vertex_position=vec3(right?1.0:-1.0,0.0,top?1.0:-1.0);
+        sprite_vertex_uv=vec2(
+            right?procedural_sprite_uv.y:procedural_sprite_uv.x,
+            top?procedural_sprite_uv.z:procedural_sprite_uv.w);
+        sprite_vertex_anchor=vec3(0.0);
+        sprite_vertex_rgb=vec3(1.0);
+        sprite_vertex_extra=procedural_sprite_light.x;
+        sprite_vertex_static=0.0;
+        local_normal=vec3(0.0,-1.0,0.0);
+        local_light_normal=local_normal;
+        decoded_light_mode=procedural_sprite_light.y;
+    }
     decal_coverage=decal_receiver_lighting!=0
-        ? vec4(local_face_anchor,local_extra_light)
+        ? vec4(sprite_vertex_anchor,sprite_vertex_extra)
         : vec4(0.5,0.5,0.5,1.0);
     // Preserve rdMatrix_TransformPoint34's additive operand order.
-    float x = (model_forward.x*local_position.y+
-               model_up.x*local_position.z+
-               model_right.x*local_position.x)+model_origin.x;
-    float y = (model_forward.y*local_position.y+
-               model_up.y*local_position.z+
-               model_right.y*local_position.x)+model_origin.y;
-    float z = (model_up.z*local_position.z+
-               model_forward.z*local_position.y+
-               model_right.z*local_position.x)+model_origin.z;
+    float x = (model_forward.x*sprite_vertex_position.y+
+               model_up.x*sprite_vertex_position.z+
+               model_right.x*sprite_vertex_position.x)+model_origin.x;
+    float y = (model_forward.y*sprite_vertex_position.y+
+               model_up.y*sprite_vertex_position.z+
+               model_right.y*sprite_vertex_position.x)+model_origin.y;
+    float z = (model_up.z*sprite_vertex_position.z+
+               model_forward.z*sprite_vertex_position.y+
+               model_right.z*sprite_vertex_position.x)+model_origin.z;
     float h=max(projection.x,0.0001);
     float v=h/max(projection.y,0.0001);
     gl_Position=vec4(x/h,z/v,-projection.z,y);
@@ -172,13 +197,13 @@ void main() {
     // GPU fog/SSAO depth is recovered per-fragment from gl_FragCoord.w.
     // Never clamp depth here: vertices of huge faces can lie behind the
     // camera, and clamping before interpolation distorts nearby fog.
-    pixel_uv=local_uv;
-    local_fragment_position=local_position;
+    pixel_uv=sprite_vertex_uv;
+    local_fragment_position=sprite_vertex_position;
     local_fragment_normal=local_light_normal;
-    pixel_light_face_anchor=local_face_anchor;
+    pixel_light_face_anchor=sprite_vertex_anchor;
     pixel_light_face_normal=local_normal;
-    pixel_light_vertex_rgb=local_vertex_rgb;
-    pixel_light_state=vec3(local_static_light,local_extra_light,decoded_light_mode);
+    pixel_light_vertex_rgb=sprite_vertex_rgb;
+    pixel_light_state=vec3(sprite_vertex_static,sprite_vertex_extra,decoded_light_mode);
     sector_vertex_cmp=colormap_tint;
     sector_vertex_tint=thing_sector_tint_delta;
     // A Camera-type Thing is a HUD overlay: no native ambient/dynamic
@@ -196,10 +221,10 @@ void main() {
     // before the gamma-1.8 vertex conversion (like the native D3D path).
     float mode=decoded_light_mode>3.5 ? 1.0
         : min(decoded_light_mode,effective_light_mode);
-    float l=mode>=2.5 ? local_static_light : 0.0;
+    float l=mode>=2.5 ? sprite_vertex_static : 0.0;
     float dynamic_added=0.0;
     if(mode>=1.5 && num_lights>0 && pixel_dynamic_lighting==0) {
-        vec3 anchor=mode>=2.5 ? local_position : local_face_anchor;
+        vec3 anchor=mode>=2.5 ? sprite_vertex_position : sprite_vertex_anchor;
         vec3 normal=mode>=2.5 ? local_light_normal : local_normal;
         // The local-space shortcut assumes orthonormal R/L/U. For scaled
         // animation nodes, evaluate distance and incidence in the camera's
@@ -230,11 +255,11 @@ void main() {
     }
     // Face ExtraLight may darken the authored vertex, but cannot produce
     // >1 baked brightness with the option off (or >2 with it on).
-    float raw_light=clamp(l+local_extra_light,0.0,jk_light_limit);
+    float raw_light=clamp(l+sprite_vertex_extra,0.0,jk_light_limit);
     float bright=mode<0.5 ? 1.0
         : max(raw_light+dynamic_added,ambient_light);
     if(jk_light_limit<=1.0)bright=min(bright,1.0);
-    jk_lit_rgb=vec3(pow(max(bright,0.0),1.8))*local_vertex_rgb;
+    jk_lit_rgb=vec3(pow(max(bright,0.0),1.8))*sprite_vertex_rgb;
     jk_lit_rgb*=colormap_tint; // before native hardware color effects
     jk_lit_rgb=jk_light_color_cap(jk_lit_rgb);
     if(jk_color_filter.w>0.5 ||
@@ -267,7 +292,7 @@ void main() {
                 max(raw_light+dynamic_added,sector_crossing_info[i].x);
             if(jk_light_limit<=1.0)sector_bright=min(sector_bright,1.0);
             vec3 candidate=vec3(pow(
-                max(sector_bright,0.0),1.8))*local_vertex_rgb;
+                max(sector_bright,0.0),1.8))*sprite_vertex_rgb;
             candidate*=sector_crossing_cmp[i].xyz;
             candidate=jk_light_color_cap(candidate);
             if(jk_color_filter.w>0.5 ||

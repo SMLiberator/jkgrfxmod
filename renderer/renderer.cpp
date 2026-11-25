@@ -438,6 +438,17 @@ namespace jkgm {
         {
             num_indices=static_cast<unsigned>(source.indices.size());
             vertex_count=uint64_t(source.vertices.size());
+            if(source.procedural_sprite) {
+                // One shared VAO with six indices; no per-SPR vertex upload.
+                std::vector<uint32_t> const quad={0U,1U,2U,0U,2U,3U};
+                num_indices=6U;
+                vertex_count=0U;
+                gl::bind_vertex_array(vao);
+                gl::bind_buffer(gl::buffer_bind_target::element_array,indices);
+                gl::buffer_data(gl::buffer_bind_target::element_array,
+                    make_span(quad).as_const_bytes(),gl::buffer_usage::static_draw);
+                return;
+            }
             std::vector<gpu_3do_packed_vertex> packed_vertices;
             std::vector<gpu_3do_compact_vertex> compact_vertices;
             uint32_t rejection_reasons=0;
@@ -6060,7 +6071,11 @@ namespace jkgm {
                 // context memory survives the intervening decal pass.
                 auto &context=*draw.context;
                 if(!context.mesh) {
-                    auto it=gpu_3do_gl_cache.find(inst.id);
+                    // One GL mesh for all procedural sprite descriptors.
+                    // Preserve distinct instance IDs for MAT/occlusion state.
+                    uint64_t const mesh_key=inst.geometry->procedural_sprite
+                        ?UINT64_MAX:inst.id;
+                    auto it=gpu_3do_gl_cache.find(mesh_key);
                     if(it==gpu_3do_gl_cache.end()) {
                         auto ptr=std::make_unique<gpu_3do_gl_mesh>(
                             the_config->gpu_3do_vertex_format,
@@ -6071,10 +6086,10 @@ namespace jkgm {
                         if(the_config->profile_renderer)
                             ++profile_frame.gpu_uploads;
                         it=gpu_3do_gl_cache.emplace(
-                            inst.id,std::move(ptr)).first;
+                            mesh_key,std::move(ptr)).first;
                     }
                     context.mesh=it->second.get();
-                    gpu_3do_last_drawn[inst.id]=gpu_3do_present_serial;
+                    gpu_3do_last_drawn[mesh_key]=gpu_3do_present_serial;
                 }
                 auto &gpu_mesh=*context.mesh;
                 if(active_instance!=draw.instance) {
@@ -6092,6 +6107,14 @@ namespace jkgm {
                                          make_point(m[9],m[10],m[11],1.0f));
                     gl::bind_vertex_array(gpu_mesh.vao);
                     prog.set_packed_vertex_format(gpu_mesh.packed_vertex_format);
+                    auto const &quad=*inst.geometry;
+                    prog.set_procedural_sprite(quad.procedural_sprite,
+                        make_point(quad.procedural_sprite_uv[0],
+                                   quad.procedural_sprite_uv[1],
+                                   quad.procedural_sprite_uv[2],
+                                   quad.procedural_sprite_uv[3]),
+                        quad.procedural_sprite_extra_light,
+                        quad.procedural_sprite_light_mode);
                     // ThingFlag 0x20 intentionally uses the existing JK-style
                     // vertex dynamic-light loop; ordinary GPU 3DOs keep their
                     // per-fragment point lights. This is an instance choice,
@@ -7016,8 +7039,10 @@ namespace jkgm {
                     c.sprite_resource=inst.sprite_occlusion_resource;
                     c.sprite_bound=bound;
                     c.sprite_pose=inst.transform;
-                    c.sprite_id=inst.id;
-                    c.sprite_geometry=inst.geometry;
+                    c.sprite_id=inst.sprite_occlusion_quad_id
+                        ?inst.sprite_occlusion_quad_id:inst.id;
+                    c.sprite_geometry=inst.sprite_occlusion_quad
+                        ?inst.sprite_occlusion_quad:inst.geometry;
                     c.position=bound.center;
                     for(auto const &g:inst.geometry->groups)
                         c.triangles+=g.count/3U;

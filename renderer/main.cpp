@@ -328,12 +328,17 @@ namespace {
         float face_extra_light=0.0f;
         uint64_t id=0;
         std::shared_ptr<jkgm::gpu_3do_geometry const> geometry;
+        uint64_t shadow_id=0;
+        std::shared_ptr<jkgm::gpu_3do_geometry const> shadow_geometry;
     };
     // Each shared .SPR can appear simultaneously at different rdThing.wallCel
     // frames. Retain immutable quad geometry per resource AND per active cel.
     // The outer resource key keeps native free hooks able to purge all cels.
     std::unordered_map<uintptr_t,
         std::unordered_map<int32_t,cached_gpu_sprite_quad>> gpu_sprite_quads;
+    // One 4-vertex occlusion proxy, only used by the legacy depth program.
+    uint64_t gpu_sprite_occlusion_quad_id=0;
+    std::shared_ptr<jkgm::gpu_3do_geometry const> gpu_sprite_occlusion_quad;
     struct moving_mesh_occurrence_key {
         uint64_t thing=0;
         uintptr_t mesh=0;
@@ -3087,6 +3092,8 @@ void jkgm::reset_gpu_3do_instances()
     gpu_mesh_cache_peak=0;
     gpu_mesh_cache_last_trim_frame=0;
     gpu_sprite_quads.clear();
+    gpu_sprite_occlusion_quad.reset();
+    gpu_sprite_occlusion_quad_id=0;
     gpu_mat_residency.clear();
     ++gpu_frame_serial;
     gpu_native_stats={};
@@ -6544,9 +6551,15 @@ namespace {
            !same(variant->second.resource,resource)) {
             if(resource_item==gpu_sprite_quads.end() &&
                gpu_sprite_quads.size()>=4096U)return reject(7);
-            auto quad=jkgm::make_gpu_sprite_quad(
-                resource.material,resource.texcoords,flags,geometry==3U,
-                cel,lighting,native_face_extra);
+            std::shared_ptr<jkgm::gpu_3do_geometry const> quad;
+            if(the_config->experimental_procedural_sprite_quads)
+                quad=jkgm::make_gpu_sprite_procedural_quad(
+                    resource.material,resource.texcoords,flags,geometry==3U,
+                    cel,lighting,native_face_extra);
+            else
+                quad=jkgm::make_gpu_sprite_quad(
+                    resource.material,resource.texcoords,flags,geometry==3U,
+                    cel,lighting,native_face_extra);
             if(!quad)return reject(5);
             cached_gpu_sprite_quad entry{};
             entry.resource=resource;
@@ -6618,6 +6631,20 @@ namespace {
                    signature!=0U) {
                     instance.shadow_owner=(uint64_t(owner)<<32)|signature;
                     instance.sprite_occlusion_resource=sprite;
+                    if(instance.geometry->procedural_sprite &&
+                       the_config->experimental_3do_occlusion_culling) {
+                        if(!gpu_sprite_occlusion_quad) {
+                            jkgm::sprite_decal_texture_coords unit_uv{};
+                            unit_uv.left=0.0f;unit_uv.right=1.0f;
+                            unit_uv.top=0.0f;unit_uv.bottom=1.0f;
+                            gpu_sprite_occlusion_quad=jkgm::make_gpu_sprite_quad(
+                                1U,unit_uv,0U);
+                            if(gpu_sprite_occlusion_quad)
+                                gpu_sprite_occlusion_quad_id=next_gpu_id++;
+                        }
+                        instance.sprite_occlusion_quad=gpu_sprite_occlusion_quad;
+                        instance.sprite_occlusion_quad_id=gpu_sprite_occlusion_quad_id;
+                    }
                 }
             }
         }
@@ -6657,9 +6684,21 @@ namespace {
                     if(jkgm::make_gpu_sprite_sun_shadow_pose(
                            pose,size,offset,info.width,info.height,
                            current_sprite_roll(rd),direction,sun_pose)) {
+                        // Existing sun-depth shaders still need a 3DO-layout
+                        // quad, so build it lazily for actual casters only.
+                        if(variant->second.geometry->procedural_sprite &&
+                           !variant->second.shadow_geometry) {
+                            variant->second.shadow_geometry=jkgm::make_gpu_sprite_quad(
+                                resource.material,resource.texcoords,flags,
+                                geometry==3U,cel,lighting,native_face_extra);
+                            if(variant->second.shadow_geometry)
+                                variant->second.shadow_id=next_gpu_id++;
+                        }
                         jkgm::gpu_3do_instance shadow{};
-                        shadow.id=variant->second.id; // share immutable quad
-                        shadow.geometry=variant->second.geometry;
+                        shadow.id=variant->second.geometry->procedural_sprite
+                            ?variant->second.shadow_id:variant->second.id;
+                        shadow.geometry=variant->second.geometry->procedural_sprite
+                            ?variant->second.shadow_geometry:variant->second.geometry;
                         shadow.transform=sun_pose;
                         shadow.shadow_only=true;
                         shadow.is_sprite_quad=true;
@@ -6672,7 +6711,8 @@ namespace {
                         // rules; all motion is also part of caster hashing.
                         shadow.dynamic_sun_caster=move_type!=0U ||
                             (attach_flags&jkgm::native_attach_thing)!=0U;
-                        pending_gpu_instances.emplace_back(std::move(shadow));
+                        if(shadow.geometry)
+                            pending_gpu_instances.emplace_back(std::move(shadow));
                         if(the_config->profile_renderer &&
                            (gpu_frame_serial%120U)==0U) {
                             static uint64_t logged_frame=0;
