@@ -881,6 +881,8 @@ jkgm::shaders::gpu_3do_preview_shader::gpu_3do_preview_shader(
     , world_lighting_exempt(gl::get_uniform_location(
         the_program,"world_lighting_exempt"))
     , sprite_receiver(gl::get_uniform_location(the_program,"sprite_receiver"))
+    , sprite_depth_bias(gl::get_uniform_location(the_program,"sprite_depth_bias"))
+    , sprite_flare_center(gl::get_uniform_location(the_program,"sprite_flare_center"))
     , decal_light_texture(gl::get_uniform_location(the_program,"decal_light_texture"))
     , decal_occlusion(gl::get_uniform_location(the_program,"decal_occlusion"))
     , decal_receiver_lighting(gl::get_uniform_location(the_program,"decal_receiver_lighting"))
@@ -1287,6 +1289,17 @@ void jkgm::shaders::gpu_3do_preview_shader::set_world_lighting_exempt(
 void jkgm::shaders::gpu_3do_preview_shader::set_sprite_receiver(bool enabled)
 {
     gl::set_uniform_integer(sprite_receiver,enabled?1:0);
+}
+
+void jkgm::shaders::gpu_3do_preview_shader::set_sprite_depth_bias(float depth)
+{
+    gl::set_uniform_float(sprite_depth_bias,depth);
+}
+
+void jkgm::shaders::gpu_3do_preview_shader::set_sprite_flare(
+    point<4,float> center)
+{
+    gl::set_uniform_vector(sprite_flare_center,center);
 }
 
 void jkgm::shaders::gpu_3do_preview_shader::set_post_exempt(bool enabled)

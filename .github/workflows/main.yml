@@ -37,6 +37,8 @@ jobs:
         native_mesh_revision_policy_test.exe
         cl.exe /nologo /EHsc /std:c++17 /I. tests\\sprite_orientation.cpp /Fe:sprite_orientation_test.exe
         sprite_orientation_test.exe
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\\sprite_gpu_depth_offset.cpp /Fe:sprite_gpu_depth_offset_test.exe || exit /b 1
+        sprite_gpu_depth_offset_test.exe || exit /b 1
 
     - name: CameraToMat live material API regressions
       shell: cmd

@@ -126,4 +126,26 @@ inline bool project_sprite_flare_thing_center(
     out.view_depth=float(native_depth);
     return true;
 }
+// Cached flare quads retain their rendered center; authored Y modifies
+// only the depth used by the single center occlusion sample.
+inline bool project_gpu_sprite_flare_center(
+    std::array<float,3> const &rendered_world_center,
+    std::array<float,12> const &view,
+    float tan_half_horizontal_fov,float aspect,
+    std::array<float,2> viewport,float y_depth_bias,
+    sprite_flare_center &out)
+{
+    if(!std::isfinite(y_depth_bias) ||
+       !project_sprite_flare_thing_center(
+            rendered_world_center,view,tan_half_horizontal_fov,
+            aspect,viewport,out))
+        return false;
+    double const depth=double(out.view_depth)+double(y_depth_bias)*32.0;
+    if(!std::isfinite(depth) || depth<=0.0 || depth>=65500.0) {
+        out={};
+        return false;
+    }
+    out.view_depth=float(depth);
+    return true;
+}
 } // namespace jkgm

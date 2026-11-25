@@ -50,6 +50,29 @@ int main() {
     assert(near(center.pixel[0],500.0f));
     assert(near(center.pixel[1],400.0f));
     assert(near(center.view_depth,256.0f));
+    // GPU-cached flare Y alters effective depth without shifting its
+    // camera-space center or rescaling the authored H/V dimensions.
+    std::array<float,3> const cached_center{{2.0f,10.0f,2.0f}};
+    sprite_flare_center cached{};
+    assert(project_gpu_sprite_flare_center(
+        cached_center,identity_camera,1.0f,4.0f/3.0f,
+        {{800.0f,600.0f}},0.0f,cached));
+    assert(near(cached.pixel[0],480.0f));
+    assert(near(cached.pixel[1],380.0f));
+    assert(near(cached.view_depth,320.0f));
+    assert(project_gpu_sprite_flare_center(
+        cached_center,identity_camera,1.0f,4.0f/3.0f,
+        {{800.0f,600.0f}},-2.0f,cached));
+    assert(near(cached.pixel[0],480.0f));
+    assert(near(cached.pixel[1],380.0f));
+    assert(near(cached.view_depth,256.0f));
+    assert(!project_gpu_sprite_flare_center(
+        cached_center,identity_camera,1.0f,4.0f/3.0f,
+        {{800.0f,600.0f}},-11.0f,cached));
+    assert(!project_gpu_sprite_flare_center(
+        cached_center,identity_camera,1.0f,4.0f/3.0f,
+        {{800.0f,600.0f}},
+        std::numeric_limits<float>::quiet_NaN(),cached));
     // Camera rotation must not rotate an authored camera-space offset.
     std::array<float,12> const yawed_camera{{
         0,1,0,-1,0,0,0,0,1,0,0,0

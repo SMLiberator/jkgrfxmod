@@ -47,6 +47,7 @@ uniform vec4 view_right, view_forward, view_up, view_origin;
 uniform int sprite_instance_count;
 uniform vec4 sprite_instance_matrix[128]; // 32 instances * (right, forward, up, origin)
 uniform vec4 projection; // tan(half horizontal FOV), aspect, inverse far
+uniform float sprite_depth_bias; // authored Y, affects clip-space Z only
 out vec2 pixel_uv;
 out vec3 view_normal;
 // Decals reuse the existing light-anchor (xyz) and extra-light (w)
@@ -161,6 +162,13 @@ void main() {
     float h=max(projection.x,0.0001);
     float v=h/max(projection.y,0.0001);
     gl_Position=vec4(x/h,z/v,-projection.z,y);
+    // Keep X/Y/W unchanged: the billboard's pixel center and apparent
+    // dimensions do not move when authored SPR Y changes. Only Z changes.
+    if(sprite_depth_bias!=0.0) {
+        float effective_y=y+sprite_depth_bias;
+        gl_Position.z=effective_y>0.0001
+            ?-projection.z*y/effective_y : -2.0*y;
+    }
     // GPU fog/SSAO depth is recovered per-fragment from gl_FragCoord.w.
     // Never clamp depth here: vertices of huge faces can lie behind the
     // camera, and clamping before interpolation distorts nearby fog.

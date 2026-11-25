@@ -6424,7 +6424,8 @@ namespace {
             return false;
         };
         if(!the_config || !the_config->use_gpu_cache ||
-           type>jkgm::sprite_fixed)return false;
+           (type>jkgm::sprite_fixed && !jkgm::sprite_is_flare(type)))
+            return false;
         if(!gpu_span_readable(rd,0x48U) ||
            !gpu_span_readable(orientation,12*sizeof(float)))
             return reject(0);
@@ -6582,6 +6583,10 @@ namespace {
         instance.geometry=variant->second.geometry;
         instance.transform=placement;
         instance.is_sprite_quad=true;
+        instance.is_sprite_flare=jkgm::sprite_is_flare(type);
+        instance.sprite_depth_bias=
+            (type==jkgm::sprite_default || instance.is_sprite_flare)
+                ?offset[1]:0.0f;
         instance.sprite_opacity=info.opacity;
         // The visible billboard does not cast from its camera-facing pose.
         instance.casts_sun_shadows=false;
@@ -6630,6 +6635,7 @@ namespace {
            the_config->enable_sprite_shadows &&
            the_config->use_gpu_cache &&
            info.opacity>=0.999f && (flags&2U)==0U &&
+           !instance.is_sprite_flare &&
            !instance.world_lighting_exempt &&
            pending_gpu_instances.size()+1U<16384U) {
             uint32_t signature=0,move_type=0,attach_flags=0;
@@ -6752,7 +6758,8 @@ namespace {
             return 1;
         }
         if(known_type && the_config && the_config->use_gpu_cache &&
-           authored_type<=jkgm::sprite_fixed) {
+           (authored_type<=jkgm::sprite_fixed ||
+            jkgm::sprite_is_flare(authored_type))) {
             if(submit_gpu_sprite_quad(thing,orientation,authored_type,info))
                 return 1;
             if(profiling)++native_sprite_totals.gpu_quad_fallbacks;

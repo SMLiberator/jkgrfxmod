@@ -305,7 +305,9 @@ namespace jkgm {
         // distances and inverse-transposed normals, not local distances.
         bool nonrigid_light_transform=false;
         bool is_projected_decal=false; // type-3 SPR, world- or receiver-local
-        bool is_sprite_quad=false; // ordinary SPR with shared GPU quad
+        bool is_sprite_quad=false; // ordinary SPR or flare with shared GPU quad
+        bool is_sprite_flare=false; // type-4: center-only opaque-depth test
+        float sprite_depth_bias=0.0f; // authored SPR Y, no geometric scaling
         bool transient_procedural=false; // particles/polylines: evict after this frame
         bool saber_trail_active=false; // diagnostics: procedural blade fan was appended
         float sprite_opacity=1.0f; // SetSpriteInfo opacity

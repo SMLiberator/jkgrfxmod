@@ -34,6 +34,8 @@ uniform int camera_hud_thing; // 0=world, 1=overlay HUD, 2=world-depth HUD
 // projected spotlights; a zero G-buffer normal also omits SSAO on this Thing.
 uniform int world_lighting_exempt;
 uniform int sprite_receiver; // 1=visible SPR; distinguish billboard receivers in G-buffer
+uniform float sprite_depth_bias; // SPR render-only Y, in JK units
+uniform vec4 sprite_flare_center; // pixel X/Y, native depth, W=flare enabled
 // Projected decal only: opaque G-buffer emissive.A stores diffuse JK light,
 // leaving emission RGB and all existing render targets unchanged.
 uniform int decal_receiver_lighting;
@@ -872,6 +874,21 @@ void main() {
     // This is the exact native 1/rhw linear depth (32*Y) even on large
     // triangles crossing the camera near plane; no vertex-depth clamping.
     float view_depth=32.0/max(gl_FragCoord.w,0.00000001);
+    // Lighting and fog retain the geometric depth. G-buffer and depth
+    // clipping use the authored rendering-only bias for classic sprites.
+    float effective_depth=view_depth+32.0*sprite_depth_bias;
+    if(sprite_flare_center.w>0.5) {
+        // Type 4 uses exactly one opaque-depth sample at its center.
+        // Its edges must never undergo ordinary per-pixel occlusion.
+        vec3 center=sprite_flare_center.xyz;
+        ivec2 dims=textureSize(scene_depth,0);
+        if(any(lessThan(center.xy,vec2(0.0))) ||
+           any(greaterThanEqual(center.xy,vec2(dims))) ||
+           !(center.z>0.0) || center.z>=65500.0) discard;
+        float opaque=texelFetch(scene_depth,ivec2(center.xy),0).r;
+        if(opaque<65500.0 &&
+           opaque+max(0.01,center.z*0.0005)<center.z) discard;
+    }
     if(smoke_half_resolution!=0) {
         // This FBO has stencil but not the full-resolution hardware depth.
         // A conservative 2x2 opaque footprint blocks smoke through walls.
@@ -882,17 +899,18 @@ void main() {
         closest=min(closest,texelFetch(scene_depth,min(p+ivec2(0,1),last),0).r);
         closest=min(closest,texelFetch(scene_depth,min(p+ivec2(1,1),last),0).r);
         if(closest<65500.0 &&
-           view_depth>closest+max(0.05,closest*0.0005)) discard;
+           effective_depth>closest+max(0.05,closest*0.0005)) discard;
     }
     // Camera + ThingFlag 0x20 behaves as a world-anchored GUI element:
     // remain immune to all postFX, but disappear behind opaque scene depth.
     // The final framebuffer has no attached scene depth after compositing.
     if(post_exempt_pass!=0 && camera_hud_thing==2) {
         float behind=texelFetch(scene_depth,ivec2(gl_FragCoord.xy),0).r;
-        if(behind<65500.0 && view_depth>behind+max(0.05,behind*0.0005)) discard;
+        if(behind<65500.0 &&
+           effective_depth>behind+max(0.05,behind*0.0005)) discard;
     }
     if(transparent_pass!=0 && advanced_material_params.x>0.5 &&
-       depth_clip_rejected(view_depth)) discard;
+       depth_clip_rejected(effective_depth)) discard;
     vec2 uv=gpu_parallax_uv(pixel_uv*uv_scale);
     vec4 texel=gpu_material_sample_albedo(
         albedo_map,albedo_map2,uv,albedo_scroll,has_texture,
@@ -1118,7 +1136,7 @@ void main() {
         // MAT/texture alpha affects the blend factor, not pigment RGB.
         // JK's original per-face vertex alpha is premultiplied before
         // gamma-1.8, unlike MAT alpha. Match that distinction here.
-        float absorption=fluid_absorption(view_depth);
+        float absorption=fluid_absorption(effective_depth);
         float opacity=albedo.a*absorption;
         float vertex_rgb_alpha=pow(clamp(native_face_opacity,0.0,1.0),1.8);
         vec3 diffuse=(lit_rgb*(1.0-fog)*vertex_rgb_alpha+
@@ -1167,7 +1185,7 @@ void main() {
                                          sprite_receiver!=0 ? 2.0 : 1.0,
                                          dot(jk_fragment_lit,vec3(0.2126,0.7152,0.0722)));
     // Packed mode stores unlit pigment separately; depth remains R16F.
-    out_depth=vec4(view_depth,
+    out_depth=vec4(effective_depth,
                    albedo.rgb+matcap_lit*base_diffuse_trans);
     out_pigment=vec4(albedo.rgb+matcap_lit*base_diffuse_trans,1.0);
 }

@@ -5274,7 +5274,9 @@ namespace jkgm {
                 // traversal, reflected cameras, sun/shadow atlases or
                 // projected decals. Unusable/stale query records fail open.
                 bool const sprite_occlusion_eligible=
-                    inst.is_sprite_quad && inst.sprite_occlusion_resource &&
+                    inst.is_sprite_quad && !inst.is_sprite_flare &&
+                    inst.sprite_depth_bias==0.0f &&
+                    inst.sprite_occlusion_resource &&
                     !inst.world_lighting_exempt;
                 bool const occlusion_eligible=ordinary_pass &&
                     !decals_only && the_config->experimental_3do_occlusion_culling &&
@@ -5466,7 +5468,8 @@ namespace jkgm {
                     bool const fading_3do=!inst.is_sprite_quad &&
                         !inst.is_projected_decal &&
                         inst.thing_opacity<0.999f;
-                    auto const material_policy=inst.is_projected_decal
+                    auto const material_policy=
+                        (inst.is_projected_decal || inst.is_sprite_flare)
                         ? gpu_3do_alpha_mode::blend_only
                         : choose_gpu_3do_alpha_mode(
                             (group.face_type&0x2U)!=0 ||
@@ -5507,6 +5510,7 @@ namespace jkgm {
                         depth=(wx-cam.position[0])*cam.forward[0]+
                               (wy-cam.position[1])*cam.forward[1]+
                               (wz-cam.position[2])*cam.forward[2];
+                        depth+=inst.sprite_depth_bias;
                     }
                     size_t const source_order=opaque_order
                         ?instance_order_base+group_index:next_draw_order++;
@@ -5520,6 +5524,8 @@ namespace jkgm {
                     // sprite quads are collected in dedicated buckets.
                     bool const batchable_sprite=collect_sprite_batches &&
                         inst.is_sprite_quad && !inst.camera_hud &&
+                        !inst.is_sprite_flare &&
+                        inst.sprite_depth_bias==0.0f &&
                         !inst.is_projected_decal && !inst.shadow_only &&
                         !inst.transient_procedural &&
                         inst.num_lights==0U && !inst.crossing_lighting &&
@@ -5794,6 +5800,7 @@ namespace jkgm {
                 for(size_t read=0;read<draws.size();++read) {
                     auto &candidate=draws[read];
                     bool const fluid_sprite=candidate.instance->is_sprite_quad &&
+                        !candidate.instance->is_sprite_flare &&
                         !candidate.instance->camera_hud &&
                         !candidate.instance->is_projected_decal &&
                         candidate.texture->blend==material_blend_mode::fluid;
@@ -5861,6 +5868,8 @@ namespace jkgm {
                     transparent && the_config->enable_gpu_sprite_instancing &&
                     !post_exempt && !decals_only &&
                     inst.is_sprite_quad && !inst.camera_hud &&
+                    !inst.is_sprite_flare &&
+                    inst.sprite_depth_bias==0.0f &&
                     !inst.is_projected_decal && !inst.shadow_only &&
                     !inst.transient_procedural &&
                     inst.num_lights==0U && !inst.crossing_lighting &&
@@ -5906,6 +5915,8 @@ namespace jkgm {
                         auto const &next=draws[end];
                         auto const &other=*next.instance;
                         if(!other.is_sprite_quad || other.camera_hud ||
+                           other.is_sprite_flare ||
+                           other.sprite_depth_bias!=0.0f ||
                            other.num_lights!=0U || other.crossing_lighting ||
                            other.id!=inst.id || next.group!=draw.group ||
                            next.policy!=draw.policy ||
@@ -6010,6 +6021,32 @@ namespace jkgm {
                     // Native D3D triangles do not carry per-Thing flags here.
                     prog.set_world_lighting_exempt(inst.world_lighting_exempt);
                     prog.set_sprite_receiver(inst.is_sprite_quad);
+                    prog.set_sprite_depth_bias(inst.sprite_depth_bias);
+                    // Cached flares keep their visual center but apply
+                    // authored Y to the center-only depth comparison.
+                    if(inst.is_sprite_flare && transparent && !post_exempt) {
+                        sprite_flare_center center{};
+                        std::array<float,3> const origin{{
+                            inst.transform[9],inst.transform[10],
+                            inst.transform[11]}};
+                        bool const valid=project_gpu_sprite_flare_center(
+                            origin,native_view,tan_half_fov,aspect,
+                            {{get<x>(internal_scr_res_f),
+                              get<y>(internal_scr_res_f)}},
+                            inst.sprite_depth_bias,center);
+                        if(valid) {
+                            center.pixel[0]+=
+                                float(get<x>(actual_display_area.start));
+                            center.pixel[1]+=
+                                float(get<y>(actual_display_area.start));
+                        }
+                        prog.set_sprite_flare(valid
+                            ?make_point(center.pixel[0],center.pixel[1],
+                                        center.view_depth,1.0f)
+                            :make_point(-1.0f,-1.0f,0.0f,1.0f));
+                    } else {
+                        prog.set_sprite_flare(make_point(0.0f,0.0f,0.0f,0.0f));
+                    }
                     // 0x20 skyboxes keep JK vertex lighting, not the sector's
                     // CMP colors, tint, or opt-in crossing-based lighting.
                     bool const allow_sector_effects=!inst.skybox_vertex_lighting;
@@ -6324,6 +6361,9 @@ namespace jkgm {
                 prog.set_emissive(material.has_emission,
                                   material.emission_factor,
                                   material.emissive_scroll);
+                // A flare's edges must never use per-fragment world Z.
+                // Its shader accepts/rejects the entire quad at its center.
+                if(inst.is_sprite_flare)gl::disable(gl::capability::depth_test);
                 // Groups here already share Thing transform, MAT, alpha
                 // policy and face state. Only join adjacent EBO spans:
                 // a single glDrawElements can replace a multi-draw when
@@ -6387,6 +6427,7 @@ namespace jkgm {
                                             static_cast<GLsizei>(multidraw_counts.size()));
                     }
                 }
+                if(inst.is_sprite_flare)gl::enable(gl::capability::depth_test);
                 // Creation of a procedural trail doesn't prove the extra
                 // triangles survived to an actual OpenGL material draw.
                 if(the_config->profile_renderer && inst.saber_trail_active &&
@@ -6861,7 +6902,11 @@ namespace jkgm {
                    inst.transient_procedural || inst.saber_trail_active)
                     continue;
                 if(inst.is_sprite_quad) {
-                    if(!inst.sprite_occlusion_resource ||
+                    // Flare visibility is resolved at the emitter; depth
+                    // bias invalidates ordinary geometry-proxy assumptions.
+                    if(inst.is_sprite_flare ||
+                       inst.sprite_depth_bias!=0.0f ||
+                       !inst.sprite_occlusion_resource ||
                        inst.world_lighting_exempt)continue;
                     // Geometry is a camera-facing quad, not a rdModel3:
                     // its actual world-space axes/offset/scale bound ALL

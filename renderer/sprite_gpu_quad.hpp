@@ -64,7 +64,8 @@ inline bool make_gpu_sprite_pose(
     float const (&offset)[3],float w,float h,float roll,
     gpu_3do_matrix34 &out)
 {
-    if(type>sprite_fixed || !gpu_3do_matrix_finite(thing) ||
+    if((type>sprite_fixed && !sprite_is_flare(type)) ||
+       !gpu_3do_matrix_finite(thing) ||
        !gpu_3do_matrix_finite(view) || !std::isfinite(w) ||
        !std::isfinite(h) || !std::isfinite(roll) ||
        w<=0 || h<=0 || w>1000 || h>1000 ||
@@ -85,12 +86,16 @@ inline bool make_gpu_sprite_pose(
     if(!compute_sprite_axes(type,object,camera,axes))return false;
     float const angle=std::fmod(roll,360.0f)*0.01745329251994329577f;
     float const cs=std::cos(angle),sn=std::sin(angle);
+    // Classic billboards and flares reserve authored Y for render-depth.
+    // X/Z remain camera-relative geometry; other SPR types are unchanged.
+    float const geometric_y=(type==sprite_default || sprite_is_flare(type))
+        ?0.0f:offset[1];
     for(int i=0;i<3;++i) {
         out[i]=size[2]*w*(cs*axes.right[i]+sn*axes.up[i]);
         out[i+3]=axes.look[i];
         out[i+6]=size[3]*h*(cs*axes.up[i]-sn*axes.right[i]);
         out[i+9]=thing[i+9]+offset[0]*axes.right[i]+
-                 offset[1]*axes.look[i]+offset[2]*axes.up[i];
+                 geometric_y*axes.look[i]+offset[2]*axes.up[i];
     }
     return gpu_3do_matrix_finite(out);
 }
