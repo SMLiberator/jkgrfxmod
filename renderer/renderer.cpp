@@ -2120,6 +2120,8 @@ namespace jkgm {
                          profile_window.gpu_groups_frustum_culled/frames,
                          " backface_culled_avg=",
                          profile_window.gpu_groups_backface_culled/frames,
+                         " backface_delegated_avg=",
+                         profile_window.gpu_groups_backface_delegated/frames,
                          " NOTE=actual_group_walks_shared_ordinary_alpha_counted_once");
             }
             LOG_INFO("PERF geometry tris avg/max=", profile_window.tris / frames,
@@ -5428,6 +5430,8 @@ namespace jkgm {
             bool const collect_model_batches=submit_instancing &&
                 the_config->experimental_gpu_3do_indexed_instancing &&
                 !sample_instancing;
+            bool const delegate_model_backfaces=collect_model_batches &&
+                the_config->experimental_gpu_3do_gpu_backface_culling;
             struct indexed_model_member {
                 size_t instance_index;
                 submission_context *context;
@@ -5692,10 +5696,17 @@ namespace jkgm {
                     // unless it is double-sided. Since opaque faces are batched
                     // by MAT, only skip a group when ALL its faces face away.
                     // This saves CPU-side GL draw calls, not just GPU fragments.
-                    if(!parallel && can_cpu_cull && !(group.face_type&0x1U) &&
-                       group.plane_count>0 &&
-                       group.plane_start+group.plane_count<=
-                           inst.geometry->face_planes.size()) {
+                    bool const test_cpu_backface=!parallel && can_cpu_cull &&
+                        !(group.face_type&0x1U) && group.plane_count>0 &&
+                        group.plane_start+group.plane_count<=
+                            inst.geometry->face_planes.size();
+                    // Only defer serial planar candidates. Parallel workers
+                    // retain their original visibility decisions.
+                    bool const defer_backface=test_cpu_backface &&
+                        delegate_model_backfaces && indexed_state_valid &&
+                        gpu_3do_instancing_hardware_backface_candidate(inst,group);
+                    auto cpu_backface_rejected=[&] {
+                        if(!test_cpu_backface)return false;
                         bool any_visible=false;
                         for(uint32_t p=group.plane_start;
                             p<group.plane_start+group.plane_count;p++) {
@@ -5709,9 +5720,11 @@ namespace jkgm {
                         if(!any_visible) {
                             if(the_config->profile_renderer)
                                 ++profile_frame.gpu_groups_backface_culled;
-                            continue;
+                            return true;
                         }
-                    }
+                        return false;
+                    };
+                    if(!defer_backface && cpu_backface_rejected())continue;
                     // Cache MAT resolution per material/cel for the complete
                     // frame. Multiple cars using the same MAT no longer
                     // trigger thousands of redundant VirtualQuery lookups.
@@ -5792,6 +5805,31 @@ namespace jkgm {
                            ?(opaque_eligible || alpha_eligible)
                            :gpu_3do_draws_in_pass(policy,transparent)))
                         continue;
+                    // Cache exact material eligibility before deciding
+                    // whether a deferred normal test can be delegated.
+                    size_t indexed_slot=0U;
+                    if(indexed_state_valid &&
+                       gpu_3do_instancing_conservative_candidate(
+                           inst,group,policy,false)) {
+                        if(!model_class_ready) {
+                            model_class=model_collector.classify(
+                                inst.id,reinterpret_cast<uintptr_t>(
+                                    inst.geometry.get()),model_state,groups.size());
+                            model_class_ready=true;
+                        }
+                        indexed_slot=model_collector.find_range(
+                            model_class,group_index,
+                            reinterpret_cast<uintptr_t>(&tex),policy,[&] {
+                                return instancing_material_rejections(inst,tex)==0U;
+                            });
+                    }
+                    if(defer_backface) {
+                        if(indexed_slot!=0U &&
+                           model_collector.range(indexed_slot).eligible) {
+                            if(gpu_profiling)
+                                ++profile_frame.gpu_groups_backface_delegated;
+                        } else if(cpu_backface_rejected())continue;
+                    }
                     float depth=0.0f;
                     if(transparent || alpha_eligible) {
                         auto const &m=inst.transform;
@@ -5861,23 +5899,8 @@ namespace jkgm {
                         candidate.sprite_batch_group=index+1U;
                         sprite_buckets[index].draws.push_back(
                             std::move(candidate));
-                    } else if(indexed_state_valid &&
-                        gpu_3do_instancing_conservative_candidate(
-                            inst,group,policy,false)) {
-                        // A compatible class shares the exact snapshot,
-                        // geometry and draw-wide lighting state. Resolve
-                        // material eligibility only for a new range variant.
-                        if(!model_class_ready) {
-                            model_class=model_collector.classify(
-                                inst.id,reinterpret_cast<uintptr_t>(
-                                    inst.geometry.get()),model_state,groups.size());
-                            model_class_ready=true;
-                        }
-                        size_t const slot=model_collector.find_range(
-                            model_class,group_index,
-                            reinterpret_cast<uintptr_t>(&tex),policy,[&] {
-                                return instancing_material_rejections(inst,tex)==0U;
-                            });
+                    } else if(indexed_slot!=0U) {
+                        size_t const slot=indexed_slot;
                         if(model_collector.append(slot,
                             {instance_index,&context})) {
                             // The first visible member is the source-order

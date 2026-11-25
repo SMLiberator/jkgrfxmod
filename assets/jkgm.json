@@ -38,6 +38,7 @@
     "profile_renderer": false,
     "profile_gpu_3do_instancing_audit": false,
     "experimental_gpu_3do_indexed_instancing": true,
+    "experimental_gpu_3do_gpu_backface_culling": false,
     "profile_audio": false,
     "use_gpu_cache": true,
     "gpu_3do_vertex_format": 1,

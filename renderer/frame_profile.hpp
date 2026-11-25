@@ -104,6 +104,7 @@ struct profile_sample {
   // calls, tracked per pass using actual texture object IDs.
   uint64_t gpu_filter_state_sets=0,gpu_filter_state_skips=0;
   uint64_t gpu_groups_considered=0,gpu_groups_frustum_culled=0,gpu_groups_backface_culled=0;
+  uint64_t gpu_groups_backface_delegated=0;
   // Wall-clock CPU visibility prepass: two persistent helpers + render lane.
   // Count only actual worker dispatches, not frames below the threshold.
   uint64_t gpu_parallel_visibility_calls=0;
@@ -251,6 +252,7 @@ struct profile_sample {
     gpu_groups_considered+=o.gpu_groups_considered;
     gpu_groups_frustum_culled+=o.gpu_groups_frustum_culled;
     gpu_groups_backface_culled+=o.gpu_groups_backface_culled;
+    gpu_groups_backface_delegated+=o.gpu_groups_backface_delegated;
     gpu_parallel_visibility_calls+=o.gpu_parallel_visibility_calls;
     gpu_parallel_visibility_instances+=o.gpu_parallel_visibility_instances;
     gpu_parallel_visibility_groups+=o.gpu_parallel_visibility_groups;
