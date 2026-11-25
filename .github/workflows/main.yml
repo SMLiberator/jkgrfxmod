@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [master, flare-offset-correction]
+    branches: [master, development]
   workflow_dispatch:
 
 jobs:
