@@ -831,6 +831,9 @@
                          candidate.is_global?1.0f:0.0f);
             glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
             shader.use_program();
+            // Initialize sampler types even when descriptor decoding is off.
+            // The sky VAO has no world descriptors.
+            shader.set_world_surface_descriptors(0);
             shader.set_projection(projection);
             if(paraboloid_mode)
                 shader.set_paraboloid(unsigned(face),far_plane);
@@ -901,6 +904,8 @@
                 paraboloid_mode,surface_mask);
             if(profile_shared)shared_capture_profile_window.cpu_ns[2]+=
                 elapsed_profile_ns(sky_started,profile_clock::now());
+            shader.set_world_surface_descriptors(cache.descriptor_mode);
+            cache.bind_surface_descriptors();
             gl::set_front_face_raw(paraboloid_mode?GL_CW:GL_CCW);
             shader.set_modelview(view,false);
             shader.set_thing_fade(1.0f,0);
@@ -1132,7 +1137,7 @@
                     if(gpu_3do_gl_cache.size()>=8192U)return;
                     it=gpu_3do_gl_cache.emplace(inst.id,
                         std::make_unique<gpu_3do_gl_mesh>(
-                            (the_config->gpu_3do_vertex_format!=0),
+                            the_config->gpu_3do_vertex_format,
                             the_config->experimental_3do_index_u16,
                             *inst.geometry,
                             the_config->profile_renderer
@@ -1146,7 +1151,8 @@
                 // acquisition. Keep the ordinary 256-frame expiration policy.
                 gpu_3do_last_drawn[inst.id]=gpu_3do_present_serial;
                 shader.set_modelview(modelview,true,
-                                     it->second->packed_vertex_format);
+                                     it->second->vertex_format);
+                 it->second->bind_face_descriptors();
                 shader.set_model_lighting(inst.ambient,inst.effective_light_mode,
                     make_point(inst.colormap_tint[0],inst.colormap_tint[1],
                                inst.colormap_tint[2]),
