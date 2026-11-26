@@ -1403,6 +1403,12 @@ namespace jkgm {
         std::array<uint64_t,presentation_gpu_profile::num_stages>
             opaque_detail_gpu_ns{};
         uint64_t opaque_detail_gpu_samples=0,opaque_detail_gpu_skipped=0;
+        // Whole-frame lighting attribution, including shadow work before
+        // the G-buffer and independent fullscreen draws afterwards.
+        using lighting_gpu_profile=basic_presentation_gpu_profile<7>;
+        lighting_gpu_profile lighting_gpu_queries;
+        std::array<uint64_t,lighting_gpu_profile::num_stages> lighting_gpu_ns{};
+        uint64_t lighting_gpu_samples=0,lighting_gpu_skipped=0;
         // GPU-only sub-stages of opaque geometry (does not include SSAO or
         // opaque lighting composition). Results are asynchronous.
         // 0=framebuffer clears, 1=native+world, 2=gun, 3=cached 3DO,
@@ -1767,6 +1773,23 @@ namespace jkgm {
                      " NOTE=nonblocking_GPU;geometry_is_only_one_part_of_opaque_gbuffer");
             opaque_detail_gpu_ns.fill(0U);
             opaque_detail_gpu_samples=opaque_detail_gpu_skipped=0U;
+            auto lighting_us=[&](size_t stage)->uint64_t {
+                return lighting_gpu_samples
+                    ?(lighting_gpu_ns[stage]/1000U)/lighting_gpu_samples:0U;
+            };
+            LOG_INFO("PERF lighting_gpu_us spotlight_shadow=",lighting_us(0U),
+                     " sun_shadow=",lighting_us(1U),
+                     " caustics_capture=",lighting_us(2U),
+                     " half_sun_visibility=",lighting_us(3U),
+                     " opaque_composite=",lighting_us(4U),
+                     " world_ssr=",lighting_us(5U),
+                     " opaque_ssr=",lighting_us(6U),
+                     " samples=",lighting_gpu_samples,
+                     " ring_busy_skips=",lighting_gpu_skipped,
+                     " supported=",lighting_gpu_queries.is_supported(),
+                     " NOTE=async_GPU;inactive_stages_near_zero;sun_shadow_includes_atlas_and_aperture;composite_excludes_half_sun");
+            lighting_gpu_ns.fill(0U);
+            lighting_gpu_samples=lighting_gpu_skipped=0U;
             auto opaque_sub_us=[&](size_t stage)->uint64_t {
                 return opaque_geometry_gpu_samples
                     ?(opaque_geometry_gpu_ns[stage]/1000U)/
@@ -2346,6 +2369,7 @@ namespace jkgm {
                 present_gpu_queries.release();
                 scene_gpu_queries.release();
                 opaque_detail_gpu_queries.release();
+                lighting_gpu_queries.release();
                 opaque_geometry_gpu_queries.release();
                 capture_gpu_queries.release();
                 shared_capture_gpu_queries.release();
@@ -11783,7 +11807,7 @@ namespace jkgm {
             gl::set_active_texture_unit_raw(old_active-GL_TEXTURE0);
         }
 
-        void draw_game_opaque_composite()
+        void draw_game_opaque_composite(bool lighting_timing)
         {
             gl::disable(gl::capability::depth_test);
 
@@ -12033,6 +12057,7 @@ namespace jkgm {
             // Restore the opaque composition FBO without clearing it; the
             // existing full-resolution compositor applies the sky gate,
             // incidence, fog and spotlight exactly as before.
+            if(lighting_timing)lighting_gpu_queries.timestamp(3U,true);
             if(half_sun_shader) {
                 auto &buffer=*ogs->sun_half_visibility;
                 gl::bind_framebuffer(gl::framebuffer_bind_target::any,buffer.fbo);
@@ -12053,6 +12078,20 @@ namespace jkgm {
                 gl::set_active_texture_unit(11);
                 gl::bind_texture(gl::texture_bind_target::texture_2d,buffer.tex);
             }
+            if(lighting_timing)lighting_gpu_queries.timestamp(3U,false);
+            if(the_config->profile_renderer && gpu_3do_present_serial%120U==0U)
+                LOG_INFO("PERF lighting_path sun=",sun_lit && cam.valid?1:0,
+                         " shadows=",sun_shadow_ready?1:0,
+                         " half_sun=",half_sun_active?1:0,
+                         " dynamic_tiles=",sun_dynamic_views.size(),
+                         " sky_aperture=",sun_lit && sun_shadow_ready &&
+                             sun_sky_aperture_ready()?1:0,
+                         " caustics=",sun_lit && sun_shadow_ready &&
+                             the_config->experimental_sun_caustics &&
+                             sun_caustic_target && sun_caustic_target->complete &&
+                             sun_caustic_target->valid[0] &&
+                             sun_caustic_target->valid[1]?1:0,
+                         " radial_fog=",radial_fog_active?1:0);
             prog.set_sun_half_visibility(half_sun_active,11);
             // HOM coverage reads normal.A on EVERY frame, including rooms
             // without sunlight or active spotlights. Always bind this
@@ -12081,8 +12120,10 @@ namespace jkgm {
                              frame_screen->get_resolved_color_texture());
 
             gl::bind_vertex_array(ogs->postmdl.vao);
+            if(lighting_timing)lighting_gpu_queries.timestamp(4U,true);
             gl::draw_elements(
                 gl::element_type::triangles, ogs->postmdl.num_indices, gl::index_type::uint32);
+            if(lighting_timing)lighting_gpu_queries.timestamp(4U,false);
         }
 
         // Sector-first stage of live GPU-ready SithWorld faces. Native JK
@@ -12273,7 +12314,8 @@ namespace jkgm {
             }
         }
 
-        void draw_game_gbuffer_pass(triangle_buffer_models *trimdl, bool posterize_lighting)
+        void draw_game_gbuffer_pass(triangle_buffer_models *trimdl, bool posterize_lighting,
+                                    bool lighting_timing)
         {
             presentation_gpu_profile::completed_sample detail_completed{};
             bool const detail_timing=the_config->profile_renderer &&
@@ -12324,11 +12366,17 @@ namespace jkgm {
             if(detail_timing)opaque_detail_gpu_queries.timestamp(2U,true);
             frame_screen->begin_compose_opaque_pass(
                 the_config->retain_hom_pixels && mode==renderer_mode::ingame);
-            draw_game_opaque_composite();
+            draw_game_opaque_composite(lighting_timing);
             frame_screen->end_compose_opaque_pass();
             // Same-frame opaque color/depth is now safe to sample.
+            if(lighting_timing)lighting_gpu_queries.timestamp(5U,true);
             render_world_screen_reflections();
+            if(lighting_timing) {
+                lighting_gpu_queries.timestamp(5U,false);
+                lighting_gpu_queries.timestamp(6U,true);
+            }
             render_opaque_screen_reflections();
+            if(lighting_timing)lighting_gpu_queries.timestamp(6U,false);
             if(detail_timing) {
                 opaque_detail_gpu_queries.timestamp(2U,false);
                 opaque_detail_gpu_queries.end();
@@ -15725,9 +15773,28 @@ namespace jkgm {
             {
                 profile_scope timer(profiling,
                     profile_frame.timings[profile_idx(profile_stage::opaque_pass)]);
+                lighting_gpu_profile::completed_sample lighting_completed{};
+                bool const lighting_timing=profiling &&
+                    lighting_gpu_queries.begin(lighting_completed);
+                if(lighting_completed.ready) {
+                    for(size_t i=0;i<lighting_gpu_ns.size();++i)
+                        lighting_gpu_ns[i]+=lighting_completed.nanoseconds[i];
+                    ++lighting_gpu_samples;
+                }
+                if(lighting_completed.skipped)++lighting_gpu_skipped;
+                if(lighting_timing)lighting_gpu_queries.timestamp(0U,true);
                 draw_spotlight_shadow_map();
+                if(lighting_timing) {
+                    lighting_gpu_queries.timestamp(0U,false);
+                    lighting_gpu_queries.timestamp(1U,true);
+                }
                 draw_sun_shadow_map();
+                if(lighting_timing) {
+                    lighting_gpu_queries.timestamp(1U,false);
+                    lighting_gpu_queries.timestamp(2U,true);
+                }
                 draw_sun_caustics();
+                if(lighting_timing)lighting_gpu_queries.timestamp(2U,false);
                 // A 0x20 Thing is expected to receive no added sunlight
                 // and contribute no shadow depth, but must never disable
                 // the shadow map for unrelated objects. Trace *transitions*
@@ -15799,7 +15866,8 @@ namespace jkgm {
                 profile_capture(2U,[&]{render_hemi_capture();});
                 if(capture_timing)capture_gpu_queries.end();
                 if(scene_gpu_timing)scene_gpu_queries.timestamp(0U,true);
-                draw_game_gbuffer_pass(trimdl, posterize_lighting);
+                draw_game_gbuffer_pass(trimdl, posterize_lighting,lighting_timing);
+                if(lighting_timing)lighting_gpu_queries.end();
                 if(scene_gpu_timing)scene_gpu_queries.timestamp(0U,false);
             }
             {
