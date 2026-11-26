@@ -208,9 +208,21 @@ void jkgm::shaders::translucent_sun_uniforms::set_map(
             }
             if(variant!=material_shader_variant::full && type==gl::shader_type::fragment) {
                 auto const newline=source.find('\n');
-                source.insert(newline+1U,variant==material_shader_variant::simple_opaque
-                    ? "#define JKGM_SIMPLE_OPAQUE 1\n"
-                    : "#define JKGM_SIMPLE_ALPHA 1\n");
+                char const *define="";
+                switch(variant) {
+                case material_shader_variant::simple_opaque:
+                    define="#define JKGM_SIMPLE_OPAQUE 1\n"; break;
+                case material_shader_variant::simple_alpha:
+                    define="#define JKGM_SIMPLE_ALPHA 1\n"; break;
+                case material_shader_variant::simple_flare:
+                    define="#define JKGM_SIMPLE_FLARE 1\n"; break;
+                case material_shader_variant::simple_decal:
+                    define="#define JKGM_SIMPLE_DECAL 1\n"; break;
+                case material_shader_variant::simple_fluid:
+                    define="#define JKGM_SIMPLE_FLUID 1\n"; break;
+                default: break;
+                }
+                source.insert(newline+1U,define);
             }
             gl::shader_source(rv,make_string_span(""),make_span(source));
             gl::compile_shader(rv);

@@ -1,4 +1,7 @@
 #version 330 core
+#if defined(JKGM_SIMPLE_FLARE) || defined(JKGM_SIMPLE_DECAL) || defined(JKGM_SIMPLE_FLUID)
+#define JKGM_SIMPLE_ALPHA 1
+#endif
 #if defined(JKGM_SIMPLE_OPAQUE) || defined(JKGM_SIMPLE_ALPHA)
 #define JKGM_SIMPLE_MATERIAL 1
 #endif
@@ -25,12 +28,16 @@ uniform vec3 emissive_factor;
 uniform vec4 fog_params;   // start, end, opacity, 0 planar linear / 1 radial linear / 2 radial exp
 uniform vec3 fog_color;
 uniform sampler2D scene_depth; // completed opaque depth, native units 32*Y
-#ifdef JKGM_SIMPLE_MATERIAL
+#if defined(JKGM_SIMPLE_MATERIAL) && !defined(JKGM_SIMPLE_FLUID)
 const int smoke_half_resolution=0;
 #else
 uniform int smoke_half_resolution; // 1 during half-size fluid SPR rendering
 #endif
+#if defined(JKGM_SIMPLE_MATERIAL) && !defined(JKGM_SIMPLE_DECAL) && !defined(JKGM_SIMPLE_FLUID)
+const vec2 advanced_material_params=vec2(0.0,0.25);
+#else
 uniform vec2 advanced_material_params; // depth_clip, fluid thickness
+#endif
 uniform sampler2D displacement_map;
 #ifdef JKGM_SIMPLE_MATERIAL
 const float displacement_factor=0.0;
@@ -66,26 +73,30 @@ uniform int camera_hud_thing; // 0=world, 1=overlay HUD, 2=world-depth HUD
 // projected spotlights; a zero G-buffer normal also omits SSAO on this Thing.
 uniform int world_lighting_exempt;
 uniform int sprite_receiver; // 1=visible SPR; distinguish billboard receivers in G-buffer
-#ifdef JKGM_SIMPLE_MATERIAL
+#if defined(JKGM_SIMPLE_MATERIAL) && !defined(JKGM_SIMPLE_FLARE)
 const float sprite_depth_bias=0.0;
 #else
 uniform float sprite_depth_bias; // SPR render-only Y, in JK units
 #endif
-#ifdef JKGM_SIMPLE_MATERIAL
+#if defined(JKGM_SIMPLE_MATERIAL) && !defined(JKGM_SIMPLE_FLARE)
 const vec4 sprite_flare_center=vec4(0.0);
 #else
 uniform vec4 sprite_flare_center; // pixel X/Y, native depth, W=flare enabled
 #endif
 // Projected decal only: opaque G-buffer emissive.A stores diffuse JK light,
 // leaving emission RGB and all existing render targets unchanged.
-#ifdef JKGM_SIMPLE_MATERIAL
+#if defined(JKGM_SIMPLE_DECAL)
+const int decal_receiver_lighting=1;
+#elif defined(JKGM_SIMPLE_MATERIAL)
 const int decal_receiver_lighting=0;
 #else
 uniform int decal_receiver_lighting;
 #endif
 uniform sampler2D decal_light_texture;
 uniform sampler2D decal_occlusion;
-#ifdef JKGM_SIMPLE_MATERIAL
+#if defined(JKGM_SIMPLE_FLUID)
+const int blend_mode=3;
+#elif defined(JKGM_SIMPLE_OPAQUE)
 const int blend_mode=0;
 #else
 uniform int blend_mode; // 0 normal, 1 additive, 2 multiply, 3 fluid
@@ -1234,6 +1245,8 @@ void main() {
     // therefore be added directly to premultiplied RGB, never multiplied
     // by albedo alpha. With alpha=0 this acts as emission-only additive.
     float a=transparent_pass!=0 ? albedo.a : 1.0;
+    // Only the Fluid specialization or full shader can enter this branch.
+#if !defined(JKGM_SIMPLE_ALPHA) || defined(JKGM_SIMPLE_FLUID)
     if(transparent_pass!=0 && blend_mode==3) {
         // Native Fluid only multiplies diffuse pigment by absorption;
         // MAT/texture alpha affects the blend factor, not pigment RGB.
@@ -1248,7 +1261,9 @@ void main() {
         // an explicit per-Thing fade must attenuate the highlight too.
         out_color=vec4(diffuse+emission+specular*thing_opacity+
                        projected_light,opacity);
-    } else if(transparent_pass!=0 && blend_mode==2) {
+    } else
+#endif
+    if(transparent_pass!=0 && blend_mode==2) {
         // With (DST_COLOR, ZERO) the RGB output is a multiplier, not
         // premultiplied color. Alpha zero must multiply by WHITE (identity).
         // Match the native triangle path: emission biases the multiplier

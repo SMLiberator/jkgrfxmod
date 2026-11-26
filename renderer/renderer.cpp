@@ -5267,10 +5267,17 @@ namespace jkgm {
             auto const &native_frustum=frame_camera.frustum;
             bool const have_perspective_frustum=frame_camera.perspective;
             auto &prog=*ogs->gpu_3do_preview_program;
-            auto *simple_program=(!post_exempt && !decals_only)
-                ? (transparent?ogs->gpu_3do_simple_alpha_program.get()
-                              :ogs->gpu_3do_simple_opaque_program.get())
+            auto *simple_program=!post_exempt
+                ? (decals_only
+                    ? (transparent?ogs->gpu_3do_simple_decal_program.get():nullptr)
+                    : (transparent?ogs->gpu_3do_simple_alpha_program.get()
+                                  :ogs->gpu_3do_simple_opaque_program.get()))
                 :nullptr;
+            auto *simple_flare_program=transparent && !post_exempt && !decals_only
+                ?ogs->gpu_3do_simple_flare_program.get():nullptr;
+            auto *simple_fluid_program=transparent && !post_exempt && !decals_only
+                ?ogs->gpu_3do_simple_fluid_program.get():nullptr;
+            bool flare_program_initialized=false,fluid_program_initialized=false;
             bool const crossing_buffer_ready=
                 the_config->enable_sector_crossing_lighting &&
                 !post_exempt && !decals_only &&
@@ -6514,6 +6521,7 @@ namespace jkgm {
             bool prev_parallax=false;
             auto *active_preview_program=&prog;
             uint64_t simple_draw_calls=0,full_draw_calls=0,shader_switches=0;
+            uint64_t simple_flare_draws=0,simple_fluid_draws=0;
             // Filtering is texture-object state, not texture-unit state.
             // Repeated 3DO draw groups often use the exact same GL texture;
             // three glTexParameter calls for every bind become extremely
@@ -6570,25 +6578,43 @@ namespace jkgm {
                 material_depth_offset.set(post_exempt?0.0f:material.depth_bias);
                 auto const &inst=*draw.instance;
                 auto const &group=*draw.group;
-                // Ordinary map-free ranges only. Alpha includes regular sprites,
-                // but excludes flare depth, Fluid, decals and HUD. Never
-                // change sorting, batch membership, or alpha policy.
-                // Reflection modes 4..7 can use probes without an EnvMap.
-                bool const simple=simple_program &&
-                    (!inst.is_sprite_quad || (transparent &&
-                        !inst.is_sprite_flare && inst.sprite_depth_bias==0.0f)) &&
+                // Material complexity is independent of the sprite's draw
+                // behavior. Select a map-free variant with the matching
+                // flare, receiver-decal or Fluid depth policy. Keep all
+                // draw ordering and batch membership unchanged.
+                bool const fluid=material.blend==material_blend_mode::fluid;
+                auto *candidate_program=inst.is_sprite_flare
+                    ?simple_flare_program:(fluid?simple_fluid_program:simple_program);
+                bool const simple=candidate_program &&
+                    (!inst.is_sprite_quad || transparent) &&
+                    (inst.is_sprite_flare || inst.sprite_depth_bias==0.0f) &&
                     !inst.camera_hud &&
-                    !inst.is_projected_decal && !inst.transient_procedural &&
-                    material.blend==material_blend_mode::normal &&
+                    inst.is_projected_decal==decals_only &&
+                    (!inst.transient_procedural || inst.is_sprite_quad ||
+                        inst.is_projected_decal) &&
+                    (transparent || material.blend==material_blend_mode::normal) &&
+                    !(fluid && (inst.is_sprite_flare || inst.is_projected_decal)) &&
                     material.reflection_mode==0 &&
                     !material.has_environment && !material.has_environment2 &&
                     !material.has_normal && !material.has_normal2 &&
                     !material.has_surface && !material.has_matcap &&
                     get<0>(material.clearcoat_params)<=0.0f &&
                     material.displacement_factor==0.0f;
-                auto *selected_program=simple?simple_program:
+                auto *selected_program=simple?candidate_program:
                     ogs->gpu_3do_preview_program.get();
                 if(active_preview_program!=selected_program) {
+                    // Initialize auxiliary programs only on first use in
+                    // this pass, not every frame in scenes without VFX.
+                    if(simple && selected_program==simple_flare_program &&
+                       !flare_program_initialized) {
+                        initialize_preview_program(*selected_program);
+                        flare_program_initialized=true;
+                    }
+                    if(simple && selected_program==simple_fluid_program &&
+                       !fluid_program_initialized) {
+                        initialize_preview_program(*selected_program);
+                        fluid_program_initialized=true;
+                    }
                     selected_program->use_program();
                     active_preview_program=selected_program;
                     active_instance=nullptr;
@@ -6600,8 +6626,11 @@ namespace jkgm {
                 }
                 auto &prog=*selected_program;
                 if(gpu_profiling) {
-                    if(simple)++simple_draw_calls;
-                    else ++full_draw_calls;
+                    if(simple) {
+                        ++simple_draw_calls;
+                        if(selected_program==simple_flare_program)++simple_flare_draws;
+                        if(selected_program==simple_fluid_program)++simple_fluid_draws;
+                    } else ++full_draw_calls;
                 }
                 size_t draw_end=draw_start+1;
                 // Opaque sprite compatibility was decided at collection.
@@ -7322,10 +7351,13 @@ namespace jkgm {
             submit_draws();
             if(simple_program && gpu_profiling &&
                gpu_3do_present_serial%120U==0U)
-                LOG_INFO(transparent?"PERF simple_alpha_shader sample simple_draws=":
+                LOG_INFO(decals_only?"PERF simple_decal_shader sample simple_draws=":
+                         transparent?"PERF simple_alpha_shader sample simple_draws=":
                                      "PERF simple_opaque_shader sample simple_draws=",
                          simple_draw_calls," full_draws=",full_draw_calls,
-                         " switches=",shader_switches);
+                         " switches=",shader_switches,
+                         " flare_draws=",simple_flare_draws,
+                         " fluid_draws=",simple_fluid_draws);
             if(split_smoke && !smoke_draws.empty()) {
                 // No depth attachment in the half-res smoke target. Suspend
                 // polygon offset before switching FBOs and post composition.
@@ -7334,8 +7366,13 @@ namespace jkgm {
                 // R16F depth in its full-resolution 2x2 pixel footprint.
                 // Stencil counts only fragments surviving shader discard.
                 draws.swap(smoke_draws);
-                // The ordinary alpha loop may have left the simple program
-                // bound. Fluid uses the full program and its own uniforms.
+                // Both the full and map-free Fluid program must use the
+                // half-size camera/depth coordinates. Initialize the latter
+                // BEFORE setting smoke state, even if this is its first use.
+                if(simple_fluid_program && !fluid_program_initialized) {
+                    initialize_preview_program(*simple_fluid_program);
+                    fluid_program_initialized=true;
+                }
                 prog.use_program();
                 active_preview_program=&prog;
                 active_instance=nullptr;
@@ -7369,14 +7406,31 @@ namespace jkgm {
                 float const h=std::tan(cam.fov*0.008726646259971648f);
                 float const v=h*float(get<y>(conf_scr_res))/
                                 float(get<x>(conf_scr_res));
-                prog.set_translucent_spotlight_camera(
-                    axis(cam.position,0.0f),axis(cam.right,h),
-                    axis(cam.forward,0.0f),axis(cam.up,v),
-                    make_point(float(get<x>(dims)),float(get<y>(dims))));
-                prog.set_smoke_half_resolution(true);
+                auto set_half_smoke_camera=[&](shaders::gpu_3do_preview_shader &shader) {
+                    shader.use_program();
+                    shader.set_translucent_spotlight_camera(
+                        axis(cam.position,0.0f),axis(cam.right,h),
+                        axis(cam.forward,0.0f),axis(cam.up,v),
+                        make_point(float(get<x>(dims)),float(get<y>(dims))));
+                    shader.set_smoke_half_resolution(true);
+                };
+                if(simple_fluid_program)set_half_smoke_camera(*simple_fluid_program);
+                set_half_smoke_camera(prog);
+                auto const previous_simple=simple_fluid_draws;
+                auto const previous_full=full_draw_calls;
                 submit_draws();
                 material_depth_offset.reset();
+                if(simple_fluid_program) {
+                    simple_fluid_program->use_program();
+                    simple_fluid_program->set_smoke_half_resolution(false);
+                }
+                prog.use_program();
                 prog.set_smoke_half_resolution(false);
+                if(simple_fluid_program && gpu_profiling &&
+                   gpu_3do_present_serial%120U==0U)
+                    LOG_INFO("PERF simple_fluid_half_res_shader sample simple_draws=",
+                             simple_fluid_draws-previous_simple,
+                             " full_draws=",full_draw_calls-previous_full);
                 glDisable(GL_STENCIL_TEST);
                 draws.swap(smoke_draws);
                 // Full-res framebuffer and viewport for all remaining passes.

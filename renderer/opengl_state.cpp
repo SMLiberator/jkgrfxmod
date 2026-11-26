@@ -472,11 +472,23 @@ jkgm::opengl_state::opengl_state::opengl_state(size<2, int> screen_res,
             gpu_3do_simple_opaque_program=
                 std::make_unique<shaders::gpu_3do_preview_shader>(
                     data_root,material_shader_variant::simple_opaque);
-        if(the_config->use_gpu_cache &&
-           the_config->experimental_gpu_3do_simple_alpha_shader)
-            gpu_3do_simple_alpha_program=
-                std::make_unique<shaders::gpu_3do_preview_shader>(
-                    data_root,material_shader_variant::simple_alpha);
+        if(the_config->experimental_gpu_3do_simple_alpha_shader) {
+            if(the_config->use_gpu_cache) {
+                gpu_3do_simple_alpha_program=
+                    std::make_unique<shaders::gpu_3do_preview_shader>(
+                        data_root,material_shader_variant::simple_alpha);
+                gpu_3do_simple_flare_program=
+                    std::make_unique<shaders::gpu_3do_preview_shader>(
+                        data_root,material_shader_variant::simple_flare);
+                gpu_3do_simple_fluid_program=
+                    std::make_unique<shaders::gpu_3do_preview_shader>(
+                        data_root,material_shader_variant::simple_fluid);
+            }
+            if(the_config->enable_decals)
+                gpu_3do_simple_decal_program=
+                    std::make_unique<shaders::gpu_3do_preview_shader>(
+                        data_root,material_shader_variant::simple_decal);
+        }
     }
     // Build the GPU world shader whenever unified caching is enabled.
     if(the_config->use_gpu_cache)

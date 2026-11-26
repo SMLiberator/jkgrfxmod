@@ -9,7 +9,9 @@
 #include <vector>
 
 namespace jkgm {
-    enum class material_shader_variant { full, simple_opaque, simple_alpha };
+    enum class material_shader_variant {
+        full, simple_opaque, simple_alpha, simple_flare, simple_decal, simple_fluid
+    };
 
     class opengl_shader {
     protected:
