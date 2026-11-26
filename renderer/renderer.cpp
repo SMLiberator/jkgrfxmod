@@ -5152,8 +5152,8 @@ namespace jkgm {
                         LOG_INFO("AUTO 3DO LOD unreduced source=",source_id,
                                  " level=",level,
                                  " triangles=",
-                                 entry.source->indices.size()/3U,
-                                 " groups=",entry.source->groups.size(),
+                                 inst.geometry->indices.size()/3U,
+                                 " groups=",inst.geometry->groups.size(),
                                  " cpu_generation_us=",cpu_ns/1000U,
                                  " reason=no_nonempty_reduction");
                     }
@@ -5169,10 +5169,10 @@ namespace jkgm {
                             LOG_INFO("AUTO 3DO LOD generated source=",source_id,
                                      " level=",level,
                                      " triangles_native=",
-                                     entry.source->indices.size()/3U,
+                                     inst.geometry->indices.size()/3U,
                                      " triangles_generated=",
                                      entry.levels[index]->indices.size()/3U,
-                                     " groups_source=",entry.source->groups.size(),
+                                     " groups_source=",inst.geometry->groups.size(),
                                      " groups_reduced=",entry.levels[index]->groups.size(),
                                      " screen_radius_px=",pixel_radius,
                                      " cpu_generation_us=",cpu_ns/1000U);
