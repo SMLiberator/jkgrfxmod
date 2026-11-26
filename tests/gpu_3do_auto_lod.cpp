@@ -64,6 +64,20 @@ static gpu_3do_geometry fragment_groups(gpu_3do_geometry mesh,
     return mesh;
 }
 int main() {
+    // Count actual range triangles and invalidate cached metadata on a
+    // geometry copy (as generated LODs / moving decals do).
+    {
+        auto mesh=grid(2);
+        assert(mesh.cached_group_triangle_count()==8U);
+        auto copy=mesh;
+        copy.groups.front().count=3U;
+        assert(copy.cached_group_triangle_count()==1U);
+        assert(mesh.cached_group_triangle_count()==8U);
+        gpu_3do_geometry assigned{};
+        assigned=mesh;
+        assigned.groups.front().count=6U;
+        assert(assigned.cached_group_triangle_count()==2U);
+    }
     // Raw world Y must never be treated as camera-relative depth.
     std::array<float,3> const world{{0.0f,10.0f,0.0f}};
     std::array<float,3> const camera0{{0.0f,0.0f,0.0f}};

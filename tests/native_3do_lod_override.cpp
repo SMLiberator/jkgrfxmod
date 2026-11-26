@@ -35,6 +35,27 @@ int main() {
         assert(sample()==3 && reads==8);
     }
     assert(active==nullptr && sample()==3 && reads==9);
+    // The list snapshot is lazy and reference-based, and nested/native
+    // fallback scopes invalidate it exactly like the camera header.
+    struct light_state { native_draw_list_memo<int> lights; };
+    light_state *active_lights=nullptr;
+    int light_reads=0,light_base=10;
+    auto read_light=[&](size_t i) {++light_reads;return light_base+int(i);};
+    {
+        native_draw_scope<light_state> outer(active_lights,true);
+        auto const &first=active_lights->lights.get(3,read_light);
+        assert(first[2]==12 && light_reads==3);
+        assert(&active_lights->lights.get(3,read_light)==&first && light_reads==3);
+        light_base=20;
+        {
+            native_draw_scope<light_state> inner(active_lights,true);
+            assert(active_lights->lights.get(3,read_light)[2]==22 && light_reads==6);
+        }
+        assert(active_lights->lights.get(3,read_light)[2]==22 && light_reads==9);
+        *active_lights={};
+        assert(active_lights->lights.get(0,read_light).empty() && light_reads==9);
+        assert(active_lights->lights.get(1,read_light)[0]==20 && light_reads==10);
+    }
     std::unordered_map<uintptr_t,uint8_t> bytes;
     auto write=[&](uintptr_t ptr,uint32_t value) {
         uint8_t src[4]{};

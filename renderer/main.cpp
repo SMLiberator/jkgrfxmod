@@ -201,11 +201,20 @@ namespace {
         float ambient=0,attenuation=0;
         int32_t count=0;
     };
+    struct native_camera_light_record {
+        enum class status { malformed, inactive, active };
+        status state=status::malformed;
+        uint32_t id=0;
+        int32_t type=0;
+        float strength=0.0f,radius=0.0f;
+        std::array<float,3> position{};
+    };
     struct native_model_mesh_state {
         prepared_native_mesh *prepared_slot=nullptr;
         bool prepared_model=false;
         jkgm::native_draw_memo<std::array<float,3>> colormap;
         jkgm::native_draw_memo<native_camera_light_header> lighting_header;
+        jkgm::native_draw_list_memo<native_camera_light_record> camera_lights;
         jkgm::native_draw_memo<jkgm::engine_camera> camera;
         jkgm::native_draw_memo<native_mesh_frustum_state> frustum;
         jkgm::native_draw_memo<std::optional<int32_t>> geo_mode,light_mode;
@@ -784,37 +793,53 @@ namespace {
         std::array<jkgm::gpu_3do_light,64> candidates{};
         std::array<jkgm::gpu_3do_light_priority,64> priorities{};
         unsigned eligible=0,skipped=0;
-        for(int i=0;i<count;++i) {
+        // Read native light records once per prepared model draw, not
+        // once per mesh. Preserve the original order, ID, type, malformed
+        // record accounting and mesh-local sphere/inverse-transform tests.
+        auto read_light=[camera](size_t i) {
+            using R=native_camera_light_record;
+            R record{};
             uintptr_t light=0;
             std::memcpy(&light,
                 reinterpret_cast<void const *>(camera+0x5c+4*i),4);
             if(light<0x10000U ||
-               !gpu_span_readable(reinterpret_cast<void const *>(light),0x30)) {
-                ++skipped;continue;
-            }
-            uint32_t id=0,enabled=0;
-            int32_t type=0;
-            float strength=0.0f,radius=0.0f;
-            std::memcpy(&id,reinterpret_cast<void const *>(light),4);
-            std::memcpy(&type,reinterpret_cast<void const *>(light+4),4);
+               !gpu_span_readable(reinterpret_cast<void const *>(light),0x30))
+                return record;
+            uint32_t enabled=0;
+            std::memcpy(&record.id,reinterpret_cast<void const *>(light),4);
+            std::memcpy(&record.type,reinterpret_cast<void const *>(light+4),4);
             std::memcpy(&enabled,reinterpret_cast<void const *>(light+8),4);
-            std::memcpy(&strength,reinterpret_cast<void const *>(light+0x18),4);
-            std::memcpy(&radius,reinterpret_cast<void const *>(light+0x28),4);
-            if(id>=64 || !std::isfinite(strength) ||
-               !std::isfinite(radius)) {
+            std::memcpy(&record.strength,reinterpret_cast<void const *>(light+0x18),4);
+            std::memcpy(&record.radius,reinterpret_cast<void const *>(light+0x28),4);
+            if(record.id>=64 || !std::isfinite(record.strength) ||
+               !std::isfinite(record.radius))return record;
+            if(!enabled || record.strength<=0.0f || record.radius<=0.0f) {
+                record.state=R::status::inactive;
+                return record;
+            }
+            std::memcpy(record.position.data(),
+                reinterpret_cast<void const *>(camera+0x15c+record.id*12),12);
+            for(float v:record.position)if(!std::isfinite(v))return record;
+            record.state=R::status::active;
+            return record;
+        };
+        auto const *shared_lights=active_model_mesh_state &&
+            active_model_mesh_state->prepared_model
+            ?&active_model_mesh_state->camera_lights.get(size_t(count),read_light)
+            :nullptr;
+        for(int i=0;i<count;++i) {
+            auto const record=shared_lights?(*shared_lights)[size_t(i)]
+                                           :read_light(size_t(i));
+            if(record.state==native_camera_light_record::status::malformed) {
                 ++skipped;continue;
             }
-            if(!enabled || strength<=0.0f || radius<=0.0f)continue;
-            float pos[3];
-            std::memcpy(pos,
-                reinterpret_cast<void const *>(camera+0x15c+id*12),12);
-            if(!std::isfinite(pos[0]) || !std::isfinite(pos[1]) ||
-               !std::isfinite(pos[2])) {
-                ++skipped;continue;
-            }
-            float const dx=pos[0]-placement[9];
-            float const dy=pos[1]-placement[10];
-            float const dz=pos[2]-placement[11];
+            if(record.state==native_camera_light_record::status::inactive)continue;
+            uint32_t const id=record.id;
+            int32_t const type=record.type;
+            float const strength=record.strength,radius=record.radius;
+            float const dx=record.position[0]-placement[9];
+            float const dy=record.position[1]-placement[10];
+            float const dz=record.position[2]-placement[11];
             float const distance_sq=dx*dx+dy*dy+dz*dz;
             float const reach=radius+mesh_reach;
             if(distance_sq>reach*reach)continue;

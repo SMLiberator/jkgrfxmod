@@ -5012,16 +5012,25 @@ namespace jkgm {
             };
             // The minimum is per owning SithThing, not per hierarchy rdMesh.
             // Count original main-view mesh nodes before replacing any IDs.
-            struct lod_triangle_budget {uint64_t original=0,proposed=0;};
-            std::unordered_map<uint64_t,lod_triangle_budget> triangle_budgets;
+            struct thing_lod_preparation {
+                uint64_t original=0,proposed=0;
+                bool decision_ready=false;
+                unsigned level=0;
+                float radius_px=-1.0f;
+            };
+            std::unordered_map<uint64_t,thing_lod_preparation> triangle_budgets;
+            uint64_t previous_owner=0;
+            thing_lod_preparation *previous_budget=nullptr;
             for(auto const &inst:frame_gpu_3do_instances)
-                if(eligible(inst) && inst.shadow_owner)
-                    {
-                        auto &budget=triangle_budgets[inst.shadow_owner];
-                        auto const tris=inst.geometry->indices.size()/3U;
-                        budget.original+=tris;
-                        budget.proposed+=tris;
+                if(eligible(inst) && inst.shadow_owner) {
+                    if(previous_owner!=inst.shadow_owner) {
+                        previous_owner=inst.shadow_owner;
+                        previous_budget=&triangle_budgets[previous_owner];
                     }
+                    auto const tris=inst.geometry->indices.size()/3U;
+                    previous_budget->original+=tris;
+                    previous_budget->proposed+=tris;
+                }
             struct planned_lod {
                 gpu_3do_instance *instance=nullptr;
                 std::shared_ptr<gpu_3do_geometry const> geometry;
@@ -5032,19 +5041,21 @@ namespace jkgm {
             pending.reserve(frame_gpu_3do_instances.size());
             std::set<uint64_t> floor_rejected_owners;
             uint64_t floor_rejected_nodes=0U;
-            struct thing_lod_decision {
-                unsigned level=0U;
-                float radius_px=-1.0f;
-            };
-            // Compute the projected native Thing radius only once per
-            // owner each frame. All sibling hierarchy meshes (including
-            // tiny feet/hands) share that selection and hysteresis.
-            static thread_local std::unordered_map<uint64_t,thing_lod_decision>
-                thing_levels;
-            thing_levels.clear();
-            thing_levels.reserve(frame_gpu_3do_instances.size());
+            // Share the triangle budget, bounds-derived LOD decision and
+            // hysteresis in one Thing record. Adjacent siblings reuse its
+            // pointer; non-adjacent draws still resolve by exact owner.
+            size_t thing_decisions=0;
+            previous_owner=0;
+            previous_budget=nullptr;
             for(auto &inst:frame_gpu_3do_instances) {
                 if(!eligible(inst))continue;
+                if(previous_owner!=inst.shadow_owner) {
+                    previous_owner=inst.shadow_owner;
+                    auto const found=triangle_budgets.find(previous_owner);
+                    previous_budget=found==triangle_budgets.end()
+                        ?nullptr:&found->second;
+                }
+                auto *budget=previous_budget;
                 float pixel_radius=-1.0f;
                 unsigned level=0U;
                 int const debug_mode=the_config->gpu_3do_auto_lod_debug_mode;
@@ -5056,13 +5067,13 @@ namespace jkgm {
                         the_config->gpu_3do_auto_lod_lod1_radius_px,
                         the_config->gpu_3do_auto_lod_lod2_radius_px,
                         debug_mode);
-                } else if(inst.shadow_owner &&
+                } else if(budget &&
                           inst.owning_thing_world_position_valid &&
                           inst.owning_thing_lod_radius_valid) {
-                    auto const inserted=thing_levels.try_emplace(
-                        inst.shadow_owner,thing_lod_decision{});
-                    auto &decision=inserted.first->second;
-                    if(inserted.second) {
+                    auto &decision=*budget;
+                    if(!decision.decision_ready) {
+                        decision.decision_ready=true;
+                        ++thing_decisions;
                         decision.radius_px=gpu_3do_auto_lod_projected_radius_px(
                             inst.owning_thing_world_position,
                             cam.position,cam.forward,
@@ -5087,9 +5098,8 @@ namespace jkgm {
                 if(level==0U) {++selected[0];continue;}
                 // Skip generating any variants for objects already at the
                 // minimum. This also protects a standalone 12-triangle box.
-                auto const owner_total=triangle_budgets.find(inst.shadow_owner);
-                if(owner_total!=triangle_budgets.end() &&
-                   owner_total->second.original<=static_cast<uint64_t>(
+                if(budget &&
+                   budget->original<=static_cast<uint64_t>(
                        the_config->gpu_3do_auto_lod_min_object_triangles)) {
                     ++selected[0];
                     floor_rejected_owners.insert(inst.shadow_owner);
@@ -5164,10 +5174,9 @@ namespace jkgm {
                 if(!entry.levels[index]) {
                     ++selected[0];continue;
                 }
-                if(inst.shadow_owner) {
-                    auto &budget=triangle_budgets[inst.shadow_owner];
-                    budget.proposed-=inst.geometry->indices.size()/3U;
-                    budget.proposed+=entry.levels[index]->indices.size()/3U;
+                if(budget) {
+                    budget->proposed-=inst.geometry->indices.size()/3U;
+                    budget->proposed+=entry.levels[index]->indices.size()/3U;
                 }
                 pending.push_back({&inst,entry.levels[index],entry.ids[index],
                                    inst.shadow_owner,level});
@@ -5202,7 +5211,7 @@ namespace jkgm {
                          " lod1_radius_px=",the_config->gpu_3do_auto_lod_lod1_radius_px,
                          " lod2_radius_px=",the_config->gpu_3do_auto_lod_lod2_radius_px,
                          " cpu_variants=",auto_3do_lod_cache.size(),
-                         " thing_decisions=",thing_levels.size(),
+                         " thing_decisions=",thing_decisions,
                          " generation_budget=",the_config->gpu_3do_auto_lod_generation_budget,
                          " min_object_triangles=",
                          the_config->gpu_3do_auto_lod_min_object_triangles,
@@ -7614,6 +7623,18 @@ namespace jkgm {
             // of native draw submission. HUD, 0x20 skyboxes, projected
             // decals and transient particle/geometry never enter this path.
             std::unordered_map<uint64_t,candidate> grouped;
+            uint64_t previous_owner=0;
+            candidate *previous_candidate=nullptr;
+            auto candidate_for=[&](uint64_t owner) -> candidate & {
+                // Native model nodes are submitted consecutively. Hash
+                // only at owner boundaries, retaining exact owner keys for
+                // non-adjacent submissions and independent sprite paths.
+                if(!previous_candidate || previous_owner!=owner) {
+                    previous_owner=owner;
+                    previous_candidate=&grouped[owner];
+                }
+                return *previous_candidate;
+            };
             for(auto const &inst:frame_gpu_3do_instances) {
                 if(!inst.geometry || !inst.shadow_owner ||
                    inst.shadow_only || inst.camera_hud ||
@@ -7632,7 +7653,7 @@ namespace jkgm {
                     // pixels, including thick fluid-blend smoke sprites.
                     auto const bound=gpu_sprite_occlusion_bound(inst.transform);
                     if(!gpu_thing_occlusion_bound_valid(bound))continue;
-                    auto &c=grouped[inst.shadow_owner];
+                    auto &c=candidate_for(inst.shadow_owner);
                     c.owner=inst.shadow_owner;
                     c.sprite=true;
                     c.sprite_resource=inst.sprite_occlusion_resource;
@@ -7643,16 +7664,14 @@ namespace jkgm {
                     c.sprite_geometry=inst.sprite_occlusion_quad
                         ?inst.sprite_occlusion_quad:inst.geometry;
                     c.position=bound.center;
-                    for(auto const &g:inst.geometry->groups)
-                        c.triangles+=g.count/3U;
+                    c.triangles+=inst.geometry->cached_group_triangle_count();
                     continue;
                 }
                 if(!inst.owning_thing_world_position_valid)continue;
-                auto &c=grouped[inst.shadow_owner];
+                auto &c=candidate_for(inst.shadow_owner);
                 c.owner=inst.shadow_owner;
                 c.position=inst.owning_thing_world_position;
-                for(auto const &g:inst.geometry->groups)
-                    c.triangles+=g.count/3U;
+                c.triangles+=inst.geometry->cached_group_triangle_count();
             }
             if(native_enabled) {
                 auto &history=thing_occlusion_cost_history;

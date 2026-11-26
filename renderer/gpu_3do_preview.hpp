@@ -189,6 +189,8 @@ namespace jkgm {
             // Union its groups' local bounds once, not once per camera.
             std::once_flag compact_planes_once;
             gpu_3do_compact_plane_cache compact_planes;
+            std::once_flag triangles_once;
+            size_t group_triangles=0;
             std::once_flag bounds_once;
             bool bounds_complete=false;
             std::array<float,3> bounds_min{},bounds_max{};
@@ -208,6 +210,17 @@ namespace jkgm {
             opaque_order_cache_owner &operator=(
                 opaque_order_cache_owner &&)=default;
         };
+        // Query preparation counts submitted group triangles, not the
+        // backing index array (procedural/partially used ranges may differ).
+        // The copy-resettable geometry cache also covers generated LODs.
+        size_t cached_group_triangle_count() const {
+            auto &cache=*opaque_order_state.state;
+            std::call_once(cache.triangles_once,[this,&cache] {
+                for(auto const &group:groups)
+                    cache.group_triangles+=group.count/3U;
+            });
+            return cache.group_triangles;
+        }
         gpu_3do_compact_plane_cache const &cached_compact_planes() const {
             auto &cache=*opaque_order_state.state;
             std::call_once(cache.compact_planes_once,[this,&cache] {
