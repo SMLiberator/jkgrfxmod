@@ -10,6 +10,8 @@
 #include "global_env_capture.hpp"
 #include "camera_to_mat.hpp"
 #include "native_3do_profile.hpp"
+#include "native_3do_draw_memo.hpp"
+#include <optional>
 #include "native_3do_lod_override.hpp"
 #include "native_mesh_revision.hpp"
 #include "native_sprite_profile.hpp"
@@ -184,6 +186,22 @@ namespace {
     thread_local bool active_native_shadow_dynamic=false;
     thread_local uintptr_t active_native_decal_model=0;
     thread_local bool active_native_decal_receiver=false;
+    struct native_mesh_frustum_state {
+        bool valid=false;
+        int32_t project_type=0;
+        jkgm::gpu_3do_native_frustum frustum{};
+    };
+    struct native_static_receiver_state {
+        uint32_t owner=0,signature=0,world=0;
+    };
+    struct native_model_mesh_state {
+        jkgm::native_draw_memo<jkgm::engine_camera> camera;
+        jkgm::native_draw_memo<native_mesh_frustum_state> frustum;
+        jkgm::native_draw_memo<std::optional<int32_t>> geo_mode,light_mode;
+        jkgm::native_draw_memo<uint32_t> decal_geoset;
+        jkgm::native_draw_memo<native_static_receiver_state> static_receiver;
+    };
+    thread_local native_model_mesh_state *active_model_mesh_state=nullptr;
 
     // Defined below by the per-frame native memory-query cache. The
     // attachment-family resolver runs earlier in this translation unit.
@@ -606,30 +624,40 @@ namespace {
     // When bypassing rdModel3_DrawMesh, its built-in sphere/frustum cull
     // would otherwise disappear: this previously queued *every* mesh,
     // including thousands well outside the camera view.
-    bool gpu_mesh_outside_native_frustum(native_mesh const &m,void const *matrix,
-                                         jkgm::engine_camera const &camera)
+    native_mesh_frustum_state read_native_mesh_frustum()
     {
-        if(!gpu_span_readable(matrix,12*sizeof(float))) return false;
+        native_mesh_frustum_state result{};
         constexpr uintptr_t camera_global=0x0073A418U;
         if(!gpu_span_readable(reinterpret_cast<void const *>(camera_global),
-                              sizeof(uintptr_t))) return false;
+                              sizeof(uintptr_t))) return {};
         uintptr_t cam_ptr=0;
         std::memcpy(&cam_ptr,reinterpret_cast<void const *>(camera_global),
                     sizeof(cam_ptr));
         if(cam_ptr<0x10000U ||
            !gpu_span_readable(reinterpret_cast<void const *>(cam_ptr),0x4c))
-            return false;
+            return {};
         uintptr_t frustum_ptr=0;
-        int32_t project_type=0;
-        std::memcpy(&project_type,reinterpret_cast<void const *>(cam_ptr),4);
+        
+        std::memcpy(&result.project_type,reinterpret_cast<void const *>(cam_ptr),4);
         std::memcpy(&frustum_ptr,
                     reinterpret_cast<void const *>(cam_ptr+0x48U),sizeof(frustum_ptr));
         if(frustum_ptr<0x10000U ||
            !gpu_span_readable(reinterpret_cast<void const *>(frustum_ptr),
                               sizeof(jkgm::gpu_3do_native_frustum)))
-            return false;
-        jkgm::gpu_3do_native_frustum f{};
-        std::memcpy(&f,reinterpret_cast<void const *>(frustum_ptr),sizeof(f));
+            return {};
+        std::memcpy(&result.frustum,reinterpret_cast<void const *>(frustum_ptr),
+                    sizeof(result.frustum));
+        result.valid=true;
+        return result;
+    }
+
+    bool gpu_mesh_outside_native_frustum(native_mesh const &m,void const *matrix,
+                                         jkgm::engine_camera const &camera)
+    {
+        if(!gpu_span_readable(matrix,12*sizeof(float))) return false;
+        auto const state=jkgm::native_draw_read(active_model_mesh_state,
+            &native_model_mesh_state::frustum,read_native_mesh_frustum);
+        if(!state.valid)return false;
         float world[12];
         std::memcpy(world,matrix,sizeof(world));
         float const dx=world[9]-camera.position[0];
@@ -649,7 +677,7 @@ namespace {
             if(std::isfinite(scale)) max_axis_scale=std::max(max_axis_scale,scale);
         }
         return jkgm::gpu_3do_sphere_outside(
-            f,project_type==1,x,y,z,m.radius*max_axis_scale+0.02f);
+            state.frustum,state.project_type==1,x,y,z,m.radius*max_axis_scale+0.02f);
     }
 
     // Local positions are used for per-vertex illumination, so they travel
@@ -1797,7 +1825,13 @@ namespace {
                 if(profiling)++native_totals.model_lod0_forced;
             }
         }
-        int const result=RealNativeModel(thing,placement);
+        int result=0;
+        {
+            jkgm::native_draw_scope<native_model_mesh_state> scope(
+                active_model_mesh_state,the_config &&
+                    the_config->experimental_gpu_3do_model_draw_memo);
+            result=RealNativeModel(thing,placement);
+        }
         if(lod0.valid)
             std::memcpy(reinterpret_cast<void *>(lod0.selection_address),
                 &lod0.previous,sizeof(lod0.previous));
@@ -1897,15 +1931,36 @@ namespace {
     }
 
     void capture_static_sprite_decal_mesh(void *mesh,void *placement);
+    uint32_t native_draw_decal_geoset()
+    {
+        return jkgm::native_draw_read(active_model_mesh_state,
+            &native_model_mesh_state::decal_geoset,[] {
+                auto read=[](uintptr_t p,void *dst,size_t bytes) {
+                    if(!gpu_span_readable(reinterpret_cast<void const *>(p),bytes))
+                        return false;
+                    std::memcpy(dst,reinterpret_cast<void const *>(p),bytes);
+                    return true;
+                };
+                return jkgm::read_sprite_decal_draw_geoset(
+                    read,active_native_decal_model);
+            });
+    }
     void __cdecl HookedNativeMesh(void *mesh, void *placement)
     {
         auto const profiling=the_config && the_config->profile_renderer;
         auto const start=profiling ? std::chrono::steady_clock::now()
                                    : std::chrono::steady_clock::time_point{};
         if(the_config && the_config->enable_decals) {
-            capture_static_sprite_decal_mesh(mesh,placement);
-            if(profiling)
-                native_totals.mesh_decal_ns+=elapsed_native_ns(start);
+            bool const known_nonstatic=active_model_mesh_state &&
+                active_model_mesh_state->static_receiver.ready &&
+                !active_model_mesh_state->static_receiver.value.owner;
+            if(!known_nonstatic) {
+                capture_static_sprite_decal_mesh(mesh,placement);
+                if(profiling) {
+                    ++native_totals.static_decal_capture_calls;
+                    native_totals.mesh_decal_ns+=elapsed_native_ns(start);
+                }
+            } else if(profiling)++native_totals.static_decal_capture_skipped;
         }
         auto const queue_begin=profiling ? std::chrono::steady_clock::now()
                                         : std::chrono::steady_clock::time_point{};
@@ -1927,15 +1982,7 @@ namespace {
             item.model=active_native_decal_model;
             item.mesh=reinterpret_cast<uintptr_t>(mesh);
             item.revision=native_decal_mesh_structure_signature(mesh);
-            auto read_geo=[](uintptr_t p,void *dst,size_t bytes) {
-                if(!gpu_span_readable(
-                       reinterpret_cast<void const *>(p),bytes))
-                    return false;
-                std::memcpy(dst,reinterpret_cast<void const *>(p),bytes);
-                return true;
-            };
-            item.geoset=jkgm::read_sprite_decal_draw_geoset(
-                read_geo,item.model);
+            item.geoset=native_draw_decal_geoset();
             item.occurrence=++moving_mesh_occurrences[
                 {item.thing,item.mesh}];
             std::memcpy(item.transform.data(),placement,12U*sizeof(float));
@@ -2109,6 +2156,8 @@ namespace {
                     ?std::chrono::steady_clock::now()
                     :std::chrono::steady_clock::time_point{};
                 RealNativeMesh(mesh,placement);
+                // Native fallback can touch the same engine globals.
+                if(active_model_mesh_state)*active_model_mesh_state={};
                 if(profiling) {
                     native_totals.mesh_native_ns+=
                         elapsed_native_ns(fallback_begin);
@@ -2310,16 +2359,20 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
     // global GeoMode in this JK23-specific native global before it visits
     // any hierarchy meshes. Our hook otherwise ignores COG GeoMode changes.
     constexpr uintptr_t effective_geo_mode=0x0073A5D8U;
-    if(!gpu_span_readable(reinterpret_cast<void const *>(effective_geo_mode),
-                          sizeof(int32_t))) {
+    auto const geo_mode=jkgm::native_draw_read(active_model_mesh_state,
+        &native_model_mesh_state::geo_mode,[&]() -> std::optional<int32_t> {
+            if(!gpu_span_readable(reinterpret_cast<void const *>(effective_geo_mode),
+                                  sizeof(int32_t)))return std::nullopt;
+            int32_t value=0;
+            std::memcpy(&value,reinterpret_cast<void const *>(effective_geo_mode),4);
+            return value;
+        });
+    if(!geo_mode) {
         if(active_native_model_camera_hud)
             gpu_last_camera_hud_failure="effective_geo_mode_unavailable";
         return false;
     }
-    int32_t current_geo_mode=0;
-    std::memcpy(&current_geo_mode,
-                reinterpret_cast<void const *>(effective_geo_mode),
-                sizeof(current_geo_mode));
+    int32_t const current_geo_mode=*geo_mode;
     if(!jkgm::gpu_3do_supports_geo_mode(
            current_geo_mode,m.geometry_mode)) {
         if(the_config->profile_renderer) {
@@ -2336,7 +2389,11 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
     if(!jkgm::gpu_3do_geo_mode_draws_filled(
            current_geo_mode,m.geometry_mode))
         return !shadow_only;
-    auto const camera=jkgm::read_active_render_camera();
+    auto const camera=jkgm::native_draw_read(active_model_mesh_state,
+        &native_model_mesh_state::camera,[] {
+            if(the_config->profile_renderer)++native_totals.mesh_camera_reads;
+            return jkgm::read_active_render_camera();
+        });
     if(!camera.valid) {
         if(the_config->profile_renderer) ++gpu_native_stats.lighting_native;
         gpu_log_fallback(m,"camera_unavailable");
@@ -2662,11 +2719,16 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
         // the verified rdModel3 global block is +0x48 from original JK.
         // This is sampled per instance because COG can change it each frame.
         constexpr uintptr_t effective_light_mode_addr=0x0073C218U;
-        if(!gpu_span_readable(reinterpret_cast<void const *>(effective_light_mode_addr),4))
-            return false;
-        int32_t lighting_cap=0;
-        std::memcpy(&lighting_cap,
-                    reinterpret_cast<void const *>(effective_light_mode_addr),4);
+        auto const light_mode=jkgm::native_draw_read(active_model_mesh_state,
+            &native_model_mesh_state::light_mode,[&]() -> std::optional<int32_t> {
+                if(!gpu_span_readable(reinterpret_cast<void const *>(effective_light_mode_addr),4))
+                    return std::nullopt;
+                int32_t value=0;
+                std::memcpy(&value,reinterpret_cast<void const *>(effective_light_mode_addr),4);
+                return value;
+            });
+        if(!light_mode)return false;
+        int32_t const lighting_cap=*light_mode;
         if(lighting_cap<0) {
             if(the_config->profile_renderer) ++gpu_native_stats.lighting_native;
             gpu_log_fallback(m,"unsupported_thing_lighting_mode");
@@ -2687,15 +2749,7 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
         inst.decal_receiver_thing=active_native_shadow_owner;
         inst.decal_receiver_model=active_native_decal_model;
         inst.decal_receiver_mesh=reinterpret_cast<uintptr_t>(mesh);
-        auto read_geo=[](uintptr_t p,void *dst,size_t bytes) {
-            if(!gpu_span_readable(
-                   reinterpret_cast<void const *>(p),bytes))
-                return false;
-            std::memcpy(dst,reinterpret_cast<void const *>(p),bytes);
-            return true;
-        };
-        inst.decal_receiver_geoset=jkgm::read_sprite_decal_draw_geoset(
-            read_geo,active_native_decal_model);
+        inst.decal_receiver_geoset=native_draw_decal_geoset();
         inst.decal_receiver_revision=it->second.source_signature;
         inst.decal_receiver_occurrence=++moving_mesh_occurrences[
             {active_native_shadow_owner,reinterpret_cast<uintptr_t>(mesh)}];
@@ -5375,39 +5429,49 @@ namespace {
         ++sprite_static_revision;
     }
 
-    // rdModel3_DrawMesh supplies the composed WORLD joint transform.
-    // Only stationary collide=3 Things are eligible for long-lived caching.
-    void capture_static_sprite_decal_mesh(void *mesh,void *placement)
+    // Eligibility and world identity are common to the whole native draw.
+    native_static_receiver_state read_native_static_receiver()
     {
-        if(!the_config || !the_config->enable_decals ||
-           !mesh || !placement)
-            return;
         constexpr uintptr_t current_rdmodel_thing=0x0073C320U;
         if(!gpu_span_readable(reinterpret_cast<void const *>(
-                                  current_rdmodel_thing),4))return;
+                                  current_rdmodel_thing),4))return {};
         uint32_t rd=0;
         std::memcpy(&rd,reinterpret_cast<void const *>(current_rdmodel_thing),4);
         if(!gpu_span_readable(reinterpret_cast<void const *>(rd),0x48U))
-            return;
+            return {};
         uint32_t rd_type=0,owner=0;
         std::memcpy(&rd_type,reinterpret_cast<void const *>(rd),4);
         std::memcpy(&owner,reinterpret_cast<void const *>(rd+0x44U),4);
         if(rd_type!=1 || !jkgm::decal_native_address_ok(owner) ||
            !gpu_span_readable(reinterpret_cast<void const *>(owner),0xc8U) ||
-           rd!=owner+0xc4U)return;
+           rd!=owner+0xc4U)return {};
         uint32_t type=0,move_type=0,collision=0,signature=0;
         std::memcpy(&type,reinterpret_cast<void const *>(owner+0x0cU),4);
         std::memcpy(&move_type,reinterpret_cast<void const *>(owner+0x10U),4);
         std::memcpy(&collision,reinterpret_cast<void const *>(owner+0x28U),4);
         std::memcpy(&signature,reinterpret_cast<void const *>(owner+0x74U),4);
-        if(!type || move_type!=0 || collision!=3)return;
+        if(!type || move_type!=0 || collision!=3)return {};
         constexpr uintptr_t world_ptr=
             jkgm::engine_material_debug::current_world_global;
         if(!gpu_span_readable(reinterpret_cast<void const *>(world_ptr),4))
-            return;
+            return {};
         uint32_t world=0;
         std::memcpy(&world,reinterpret_cast<void const *>(world_ptr),4);
-        if(!jkgm::decal_native_address_ok(world))return;
+        if(!jkgm::decal_native_address_ok(world))return {};
+        return {owner,signature,world};
+    }
+
+    // rdModel3_DrawMesh supplies the composed WORLD joint transform.
+    // Only stationary collide=3 Things are eligible for long-lived caching.
+    void capture_static_sprite_decal_mesh(void *mesh,void *placement)
+    {
+        if(!the_config || !the_config->enable_decals ||
+           !mesh || !placement)return;
+        auto const receiver=jkgm::native_draw_read(active_model_mesh_state,
+            &native_model_mesh_state::static_receiver,read_native_static_receiver);
+        if(!receiver.owner)return;
+        uint32_t const owner=receiver.owner,signature=receiver.signature,
+            world=receiver.world;
         if(sprite_static_world!=world)
             reset_static_sprite_decal_meshes(world);
         // Mesh header is read only on a miss. Don't validate the mesh

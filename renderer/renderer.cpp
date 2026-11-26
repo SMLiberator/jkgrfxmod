@@ -1532,6 +1532,12 @@ namespace jkgm {
                          " fallback_mesh_calls_avg=",
                          profile_window.native_mesh_native_calls/frames,
                          " NOTE=model_includes_mesh; engine_excluding_mesh_is_estimate");
+                LOG_INFO("PERF native_3do draw_memo camera_reads_avg=",
+                         profile_window.native_mesh_camera_reads/frames,
+                         " static_decal_calls_avg=",
+                         profile_window.native_static_decal_capture_calls/frames,
+                         " static_decal_skipped_avg=",
+                         profile_window.native_static_decal_capture_skipped/frames);
             }
             if(native_sprite_available()) {
                 LOG_INFO("PERF native_sprite calls_avg type0/1/2/3/4=",
@@ -15570,6 +15576,9 @@ namespace jkgm {
                 profile_frame.native_mesh_queue_ns += native.mesh_queue_ns;
                 profile_frame.native_mesh_native_ns += native.mesh_native_ns;
                 profile_frame.native_mesh_decal_ns += native.mesh_decal_ns;
+                profile_frame.native_static_decal_capture_calls += native.static_decal_capture_calls;
+                profile_frame.native_static_decal_capture_skipped += native.static_decal_capture_skipped;
+                profile_frame.native_mesh_camera_reads += native.mesh_camera_reads;
                 profile_frame.native_mesh_gpu_calls += native.mesh_gpu_calls;
                 profile_frame.native_mesh_native_calls += native.mesh_native_calls;
                 auto const sprites=consume_native_sprite_sample();

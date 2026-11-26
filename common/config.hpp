@@ -91,6 +91,7 @@ namespace jkgm {
         float ssr_max_distance = 64.0f; // JK world units
         bool enable_gpu_sprite_instancing = true; // compatible SPR instancing, disable for diagnostics
         bool experimental_procedural_sprite_quads = false; // shader-generated SPRs, A/B vs cached geometry
+        bool experimental_gpu_3do_model_draw_memo = false;
         bool experimental_gpu_3do_simd_backfaces = false;
         bool experimental_gpu_3do_specialized_collection = false;
         bool experimental_gpu_3do_compact_backfaces = false; // cached plane equations

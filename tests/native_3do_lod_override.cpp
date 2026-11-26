@@ -2,6 +2,7 @@
 // The actual hook brackets rdModel3_Draw, so nested model draws restore
 // the exact previous per-Thing selection without touching rdModel3 state.
 #include "renderer/native_3do_lod_override.hpp"
+#include "renderer/native_3do_draw_memo.hpp"
 #include <cassert>
 #include <cstdint>
 #include <cstring>
@@ -9,6 +10,30 @@
 
 int main() {
     using namespace jkgm;
+    struct draw_state { native_draw_memo<int> mode; };
+    draw_state *active=nullptr;
+    int reads=0,value=4;
+    auto read_mode=[&] { ++reads;return value; };
+    auto sample=[&] { return native_draw_read(active,&draw_state::mode,read_mode); };
+    assert(sample()==4 && reads==1);
+    {
+        native_draw_scope<draw_state> outer(active,true);
+        assert(sample()==4 && sample()==4 && reads==2);
+        value=3;
+        {
+            native_draw_scope<draw_state> inner(active,true);
+            assert(sample()==3 && sample()==3 && reads==3);
+        }
+        assert(sample()==3 && reads==4);
+        *active={}; // native fallback invalidation
+        assert(sample()==3 && reads==5);
+        {
+            native_draw_scope<draw_state> disabled(active,false);
+            assert(sample()==3 && sample()==3 && reads==7);
+        }
+        assert(sample()==3 && reads==8);
+    }
+    assert(active==nullptr && sample()==3 && reads==9);
     std::unordered_map<uintptr_t,uint8_t> bytes;
     auto write=[&](uintptr_t ptr,uint32_t value) {
         uint8_t src[4]{};

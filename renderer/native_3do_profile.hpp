@@ -14,6 +14,8 @@ namespace jkgm {
         uint64_t model_hook_ns=0,model_engine_ns=0,model_engine_self_ns=0;
         uint64_t mesh_decal_ns=0,mesh_queue_ns=0,mesh_native_ns=0;
         uint64_t mesh_gpu_calls=0,mesh_native_calls=0;
+        uint64_t static_decal_capture_calls=0,static_decal_capture_skipped=0;
+        uint64_t mesh_camera_reads=0;
         void add(native_3do_sample const &o) {
             model_calls+=o.model_calls;
             model_lod0_forced+=o.model_lod0_forced;
@@ -37,6 +39,9 @@ namespace jkgm {
             mesh_native_ns+=o.mesh_native_ns;
             mesh_gpu_calls+=o.mesh_gpu_calls;
             mesh_native_calls+=o.mesh_native_calls;
+            static_decal_capture_calls+=o.static_decal_capture_calls;
+            static_decal_capture_skipped+=o.static_decal_capture_skipped;
+            mesh_camera_reads+=o.mesh_camera_reads;
         }
     };
     native_3do_sample consume_native_3do_sample();
