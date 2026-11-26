@@ -8243,17 +8243,17 @@ namespace {
         cog_push_vector(ctx,result.data());
     }
 
-    void __cdecl cog_get_lvec_pyr(void *ctx)
+    void __cdecl cog_lvec_to_pyr(void *ctx)
     {cog_direction_to_pyr(ctx,jkgm::cog_pyr_axis::look);}
-    void __cdecl cog_get_rvec_pyr(void *ctx)
+    void __cdecl cog_rvec_to_pyr(void *ctx)
     {cog_direction_to_pyr(ctx,jkgm::cog_pyr_axis::right);}
-    void __cdecl cog_get_uvec_pyr(void *ctx)
+    void __cdecl cog_uvec_to_pyr(void *ctx)
     {cog_direction_to_pyr(ctx,jkgm::cog_pyr_axis::up);}
-    void __cdecl cog_get_pyr_lvec(void *ctx)
+    void __cdecl cog_pyr_to_lvec(void *ctx)
     {cog_pyr_to_direction(ctx,jkgm::cog_pyr_axis::look);}
-    void __cdecl cog_get_pyr_rvec(void *ctx)
+    void __cdecl cog_pyr_to_rvec(void *ctx)
     {cog_pyr_to_direction(ctx,jkgm::cog_pyr_axis::right);}
-    void __cdecl cog_get_pyr_uvec(void *ctx)
+    void __cdecl cog_pyr_to_uvec(void *ctx)
     {cog_pyr_to_direction(ctx,jkgm::cog_pyr_axis::up);}
 
     // HasReach(originThing,targetThing): physical line-of-reach using the
@@ -11411,12 +11411,12 @@ namespace {
         cog_verb_entry{"rotatevector", cog_rotate_vector},
         cog_verb_entry{"getthingoffsetpos", cog_get_thing_offset_pos},
         cog_verb_entry{"getthingposoffset", cog_get_thing_pos_offset},
-        cog_verb_entry{"getlvecpyr", cog_get_lvec_pyr},
-        cog_verb_entry{"getrvecpyr", cog_get_rvec_pyr},
-        cog_verb_entry{"getuvecpyr", cog_get_uvec_pyr},
-        cog_verb_entry{"getpyrlvec", cog_get_pyr_lvec},
-        cog_verb_entry{"getpyrrvec", cog_get_pyr_rvec},
-        cog_verb_entry{"getpyruvec", cog_get_pyr_uvec},
+        cog_verb_entry{"lvectopyr", cog_lvec_to_pyr},
+        cog_verb_entry{"rvectopyr", cog_rvec_to_pyr},
+        cog_verb_entry{"uvectopyr", cog_uvec_to_pyr},
+        cog_verb_entry{"pyrtolvec", cog_pyr_to_lvec},
+        cog_verb_entry{"pyrtorvec", cog_pyr_to_rvec},
+        cog_verb_entry{"pyrtouvec", cog_pyr_to_uvec},
         cog_verb_entry{"hasreach", cog_has_reach},
         cog_verb_entry{"raycast", cog_ray_cast},
         cog_verb_entry{"raycastex", cog_ray_cast_ex},
