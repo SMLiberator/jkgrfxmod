@@ -31,7 +31,7 @@ inline void prepare_gpu_3do_parallel_visibility(
     gpu_3do_native_frustum const &frustum,
     bool have_perspective_frustum,
     gpu_3do_parallel_visibility &out,
-    bool accept_whole_mesh=false)
+    bool accept_whole_mesh=false,bool compact_backfaces=false)
 {
     out.ready=false;
     out.mesh_outside=false;
@@ -52,6 +52,8 @@ inline void prepare_gpu_3do_parallel_visibility(
     }
     out.has_local_eye=gpu_3do_local_eye(out.modelview,out.local_eye);
     out.reversed_winding=gpu_3do_reversed_winding(inst.transform);
+    auto const plane_test=prepare_gpu_3do_face_plane_test(
+        geo,out.local_eye,compact_backfaces && out.has_local_eye);
     out.groups.resize(geo.groups.size());
     for(size_t i=0;i<geo.groups.size();++i) {
         auto const &group=geo.groups[i];
@@ -66,17 +68,9 @@ inline void prepare_gpu_3do_parallel_visibility(
         } else if(out.has_local_eye && !(group.face_type&0x1U) &&
                   group.plane_count>0 &&
                   group.plane_start+group.plane_count<=geo.face_planes.size()) {
-            bool any_visible=false;
-            for(uint32_t p=group.plane_start;
-                p<group.plane_start+group.plane_count;++p) {
-                auto const &plane=geo.face_planes[p];
-                if(gpu_3do_face_facing_camera(
-                    out.local_eye,plane.anchor,plane.normal)) {
-                    any_visible=true;
-                    break;
-                }
-            }
-            if(!any_visible)reason=gpu_3do_cull_reason::backface;
+            if(!gpu_3do_group_has_facing_plane(
+                geo,group,out.local_eye,plane_test))
+                reason=gpu_3do_cull_reason::backface;
         }
         out.groups[i]=reason;
     }

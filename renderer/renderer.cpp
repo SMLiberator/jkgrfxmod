@@ -5551,7 +5551,8 @@ namespace jkgm {
                                     instances[index],native_view,native_frustum,
                                     have_perspective_frustum,
                                     prepared_visibility[index],
-                                    the_config->experimental_gpu_3do_whole_mesh_acceptance);
+                                    the_config->experimental_gpu_3do_whole_mesh_acceptance,
+                                    the_config->experimental_gpu_3do_compact_backfaces);
                             }
                         });
                         if(gpu_profiling) {
@@ -5665,6 +5666,9 @@ namespace jkgm {
                 }
                 bool const can_cpu_cull=context.has_local_eye;
                 auto const &local_eye=context.local_eye;
+                auto const plane_test=prepare_gpu_3do_face_plane_test(
+                    *inst.geometry,local_eye,!parallel && can_cpu_cull &&
+                        the_config->experimental_gpu_3do_compact_backfaces);
                 // Opaque grouping is identical across instances of this
                 // immutable geometry. Use the cached index permutation
                 // instead of sorting pending ranges for every Thing.
@@ -5745,17 +5749,8 @@ namespace jkgm {
                        group.plane_count>0 &&
                        group.plane_start+group.plane_count<=
                            inst.geometry->face_planes.size()) {
-                        bool any_visible=false;
-                        for(uint32_t p=group.plane_start;
-                            p<group.plane_start+group.plane_count;p++) {
-                            auto const &plane=inst.geometry->face_planes[p];
-                            if(gpu_3do_face_facing_camera(
-                                   local_eye,plane.anchor,plane.normal)) {
-                                any_visible=true;
-                                break;
-                            }
-                        }
-                        if(!any_visible) {
+                        if(!gpu_3do_group_has_facing_plane(
+                            *inst.geometry,group,local_eye,plane_test)) {
                             if(the_config->profile_renderer)
                                 ++profile_frame.gpu_groups_backface_culled;
                             continue;

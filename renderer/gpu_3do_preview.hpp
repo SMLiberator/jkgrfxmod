@@ -2,6 +2,7 @@
 // Development-only native 3DO GPU bypass. Each immutable mesh is copied once,
 // including UV seams and per-face material references. Transforms are dynamic.
 #include "texture_units.hpp"
+#include "gpu_3do_compat.hpp"
 #include <algorithm>
 #include <array>
 #include <cstdint>
@@ -104,6 +105,18 @@ namespace jkgm {
         std::array<float,3> anchor{};
         std::array<float,3> normal{};
     };
+    // Separate hot culling data from the original anchors, which are
+    // still needed by geometry transforms and exact edge-on fallback.
+    struct gpu_3do_compact_face_plane {
+        float nx,ny,nz,d;
+    };
+    static_assert(sizeof(gpu_3do_compact_face_plane)==16,
+                  "Unexpected compact face-plane stride");
+    struct gpu_3do_compact_plane_cache {
+        std::vector<gpu_3do_compact_face_plane> planes;
+        double max_anchor=0.0,max_normal=0.0;
+        bool valid=false;
+    };
     struct gpu_3do_group {
         uint32_t offset=0, count=0; // index-buffer range
         uintptr_t material=0;       // native JK rdMaterial pointer
@@ -174,6 +187,8 @@ namespace jkgm {
             // This same immutable geometry may be displayed in the normal
             // view, planar, shadows, and many 2-/6-view reflection probes.
             // Union its groups' local bounds once, not once per camera.
+            std::once_flag compact_planes_once;
+            gpu_3do_compact_plane_cache compact_planes;
             std::once_flag bounds_once;
             bool bounds_complete=false;
             std::array<float,3> bounds_min{},bounds_max{};
@@ -193,6 +208,30 @@ namespace jkgm {
             opaque_order_cache_owner &operator=(
                 opaque_order_cache_owner &&)=default;
         };
+        gpu_3do_compact_plane_cache const &cached_compact_planes() const {
+            auto &cache=*opaque_order_state.state;
+            std::call_once(cache.compact_planes_once,[this,&cache] {
+                auto &out=cache.compact_planes;
+                out.planes.reserve(face_planes.size());
+                for(auto const &p:face_planes) {
+                    double d=0.0;
+                    for(unsigned i=0;i<3;++i) {
+                        if(!std::isfinite(p.anchor[i]) ||
+                           !std::isfinite(p.normal[i]))return;
+                        out.max_anchor=std::max(out.max_anchor,
+                            std::fabs(double(p.anchor[i])));
+                        out.max_normal=std::max(out.max_normal,
+                            std::fabs(double(p.normal[i])));
+                        d+=double(p.anchor[i])*p.normal[i];
+                    }
+                    if(std::fabs(d)>std::numeric_limits<float>::max())return;
+                    out.planes.push_back({
+                        p.normal[0],p.normal[1],p.normal[2],float(d)});
+                }
+                out.valid=true;
+            });
+            return cache.compact_planes;
+        }
         std::vector<gpu_3do_group_submission> const &
         cached_group_submissions() const {
             auto &cache=*opaque_order_state.state;
@@ -299,6 +338,60 @@ namespace jkgm {
         uint32_t count=0;
         std::array<gpu_3do_crossing_sector,4> sectors{};
     };
+    // One setup per mesh instance, not per group. Bound rounding error
+    // for BOTH dot-product forms using mesh-wide coordinate/normal maxima.
+    // Near zero or extreme inputs use the original JK expression.
+    struct gpu_3do_face_plane_test {
+        gpu_3do_compact_face_plane const *planes=nullptr;
+        float margin=0.0f;
+    };
+    inline gpu_3do_face_plane_test prepare_gpu_3do_face_plane_test(
+        gpu_3do_geometry const &geo,std::array<float,3> const &eye,bool enabled)
+    {
+        if(!enabled || geo.face_planes.empty())return {};
+        auto const &cache=geo.cached_compact_planes();
+        if(!cache.valid)return {};
+        double eye_max=0.0;
+        for(float v:eye) {
+            if(!std::isfinite(v))return {};
+            eye_max=std::max(eye_max,std::fabs(double(v)));
+        }
+        double const extent=eye_max+cache.max_anchor;
+        double const magnitude=extent*cache.max_normal;
+        double const limit=double(std::numeric_limits<float>::max())/16.0;
+        if(extent>limit || magnitude>limit)return {};
+        // Generous bound covers rounding of the legacy subtractions,
+        // both dot products, cached d, and subnormal arithmetic.
+        float const margin=float(64.0*std::numeric_limits<float>::epsilon()*
+            magnitude+64.0*std::numeric_limits<float>::min());
+        return {cache.planes.data(),margin};
+    }
+    inline bool gpu_3do_group_has_facing_plane(
+        gpu_3do_geometry const &geo,gpu_3do_group const &group,
+        std::array<float,3> const &eye,gpu_3do_face_plane_test const &test)
+    {
+        if(test.planes) {
+            for(uint32_t p=group.plane_start;
+                p<group.plane_start+group.plane_count;++p) {
+                auto const &plane=test.planes[p];
+                float const side=eye[0]*plane.nx+eye[1]*plane.ny+
+                    eye[2]*plane.nz-plane.d;
+                if(side>test.margin)return true;
+                if(side< -test.margin)continue;
+                auto const &original=geo.face_planes[p];
+                if(gpu_3do_face_facing_camera(
+                    eye,original.anchor,original.normal))return true;
+            }
+        } else {
+            for(uint32_t p=group.plane_start;
+                p<group.plane_start+group.plane_count;++p) {
+                auto const &plane=geo.face_planes[p];
+                if(gpu_3do_face_facing_camera(
+                    eye,plane.anchor,plane.normal))return true;
+            }
+        }
+        return false;
+    }
     struct gpu_3do_instance {
         uint64_t id=0;
         std::shared_ptr<gpu_3do_geometry const> geometry;

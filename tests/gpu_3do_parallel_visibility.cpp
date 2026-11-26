@@ -97,6 +97,38 @@ int main() {
     prepare_gpu_3do_parallel_visibility(contained,identity(),f,false,accepted,true);
     assert(!accepted.mesh_inside && accepted.group_frustum_tests_avoided==0U);
 
+    prepare_gpu_3do_parallel_visibility(base,identity(),f,true,accepted,true,true);
+    assert(accepted.groups==expected.groups);
+    prepare_gpu_3do_parallel_visibility(contained,identity(),f,true,accepted,true,true);
+    assert(accepted.groups==legacy.groups);
+    // Test the hot representation, grazing angles, multi-plane groups,
+    // and the copy-reset cache used by modified/decal geometry.
+    gpu_3do_geometry planes;
+    planes.face_planes={{{{2,3,4}},{{1,2,-1}}},
+                         {{{-2,0,1}},{{-1,0,0}}}};
+    gpu_3do_group range{};
+    range.plane_count=2U;
+    assert(planes.cached_compact_planes().planes[0].d==4.0f);
+    for(int x=-10;x<=10;++x)for(int y=-10;y<=10;++y) {
+        std::array<float,3> eye{{float(x),float(y),float(x+2*y)}};
+        auto const test=prepare_gpu_3do_face_plane_test(planes,eye,true);
+        assert(test.planes);
+        assert(gpu_3do_group_has_facing_plane(planes,range,eye,test)==
+               gpu_3do_group_has_facing_plane(planes,range,eye,{}));
+    }
+    auto modified=planes;
+    modified.face_planes[0].anchor[0]=12.0f;
+    assert(modified.cached_compact_planes().planes[0].d==14.0f);
+    assert(planes.cached_compact_planes().planes[0].d==4.0f);
+    range.plane_count=1U;
+    std::array<float,3> eye{{2,3,4}};
+    auto const grazing=prepare_gpu_3do_face_plane_test(planes,eye,true);
+    assert(!gpu_3do_group_has_facing_plane(planes,range,eye,grazing));
+    eye[0]=std::nextafter(2.0f,3.0f);
+    assert(gpu_3do_group_has_facing_plane(planes,range,eye,grazing));
+    assert(!prepare_gpu_3do_face_plane_test(planes,
+        {{std::numeric_limits<float>::max(),0,0}},true).planes);
+
     // A worker exception must finish the barrier and permit safe serial
     // fallback. Subsequent dispatches should still be usable.
     assert(!workers.execute([](unsigned lane) {
