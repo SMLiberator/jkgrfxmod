@@ -562,6 +562,10 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             j.at("experimental_gpu_3do_diffuse_only_shader").get_to(
                 rv->experimental_gpu_3do_diffuse_only_shader);
         }
+        if(j.contains("experimental_gpu_3do_single_sector_ggx_shader")) {
+            j.at("experimental_gpu_3do_single_sector_ggx_shader").get_to(
+                rv->experimental_gpu_3do_single_sector_ggx_shader);
+        }
         if(j.contains("experimental_gpu_world_simple_shaders")) {
             j.at("experimental_gpu_world_simple_shaders").get_to(
                 rv->experimental_gpu_world_simple_shaders);

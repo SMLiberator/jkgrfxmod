@@ -157,7 +157,7 @@ uniform vec2 normal_specular_scroll;
 uniform vec2 normal_specular_scroll2;
 uniform vec3 local_eye;
 uniform int num_lights;
-#ifdef JKGM_DIFFUSE_ONLY
+#if defined(JKGM_DIFFUSE_ONLY) || defined(JKGM_SINGLE_SECTOR_GGX)
 const int pixel_dynamic_lighting=0;
 #else
 uniform int pixel_dynamic_lighting;
@@ -182,7 +182,7 @@ in vec3 local_fragment_position;
 in vec3 local_fragment_normal;
 // Available for cached 3DOs only. Sector plane tests use a GL 3.3
 // RGBA32F texture buffer rather than consuming huge GLSL uniform arrays.
-#ifdef JKGM_DIFFUSE_ONLY
+#if defined(JKGM_DIFFUSE_ONLY) || defined(JKGM_SINGLE_SECTOR_GGX)
 const int sector_crossing_count=0;
 #else
 uniform int sector_crossing_count;
@@ -1186,7 +1186,7 @@ void main() {
     // actually exists; follows the native replacement shader.
     // The vertex experiment has already selected and interpolated JK color.
     // Avoid all per-fragment sector bounds/plane traversal in that mode.
-#ifdef JKGM_DIFFUSE_ONLY
+#if defined(JKGM_DIFFUSE_ONLY) || defined(JKGM_SINGLE_SECTOR_GGX)
     vec3 jk_fragment_lit=mix(jk_lit_rgb,vec3(1.0),fullbright);
 #else
     sector_crossing_slot=sector_crossing_count>1 &&

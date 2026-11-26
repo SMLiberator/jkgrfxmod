@@ -209,6 +209,8 @@ void jkgm::shaders::translucent_sun_uniforms::set_map(
             bool const specialize_vertex=
                 variant==material_shader_variant::diffuse_opaque ||
                 variant==material_shader_variant::diffuse_alpha ||
+                variant==material_shader_variant::single_sector_ggx_opaque ||
+                variant==material_shader_variant::single_sector_ggx_alpha ||
                 variant==material_shader_variant::hud_only ||
                 variant==material_shader_variant::emission_only;
             if(variant!=material_shader_variant::full &&
@@ -231,6 +233,10 @@ void jkgm::shaders::translucent_sun_uniforms::set_map(
                     define="#define JKGM_SIMPLE_OPAQUE 1\n#define JKGM_DIFFUSE_ONLY 1\n"; break;
                 case material_shader_variant::diffuse_alpha:
                     define="#define JKGM_SIMPLE_ALPHA 1\n#define JKGM_DIFFUSE_ONLY 1\n"; break;
+                case material_shader_variant::single_sector_ggx_opaque:
+                    define="#define JKGM_SIMPLE_OPAQUE 1\n#define JKGM_SINGLE_SECTOR_GGX 1\n"; break;
+                case material_shader_variant::single_sector_ggx_alpha:
+                    define="#define JKGM_SIMPLE_ALPHA 1\n#define JKGM_SINGLE_SECTOR_GGX 1\n"; break;
                 case material_shader_variant::world_simple_opaque:
                     define="#define JKGM_WORLD_SIMPLE 1\n#define JKGM_WORLD_OPAQUE 1\n"; break;
                 case material_shader_variant::world_simple_alpha:

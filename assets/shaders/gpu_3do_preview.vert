@@ -32,7 +32,7 @@ uniform vec3 thing_sector_tint_delta; // own SithSector - camera SithSector
 uniform vec4 jk_color_add_fade; // RGB additive/255, A fade
 uniform float attenuation_min;
 uniform int num_lights;
-#ifdef JKGM_DIFFUSE_ONLY
+#if defined(JKGM_DIFFUSE_ONLY) || defined(JKGM_SINGLE_SECTOR_GGX)
 const int pixel_dynamic_lighting=0;
 #else
 uniform int pixel_dynamic_lighting; // fragment handles JK diffuse when enabled
@@ -82,7 +82,7 @@ out vec4 decal_coverage;
 // Four-way sector crossing is opt-in and only active on models actually
 // overlapping multiple native Adjoin-linked sectors. The ordinary
 // single-sector path stays bit-for-bit unchanged.
-#ifdef JKGM_DIFFUSE_ONLY
+#if defined(JKGM_DIFFUSE_ONLY) || defined(JKGM_SINGLE_SECTOR_GGX)
 const int sector_crossing_count=0;
 #else
 uniform int sector_crossing_count;
@@ -342,7 +342,7 @@ void main() {
     // Re-run JK's vertex gamma/color effects ONLY for crossing Things,
     // once per candidate sector. This retains interpolation of gamma-
     // corrected vertex RGB, unlike recomputing baked brightness per pixel.
-#ifndef JKGM_DIFFUSE_ONLY
+#if !defined(JKGM_DIFFUSE_ONLY) && !defined(JKGM_SINGLE_SECTOR_GGX)
     if(sector_crossing_count>1) {
         int selected_slot=sector_crossing_per_vertex!=0
             ? select_sector_crossing_vertex(vec3(x,y,z)) : 0;

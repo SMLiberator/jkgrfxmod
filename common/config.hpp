@@ -103,6 +103,7 @@ namespace jkgm {
         bool experimental_gpu_3do_simple_opaque_shader = false;
         bool experimental_gpu_3do_simple_alpha_shader = false;
         bool experimental_gpu_3do_diffuse_only_shader = false;
+        bool experimental_gpu_3do_single_sector_ggx_shader = false;
         bool experimental_gpu_world_simple_shaders = false;
         bool experimental_gpu_3do_rigid_normals = false;
         bool experimental_gpu_3do_unlit_shaders = false;

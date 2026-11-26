@@ -5307,6 +5307,11 @@ namespace jkgm {
                 :nullptr;
             bool flare_program_initialized=false,fluid_program_initialized=false;
             bool diffuse_program_initialized=false;
+            auto *ggx_program=!post_exempt && !decals_only
+                ? (transparent?ogs->gpu_3do_single_sector_ggx_alpha_program.get()
+                              :ogs->gpu_3do_single_sector_ggx_opaque_program.get())
+                :nullptr;
+            bool ggx_program_initialized=false;
             auto *hud_program=post_exempt && !decals_only
                 ?ogs->gpu_3do_hud_only_program.get():nullptr;
             auto *emission_program=transparent && !post_exempt && !decals_only
@@ -6625,6 +6630,7 @@ namespace jkgm {
             auto *active_preview_program=&prog;
             uint64_t simple_draw_calls=0,full_draw_calls=0,shader_switches=0;
             uint64_t simple_flare_draws=0,simple_fluid_draws=0,diffuse_draws=0;
+            uint64_t single_sector_ggx_draws=0;
             uint64_t hud_draws=0,emission_draws=0,rigid_draws=0;
             uint64_t alpha_instance_calls=0,alpha_instance_ranges=0;
             int last_rigid=-1;
@@ -6740,12 +6746,17 @@ namespace jkgm {
                 // Keep the full vertex-light loop, including affine lights;
                 // only remove pixel lighting and multi-sector interpolation
                 // when they are not used by this draw.
-                if(diffuse_program && simple_eligible && !fluid &&
-                   !inst.is_sprite_flare && !inst.crossing_lighting &&
-                   !pixel_lighting &&
-                   !(specular.first>0.0f &&
-                     (sun_active || point_specular_active)))
-                    candidate_program=diffuse_program;
+                bool const vertex_lit_single_sector=simple_eligible && !fluid &&
+                    !inst.is_sprite_flare && !inst.crossing_lighting &&
+                    !pixel_lighting;
+                bool const direct_specular=specular.first>0.0f &&
+                    (sun_active || point_specular_active);
+                if(vertex_lit_single_sector) {
+                    if(diffuse_program && !direct_specular)
+                        candidate_program=diffuse_program;
+                    else if(ggx_program)
+                        candidate_program=ggx_program;
+                }
                 bool const unlit_emission=emission_program && simple_eligible &&
                     !inst.is_sprite_flare && !inst.is_projected_decal &&
                     material.emissive_only && material.opacity==0.0f &&
@@ -6777,6 +6788,11 @@ namespace jkgm {
                         initialize_preview_program(*selected_program);
                         diffuse_program_initialized=true;
                     }
+                    if(simple && selected_program==ggx_program &&
+                       !ggx_program_initialized) {
+                        initialize_preview_program(*selected_program);
+                        ggx_program_initialized=true;
+                    }
                     if(unlit_hud && !hud_program_initialized) {
                         initialize_preview_program(*selected_program);
                         hud_program_initialized=true;
@@ -6804,6 +6820,7 @@ namespace jkgm {
                         if(selected_program==simple_flare_program)++simple_flare_draws;
                         if(selected_program==simple_fluid_program)++simple_fluid_draws;
                         if(selected_program==diffuse_program)++diffuse_draws;
+                        if(selected_program==ggx_program)++single_sector_ggx_draws;
                     } else ++full_draw_calls;
                 }
                 size_t draw_end=draw_start+1;
@@ -7610,7 +7627,7 @@ namespace jkgm {
                     " batches=",audit_batches," batch_all_rigid=",audit_batch_all_rigid,
                     " batch_global_block_avoided=",audit_batch_global_block,
                     " NOTE=primary_submission_only;counts_GL_calls_not_vertices;shader_override_subset_of_requested");
-            if((simple_program || diffuse_program) && gpu_profiling &&
+            if((simple_program || diffuse_program || ggx_program) && gpu_profiling &&
                gpu_3do_present_serial%120U==0U)
                 LOG_INFO(decals_only?"PERF simple_decal_shader sample simple_draws=":
                          transparent?"PERF simple_alpha_shader sample simple_draws=":
@@ -7619,7 +7636,8 @@ namespace jkgm {
                          " switches=",shader_switches,
                          " flare_draws=",simple_flare_draws,
                          " fluid_draws=",simple_fluid_draws,
-                         " diffuse_draws=",diffuse_draws);
+                         " diffuse_draws=",diffuse_draws,
+                         " single_sector_ggx_draws=",single_sector_ggx_draws);
             if(gpu_profiling && gpu_3do_present_serial%120U==0U &&
                (the_config->experimental_gpu_3do_rigid_normals ||
                 hud_program || emission_program ||

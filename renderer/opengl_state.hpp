@@ -151,6 +151,8 @@ namespace jkgm {
         std::unique_ptr<shaders::gpu_3do_preview_shader> gpu_3do_simple_fluid_program;
         std::unique_ptr<shaders::gpu_3do_preview_shader> gpu_3do_diffuse_opaque_program;
         std::unique_ptr<shaders::gpu_3do_preview_shader> gpu_3do_diffuse_alpha_program;
+        std::unique_ptr<shaders::gpu_3do_preview_shader> gpu_3do_single_sector_ggx_opaque_program;
+        std::unique_ptr<shaders::gpu_3do_preview_shader> gpu_3do_single_sector_ggx_alpha_program;
         std::unique_ptr<shaders::gpu_3do_preview_shader> gpu_3do_hud_only_program;
         std::unique_ptr<shaders::gpu_3do_preview_shader> gpu_3do_emission_only_program;
         std::unique_ptr<shaders::world_cache_preview_shader> world_cache_preview_program;
