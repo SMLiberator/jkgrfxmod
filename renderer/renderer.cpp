@@ -5267,6 +5267,59 @@ namespace jkgm {
             auto const &native_frustum=frame_camera.frustum;
             bool const have_perspective_frustum=frame_camera.perspective;
             auto &prog=*ogs->gpu_3do_preview_program;
+            auto *simple_program=(!transparent && !post_exempt && !decals_only)
+                ?ogs->gpu_3do_simple_opaque_program.get():nullptr;
+            bool const crossing_buffer_ready=
+                the_config->enable_sector_crossing_lighting &&
+                !post_exempt && !decals_only &&
+                sector_crossing_plane_texture!=0U;
+            auto const &sun=get_sun_settings();
+            auto const sun_direction=normalized_sun_direction(sun.direction.value());
+            auto const sun_color=sun.color.value();
+            auto const sun_project=[&](std::array<float,3> const &axis) {
+                return sun_direction[0]*axis[0]+sun_direction[1]*axis[1]+
+                       sun_direction[2]*axis[2];
+            };
+            // Match cached-world direct specular: disabling the COG sun
+            // disables its GGX highlights too, independently of EnvMaps.
+            float const sun_power=(the_config->enable_reflections &&
+                                   the_config->enable_sun &&
+                                   sun_level_has_sky)
+                ? std::max(0.0f,sun.intensity.value()[0]) : 0.0f;
+            bool const sun_active=sun_power>0.0f;
+            float const aspect=get<x>(internal_scr_res_f)/get<y>(internal_scr_res_f);
+            float const tan_half_fov=std::tan(cam.fov*0.008726646259971648f);
+            // Native D3D has already applied this to per-vertex colors.
+            // Apply only to the GPU-bypassed 3DO vertex shader.
+            auto const effect=read_native_jk_hardware_color_effects();
+            // Native rdSetColorEffects has already removed the validated
+            // sector request from the shared hardware effect. Everything
+            // else (filters, fade, RGB adds, other tints) remains global.
+            // Only apply local tint when the native bridge confirms that
+            // this exact request was active. When COG frees it, mode==1.
+            int const sector_palette_mode=native_sector_palette_mode().load(
+                std::memory_order_relaxed);
+            bool const can_replace_sector_tint=sector_palette_mode==2;
+            if(the_config->profile_renderer &&
+               !transparent && !post_exempt && !decals_only &&
+               gpu_3do_present_serial%120U==0U) {
+                size_t valid=0,eligible=0;
+                for(auto const &inst:instances) {
+                    if(inst.shadow_only || inst.camera_hud ||
+                       inst.is_projected_decal)continue;
+                    ++eligible;
+                    if(inst.sector_tint_valid)++valid;
+                }
+                LOG_INFO("THING SECTOR TINT bridge_mode=",
+                         sector_palette_mode,
+                         " replace=",can_replace_sector_tint?1:0,
+                         " eligible=",eligible," local_valid=",valid,
+                         " remaining_effect_active=",effect.active?1:0);
+                LOG_INFO("THING SECTOR TINT remaining_effect_rgb=",
+                         effect.tint[0],",",effect.tint[1],
+                         ",",effect.tint[2]);
+            }
+            auto initialize_preview_program=[&](shaders::gpu_3do_preview_shader &prog) {
             prog.use_program();
             prog.set_smoke_half_resolution(false);
             prog.set_light_brightness_limit(
@@ -5279,10 +5332,6 @@ namespace jkgm {
                 prog.set_sprite_instances(none,0);
                 prog.set_buffered_instances(-1);
             }
-            bool const crossing_buffer_ready=
-                the_config->enable_sector_crossing_lighting &&
-                !post_exempt && !decals_only &&
-                sector_crossing_plane_texture!=0U;
             // No plane buffer (including a single-sector world): reset
             // the persistent shader once per pass, not per instance.
             if(!crossing_buffer_ready)
@@ -5343,58 +5392,12 @@ namespace jkgm {
             prog.set_environment(false,false,0.0f,0);
             prog.set_albedo_transition(2,0.0f);
             prog.set_camera_axes(cam.right,cam.forward,cam.up);
-            auto const &sun=get_sun_settings();
-            auto const sun_direction=normalized_sun_direction(sun.direction.value());
-            auto const sun_color=sun.color.value();
-            auto const sun_project=[&](std::array<float,3> const &axis) {
-                return sun_direction[0]*axis[0]+sun_direction[1]*axis[1]+
-                       sun_direction[2]*axis[2];
-            };
-            // Match cached-world direct specular: disabling the COG sun
-            // disables its GGX highlights too, independently of EnvMaps.
-            float const sun_power=(the_config->enable_reflections &&
-                                   the_config->enable_sun &&
-                                   sun_level_has_sky)
-                ? std::max(0.0f,sun.intensity.value()[0]) : 0.0f;
-            bool const sun_active=sun_power>0.0f;
             prog.set_sun(make_point(sun_project(cam.right),
                                     sun_project(cam.up),
                                     sun_project(cam.forward),1.0f),
                          make_point(sun_color[0],sun_color[1],sun_color[2],
                                     sun_power));
-            float const aspect=get<x>(internal_scr_res_f)/get<y>(internal_scr_res_f);
-            float const tan_half_fov=std::tan(cam.fov*0.008726646259971648f);
             prog.set_projection(make_point(tan_half_fov,aspect,1.0f/far_plane,0.0f));
-            // Native D3D has already applied this to per-vertex colors.
-            // Apply only to the GPU-bypassed 3DO vertex shader.
-            auto const effect=read_native_jk_hardware_color_effects();
-            // Native rdSetColorEffects has already removed the validated
-            // sector request from the shared hardware effect. Everything
-            // else (filters, fade, RGB adds, other tints) remains global.
-            // Only apply local tint when the native bridge confirms that
-            // this exact request was active. When COG frees it, mode==1.
-            int const sector_palette_mode=native_sector_palette_mode().load(
-                std::memory_order_relaxed);
-            bool const can_replace_sector_tint=sector_palette_mode==2;
-            if(the_config->profile_renderer &&
-               !transparent && !post_exempt && !decals_only &&
-               gpu_3do_present_serial%120U==0U) {
-                size_t valid=0,eligible=0;
-                for(auto const &inst:instances) {
-                    if(inst.shadow_only || inst.camera_hud ||
-                       inst.is_projected_decal)continue;
-                    ++eligible;
-                    if(inst.sector_tint_valid)++valid;
-                }
-                LOG_INFO("THING SECTOR TINT bridge_mode=",
-                         sector_palette_mode,
-                         " replace=",can_replace_sector_tint?1:0,
-                         " eligible=",eligible," local_valid=",valid,
-                         " remaining_effect_active=",effect.active?1:0);
-                LOG_INFO("THING SECTOR TINT remaining_effect_rgb=",
-                         effect.tint[0],",",effect.tint[1],
-                         ",",effect.tint[2]);
-            }
             prog.set_jk_color_effects(
                 make_point(float(effect.filter[0]),float(effect.filter[1]),
                            float(effect.filter[2]),effect.active?1.0f:0.0f),
@@ -5412,6 +5415,12 @@ namespace jkgm {
                                    ?(the_config->experimental_exponential_fog?2.0f:1.0f)
                                    :0.0f),
                              make_point(color[0],color[1],color[2],0.0f));
+            }
+            };
+            initialize_preview_program(prog);
+            if(simple_program) {
+                initialize_preview_program(*simple_program);
+                prog.use_program();
             }
             // Prepared once per accepted Thing, including both ordinary
             // opaque and alpha passes. The GPU mesh is created lazily on the
@@ -6501,6 +6510,8 @@ namespace jkgm {
             bool prev_albedo_transition=false;
             bool prev_advanced_material=false;
             bool prev_parallax=false;
+            auto *active_preview_program=&prog;
+            uint64_t simple_draw_calls=0,full_draw_calls=0,shader_switches=0;
             // Filtering is texture-object state, not texture-unit state.
             // Repeated 3DO draw groups often use the exact same GL texture;
             // three glTexParameter calls for every bind become extremely
@@ -6557,6 +6568,36 @@ namespace jkgm {
                 material_depth_offset.set(post_exempt?0.0f:material.depth_bias);
                 auto const &inst=*draw.instance;
                 auto const &group=*draw.group;
+                // Only mapped-free ordinary opaque 3DO ranges qualify.
+                // Do not change sorting, batch membership, or alpha policy.
+                // Reflection modes 4..7 can use probes without an EnvMap.
+                bool const simple=simple_program &&
+                    !inst.is_sprite_quad && !inst.camera_hud &&
+                    !inst.is_projected_decal && !inst.transient_procedural &&
+                    material.blend==material_blend_mode::normal &&
+                    material.reflection_mode==0 &&
+                    !material.has_environment && !material.has_environment2 &&
+                    !material.has_normal && !material.has_normal2 &&
+                    !material.has_surface && !material.has_matcap &&
+                    get<0>(material.clearcoat_params)<=0.0f &&
+                    material.displacement_factor==0.0f;
+                auto *selected_program=simple?simple_program:
+                    ogs->gpu_3do_preview_program.get();
+                if(active_preview_program!=selected_program) {
+                    selected_program->use_program();
+                    active_preview_program=selected_program;
+                    active_instance=nullptr;
+                    // Each program retains its own material uniforms.
+                    // Force the next draw to write/reset all conditional state.
+                    prev_specular_active=prev_albedo_transition=
+                        prev_advanced_material=prev_parallax=true;
+                    if(gpu_profiling)++shader_switches;
+                }
+                auto &prog=*selected_program;
+                if(gpu_profiling) {
+                    if(simple)++simple_draw_calls;
+                    else ++full_draw_calls;
+                }
                 size_t draw_end=draw_start+1;
                 // Opaque sprite compatibility was decided at collection.
                 // Keep the old depth-ordered alpha batching unchanged.
@@ -7274,6 +7315,11 @@ namespace jkgm {
             }
             };
             submit_draws();
+            if(simple_program && gpu_profiling &&
+               gpu_3do_present_serial%120U==0U)
+                LOG_INFO("PERF simple_opaque_shader sample simple_draws=",
+                         simple_draw_calls," full_draws=",full_draw_calls,
+                         " switches=",shader_switches);
             if(split_smoke && !smoke_draws.empty()) {
                 // No depth attachment in the half-res smoke target. Suspend
                 // polygon offset before switching FBOs and post composition.

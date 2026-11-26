@@ -550,6 +550,10 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             j.at("experimental_gpu_3do_shared_collection_layout").get_to(
                 rv->experimental_gpu_3do_shared_collection_layout);
         }
+        if(j.contains("experimental_gpu_3do_simple_opaque_shader")) {
+            j.at("experimental_gpu_3do_simple_opaque_shader").get_to(
+                rv->experimental_gpu_3do_simple_opaque_shader);
+        }
         if(j.contains("experimental_gpu_3do_buffered_instancing")) {
             j.at("experimental_gpu_3do_buffered_instancing").get_to(
                 rv->experimental_gpu_3do_buffered_instancing);

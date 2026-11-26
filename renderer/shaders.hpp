@@ -17,7 +17,8 @@ namespace jkgm {
         opengl_shader(std::string const &name,
                       fs::path const &vertex_part,
                       fs::path const &fragment_part,
-                      fs::path const &geometry_part = fs::path());
+                      fs::path const &geometry_part = fs::path(),
+                      bool simple_opaque = false);
 
     public:
         opengl_shader(opengl_shader const &) = delete;
@@ -398,7 +399,8 @@ namespace jkgm {
             std::vector<gl::uniform_location_id> light_position_radius,light_intensity,light_color;
         public:
             static constexpr size_t max_sprite_instances=32;
-            explicit gpu_3do_preview_shader(fs::path const &data_root);
+            explicit gpu_3do_preview_shader(fs::path const &data_root,
+                                           bool simple_opaque=false);
             void set_view_matrix(point<4,float> right,point<4,float> forward,
                                  point<4,float> up,point<4,float> origin);
             // Zero count restores the normal draw path.

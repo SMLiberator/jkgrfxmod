@@ -467,6 +467,11 @@ jkgm::opengl_state::opengl_state::opengl_state(size<2, int> screen_res,
         gpu_3do_preview_program =
             std::make_unique<shaders::gpu_3do_preview_shader>(
                 data_root);
+        if(the_config->use_gpu_cache &&
+           the_config->experimental_gpu_3do_simple_opaque_shader)
+            gpu_3do_simple_opaque_program=
+                std::make_unique<shaders::gpu_3do_preview_shader>(
+                    data_root,true);
     }
     // Build the GPU world shader whenever unified caching is enabled.
     if(the_config->use_gpu_cache)
