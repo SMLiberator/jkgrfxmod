@@ -5526,6 +5526,53 @@ namespace jkgm {
             }
             auto &contexts=ordinary_pass
                 ?ordinary_contexts:isolated_contexts;
+            // Sample only once per 120 frames, never change normal math
+            // or batch eligibility as a side effect of the audit.
+            bool const rigid_audit=gpu_profiling &&
+                the_config->experimental_gpu_3do_rigid_normals &&
+                gpu_3do_present_serial%120U==0U;
+            // unit, near-unit drift, uniform scale, nonuniform scale,
+            // nonorthogonal (shear), nonfinite/degenerate axis.
+            struct basis_audit {
+                size_t category=5;
+                float norm_error=0.0f,orthogonality_error=0.0f;
+            };
+            auto audit_basis=[](gpu_3do_matrix34 const &m) {
+                basis_audit result{};
+                std::array<float,3> lengths2{};
+                for(size_t a=0;a<3;++a) {
+                    float const d=m[a*3]*m[a*3]+m[a*3+1]*m[a*3+1]+
+                                  m[a*3+2]*m[a*3+2];
+                    if(!std::isfinite(d) || d<=1e-12f)return result;
+                    lengths2[a]=d;
+                    result.norm_error=std::max(result.norm_error,std::abs(d-1.0f));
+                }
+                float raw_dot_error=0.0f;
+                for(size_t a=0;a<3;++a)for(size_t b=a+1;b<3;++b) {
+                    float const d=m[a*3]*m[b*3]+m[a*3+1]*m[b*3+1]+
+                                  m[a*3+2]*m[b*3+2];
+                    if(!std::isfinite(d))return result;
+                    raw_dot_error=std::max(raw_dot_error,std::abs(d));
+                    result.orthogonality_error=std::max(
+                        result.orthogonality_error,
+                        std::abs(d)/(std::sqrt(lengths2[a])*std::sqrt(lengths2[b])));
+                }
+                if(gpu_3do_orthonormal_basis(m))result.category=0;
+                else if(std::max(result.norm_error,raw_dot_error)<=0.001f)
+                    result.category=1;
+                else if(result.orthogonality_error>0.0001f)result.category=4;
+                else {
+                    float const low=*std::min_element(lengths2.begin(),lengths2.end());
+                    float const high=*std::max_element(lengths2.begin(),lengths2.end());
+                    result.category=high-low<=high*0.0001f?2:3;
+                }
+                return result;
+            };
+            std::array<uint64_t,6> source_basis_counts{},view_basis_counts{};
+            uint64_t audit_examples=0,audit_nonrigid_light=0;
+            uint64_t audit_batches=0,audit_batch_all_rigid=0,
+                     audit_batch_global_block=0,audit_shader_override=0,
+                     audit_direct_nonrigid=0,audit_requested=0,audit_draws=0;
             draws.clear();
             if(!transparent && ordinary_pass && !decals_only &&
                the_config->experimental_3do_occlusion_culling &&
@@ -5807,6 +5854,24 @@ namespace jkgm {
                 context.modelview=modelview;
                 context.rigid_basis=the_config->experimental_gpu_3do_rigid_normals &&
                     gpu_3do_orthonormal_basis(modelview);
+                if(rigid_audit) {
+                    auto const source=audit_basis(inst.transform);
+                    auto const view=audit_basis(modelview);
+                    ++source_basis_counts[source.category];
+                    ++view_basis_counts[view.category];
+                    if(inst.nonrigid_light_transform)++audit_nonrigid_light;
+                    if(!context.rigid_basis && audit_examples++<4U)
+                        LOG_INFO("PERF rigid_basis_example id=",inst.id,
+                            " sprite=",inst.is_sprite_quad?1:0,
+                            " hud=",inst.camera_hud?1:0,
+                            " source_class=",source.category,
+                            " modelview_class=",view.category,
+                            " source_norm_error=",std::to_string(source.norm_error),
+                            " source_dot_error=",std::to_string(source.orthogonality_error),
+                            " view_norm_error=",std::to_string(view.norm_error),
+                            " view_dot_error=",std::to_string(view.orthogonality_error),
+                            " nonrigid_light=",inst.nonrigid_light_transform?1:0);
+                }
                 if(parallel) {
                     context.has_local_eye=parallel->has_local_eye;
                     context.local_eye=parallel->local_eye;
@@ -7306,6 +7371,34 @@ namespace jkgm {
                         last_rigid=int(rigid);
                     }
                     if(rigid && gpu_profiling)++rigid_draws;
+                    if(rigid_audit) {
+                        ++audit_draws;
+                        if(rigid) {
+                            ++audit_requested;
+                            if(inst.nonrigid_light_transform)++audit_shader_override;
+                        }
+                        bool const batched=compact_members || sprite_batch_count>1 ||
+                            model_batch_count>1;
+                        if(batched) {
+                            ++audit_batches;
+                            bool batch_rigid=true;
+                            if(compact_members) {
+                                for(size_t n=0;n<model_batch_count;++n)
+                                    if(!(*compact_members)[compact_offset+n].context->rigid_basis) {
+                                        batch_rigid=false;break;
+                                    }
+                            } else {
+                                for(size_t n=draw_start;n<draw_end;++n)
+                                    if(!draws[n].context->rigid_basis) {
+                                        batch_rigid=false;break;
+                                    }
+                            }
+                            if(batch_rigid) {
+                                ++audit_batch_all_rigid;
+                                if(!all_contexts_rigid)++audit_batch_global_block;
+                            }
+                        } else if(!context.rigid_basis)++audit_direct_nonrigid;
+                    }
                 }
                 if(buffered_model_batches && compact_members) {
                     prog.set_buffered_instances(static_cast<int>(
@@ -7486,6 +7579,38 @@ namespace jkgm {
             }
             };
             submit_draws();
+            if(rigid_audit && !reuse_alpha) {
+                auto const camera=audit_basis(native_view);
+                LOG_INFO("PERF rigid_basis_audit alpha=",transparent?1:0,
+                    " hud=",post_exempt?1:0," decals=",decals_only?1:0,
+                    " contexts=",contexts.size(),
+                    " source_unit=",source_basis_counts[0],
+                    " source_near_unit=",source_basis_counts[1],
+                    " source_uniform_scale=",source_basis_counts[2],
+                    " source_nonuniform_scale=",source_basis_counts[3],
+                    " source_shear=",source_basis_counts[4],
+                    " source_invalid=",source_basis_counts[5],
+                    " view_unit=",view_basis_counts[0],
+                    " view_near_unit=",view_basis_counts[1],
+                    " view_uniform_scale=",view_basis_counts[2],
+                    " view_nonuniform_scale=",view_basis_counts[3],
+                    " view_shear=",view_basis_counts[4],
+                    " view_invalid=",view_basis_counts[5],
+                    " camera_class=",camera.category,
+                    " camera_norm_error=",std::to_string(camera.norm_error),
+                    " camera_dot_error=",std::to_string(camera.orthogonality_error),
+                    " nonrigid_light_contexts=",audit_nonrigid_light,
+                    " NOTE=collected_contexts_not_unique_things;near_unit_threshold_0.001_is_diagnostic_only");
+            }
+            if(rigid_audit)
+                LOG_INFO("PERF rigid_draw_audit alpha=",transparent?1:0,
+                    " hud=",post_exempt?1:0," decals=",decals_only?1:0,
+                    " draws=",audit_draws," requested=",audit_requested,
+                    " shader_override=",audit_shader_override,
+                    " direct_nonrigid=",audit_direct_nonrigid,
+                    " batches=",audit_batches," batch_all_rigid=",audit_batch_all_rigid,
+                    " batch_global_block=",audit_batch_global_block,
+                    " NOTE=primary_submission_only;counts_GL_calls_not_vertices;shader_override_subset_of_requested");
             if((simple_program || diffuse_program) && gpu_profiling &&
                gpu_3do_present_serial%120U==0U)
                 LOG_INFO(decals_only?"PERF simple_decal_shader sample simple_draws=":
