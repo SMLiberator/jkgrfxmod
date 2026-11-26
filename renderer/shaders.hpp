@@ -9,6 +9,8 @@
 #include <vector>
 
 namespace jkgm {
+    enum class material_shader_variant { full, simple_opaque, simple_alpha };
+
     class opengl_shader {
     protected:
         gl::program the_program;
@@ -18,7 +20,7 @@ namespace jkgm {
                       fs::path const &vertex_part,
                       fs::path const &fragment_part,
                       fs::path const &geometry_part = fs::path(),
-                      bool simple_opaque = false);
+                      material_shader_variant variant = material_shader_variant::full);
 
     public:
         opengl_shader(opengl_shader const &) = delete;
@@ -400,7 +402,7 @@ namespace jkgm {
         public:
             static constexpr size_t max_sprite_instances=32;
             explicit gpu_3do_preview_shader(fs::path const &data_root,
-                                           bool simple_opaque=false);
+                                           material_shader_variant variant=material_shader_variant::full);
             void set_view_matrix(point<4,float> right,point<4,float> forward,
                                  point<4,float> up,point<4,float> origin);
             // Zero count restores the normal draw path.

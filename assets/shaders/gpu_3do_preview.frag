@@ -1,7 +1,10 @@
 #version 330 core
-#ifdef JKGM_SIMPLE_OPAQUE
-// Draw eligibility excludes every mapped material and non-opaque pass.
-// Retain the shared G-buffer, alpha coverage, direct light and tint math.
+#if defined(JKGM_SIMPLE_OPAQUE) || defined(JKGM_SIMPLE_ALPHA)
+#define JKGM_SIMPLE_MATERIAL 1
+#endif
+#ifdef JKGM_SIMPLE_MATERIAL
+// Ordinary map-free ranges only: retain direct lighting, tint, fog and
+// identical alpha coverage; compile out advanced material and VFX paths.
 #undef JKGM_MATCAP_LAYER
 #undef JKGM_CLEARCOAT_LAYER
 #undef JKGM_REFLECTION_PROBE
@@ -22,14 +25,14 @@ uniform vec3 emissive_factor;
 uniform vec4 fog_params;   // start, end, opacity, 0 planar linear / 1 radial linear / 2 radial exp
 uniform vec3 fog_color;
 uniform sampler2D scene_depth; // completed opaque depth, native units 32*Y
-#ifdef JKGM_SIMPLE_OPAQUE
+#ifdef JKGM_SIMPLE_MATERIAL
 const int smoke_half_resolution=0;
 #else
 uniform int smoke_half_resolution; // 1 during half-size fluid SPR rendering
 #endif
 uniform vec2 advanced_material_params; // depth_clip, fluid thickness
 uniform sampler2D displacement_map;
-#ifdef JKGM_SIMPLE_OPAQUE
+#ifdef JKGM_SIMPLE_MATERIAL
 const float displacement_factor=0.0;
 #else
 uniform float displacement_factor;
@@ -42,17 +45,19 @@ uniform int solid_fullbright; // exact 8-bit CMP light-table invariant for GeoMo
 uniform sampler2D palette_fullbright_mask;
 uniform int has_palette_fullbright;
 uniform int has_emissive;
-#ifdef JKGM_SIMPLE_OPAQUE
+#if defined(JKGM_SIMPLE_ALPHA)
+const int transparent_pass=1;
+#elif defined(JKGM_SIMPLE_OPAQUE)
 const int transparent_pass=0;
 #else
 uniform int transparent_pass;
 #endif
-#ifdef JKGM_SIMPLE_OPAQUE
+#ifdef JKGM_SIMPLE_MATERIAL
 const int post_exempt_pass=0;
 #else
 uniform int post_exempt_pass; // Camera Thing pass after post-processing
 #endif
-#ifdef JKGM_SIMPLE_OPAQUE
+#ifdef JKGM_SIMPLE_MATERIAL
 const int camera_hud_thing=0;
 #else
 uniform int camera_hud_thing; // 0=world, 1=overlay HUD, 2=world-depth HUD
@@ -61,26 +66,26 @@ uniform int camera_hud_thing; // 0=world, 1=overlay HUD, 2=world-depth HUD
 // projected spotlights; a zero G-buffer normal also omits SSAO on this Thing.
 uniform int world_lighting_exempt;
 uniform int sprite_receiver; // 1=visible SPR; distinguish billboard receivers in G-buffer
-#ifdef JKGM_SIMPLE_OPAQUE
+#ifdef JKGM_SIMPLE_MATERIAL
 const float sprite_depth_bias=0.0;
 #else
 uniform float sprite_depth_bias; // SPR render-only Y, in JK units
 #endif
-#ifdef JKGM_SIMPLE_OPAQUE
+#ifdef JKGM_SIMPLE_MATERIAL
 const vec4 sprite_flare_center=vec4(0.0);
 #else
 uniform vec4 sprite_flare_center; // pixel X/Y, native depth, W=flare enabled
 #endif
 // Projected decal only: opaque G-buffer emissive.A stores diffuse JK light,
 // leaving emission RGB and all existing render targets unchanged.
-#ifdef JKGM_SIMPLE_OPAQUE
+#ifdef JKGM_SIMPLE_MATERIAL
 const int decal_receiver_lighting=0;
 #else
 uniform int decal_receiver_lighting;
 #endif
 uniform sampler2D decal_light_texture;
 uniform sampler2D decal_occlusion;
-#ifdef JKGM_SIMPLE_OPAQUE
+#ifdef JKGM_SIMPLE_MATERIAL
 const int blend_mode=0;
 #else
 uniform int blend_mode; // 0 normal, 1 additive, 2 multiply, 3 fluid
@@ -132,7 +137,7 @@ uniform vec4 environment_info; // from enabled, reflection_mode, to enabled, pro
 uniform vec4 sun_direction; // view-space direction TOWARD sun
 uniform vec4 sun_color_intensity; // rgb, intensity
 uniform vec4 specular_params; // strength, roughness, metalness, has surface map
-#ifdef JKGM_SIMPLE_OPAQUE
+#ifdef JKGM_SIMPLE_MATERIAL
 const vec4 normal_specular_params=vec4(0.0,1.0,0.0,0.0);
 #else
 uniform vec4 normal_specular_params; // has normal map, strength, unused, unused
@@ -142,7 +147,7 @@ uniform vec2 normal_specular_scroll2;
 uniform vec3 local_eye;
 uniform int num_lights;
 uniform int pixel_dynamic_lighting;
-#ifdef JKGM_SIMPLE_OPAQUE
+#ifdef JKGM_SIMPLE_MATERIAL
 const int normal_mapped_diffuse=0;
 #else
 uniform int normal_mapped_diffuse; // opt-in: added real-time diffuse only
@@ -945,7 +950,7 @@ void prepare_fragment_surface(vec2 uv)
         surface_base_view=gpu_view_normal_from_local(surface_base_local);
     }
     if(base_spec) {
-#ifdef JKGM_SIMPLE_OPAQUE
+#ifdef JKGM_SIMPLE_MATERIAL
         surface_map_value=vec3(1.0);
 #else
         surface_map_value=specular_params.w>0.5
@@ -1101,7 +1106,7 @@ void main() {
         diffuse_view_normal=normalize(vec3(n.x*sh,n.y*sv,n.z));
     }
     float env_metalness=0.0;
-#ifdef JKGM_SIMPLE_OPAQUE
+#ifdef JKGM_SIMPLE_MATERIAL
     vec3 env_reflection=vec3(0.0);
 #else
     vec3 env_reflection=gpu_environment_reflection(albedo.rgb,uv,env_metalness);

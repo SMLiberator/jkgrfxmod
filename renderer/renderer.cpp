@@ -5267,8 +5267,10 @@ namespace jkgm {
             auto const &native_frustum=frame_camera.frustum;
             bool const have_perspective_frustum=frame_camera.perspective;
             auto &prog=*ogs->gpu_3do_preview_program;
-            auto *simple_program=(!transparent && !post_exempt && !decals_only)
-                ?ogs->gpu_3do_simple_opaque_program.get():nullptr;
+            auto *simple_program=(!post_exempt && !decals_only)
+                ? (transparent?ogs->gpu_3do_simple_alpha_program.get()
+                              :ogs->gpu_3do_simple_opaque_program.get())
+                :nullptr;
             bool const crossing_buffer_ready=
                 the_config->enable_sector_crossing_lighting &&
                 !post_exempt && !decals_only &&
@@ -6568,11 +6570,14 @@ namespace jkgm {
                 material_depth_offset.set(post_exempt?0.0f:material.depth_bias);
                 auto const &inst=*draw.instance;
                 auto const &group=*draw.group;
-                // Only mapped-free ordinary opaque 3DO ranges qualify.
-                // Do not change sorting, batch membership, or alpha policy.
+                // Ordinary map-free ranges only. Alpha includes regular sprites,
+                // but excludes flare depth, Fluid, decals and HUD. Never
+                // change sorting, batch membership, or alpha policy.
                 // Reflection modes 4..7 can use probes without an EnvMap.
                 bool const simple=simple_program &&
-                    !inst.is_sprite_quad && !inst.camera_hud &&
+                    (!inst.is_sprite_quad || (transparent &&
+                        !inst.is_sprite_flare && inst.sprite_depth_bias==0.0f)) &&
+                    !inst.camera_hud &&
                     !inst.is_projected_decal && !inst.transient_procedural &&
                     material.blend==material_blend_mode::normal &&
                     material.reflection_mode==0 &&
@@ -7317,7 +7322,8 @@ namespace jkgm {
             submit_draws();
             if(simple_program && gpu_profiling &&
                gpu_3do_present_serial%120U==0U)
-                LOG_INFO("PERF simple_opaque_shader sample simple_draws=",
+                LOG_INFO(transparent?"PERF simple_alpha_shader sample simple_draws=":
+                                     "PERF simple_opaque_shader sample simple_draws=",
                          simple_draw_calls," full_draws=",full_draw_calls,
                          " switches=",shader_switches);
             if(split_smoke && !smoke_draws.empty()) {
@@ -7328,7 +7334,13 @@ namespace jkgm {
                 // R16F depth in its full-resolution 2x2 pixel footprint.
                 // Stencil counts only fragments surviving shader discard.
                 draws.swap(smoke_draws);
+                // The ordinary alpha loop may have left the simple program
+                // bound. Fluid uses the full program and its own uniforms.
+                prog.use_program();
+                active_preview_program=&prog;
                 active_instance=nullptr;
+                prev_specular_active=prev_albedo_transition=
+                    prev_advanced_material=prev_parallax=true;
                 auto const dims=make_size(
                     std::max(1,(get<x>(conf_scr_res)+1)/2),
                     std::max(1,(get<y>(conf_scr_res)+1)/2));

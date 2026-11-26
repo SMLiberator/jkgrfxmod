@@ -167,7 +167,7 @@ void jkgm::shaders::translucent_sun_uniforms::set_map(
 
         gl::shader compile_shader_from_file(fs::path const &filename,
                                             gl::shader_type type,
-                                            bool simple_opaque=false)
+                                            material_shader_variant variant=material_shader_variant::full)
         {
             diagnostic_context dc(filename.generic_string());
             gl::shader rv(type);
@@ -206,9 +206,11 @@ void jkgm::shaders::translucent_sun_uniforms::set_map(
                     source.insert(newline+1U,"#define JKGM_CLEARCOAT_LAYER 1\n");
                 }
             }
-            if(simple_opaque && type==gl::shader_type::fragment) {
+            if(variant!=material_shader_variant::full && type==gl::shader_type::fragment) {
                 auto const newline=source.find('\n');
-                source.insert(newline+1U,"#define JKGM_SIMPLE_OPAQUE 1\n");
+                source.insert(newline+1U,variant==material_shader_variant::simple_opaque
+                    ? "#define JKGM_SIMPLE_OPAQUE 1\n"
+                    : "#define JKGM_SIMPLE_ALPHA 1\n");
             }
             gl::shader_source(rv,make_string_span(""),make_span(source));
             gl::compile_shader(rv);
@@ -269,11 +271,11 @@ void jkgm::shaders::translucent_sun_uniforms::set_map(
                                      fs::path const &vx,
                                      fs::path const &fg,
                                      fs::path const &geom,
-                                     bool simple_opaque)
+                                     material_shader_variant variant)
         {
             auto vx_shader = compile_shader_from_file(vx,gl::shader_type::vertex);
             auto fg_shader = compile_shader_from_file(
-                fg,gl::shader_type::fragment,simple_opaque);
+                fg,gl::shader_type::fragment,variant);
 
             gl::attach_shader(prog, vx_shader);
             gl::attach_shader(prog, fg_shader);
@@ -306,11 +308,11 @@ jkgm::opengl_shader::opengl_shader(std::string const &name,
                                    fs::path const &vertex_part,
                                    fs::path const &fragment_part,
                                    fs::path const &geometry_part,
-                                   bool simple_opaque)
+                                   material_shader_variant variant)
     : gbuffer_packing_uniform(gl::uniform_location_id(-1))
 {
     link_program_from_files(
-        name,the_program,vertex_part,fragment_part,geometry_part,simple_opaque);
+        name,the_program,vertex_part,fragment_part,geometry_part,variant);
     gbuffer_packing_uniform=gl::get_uniform_location(the_program,"gbuffer_packing");
 }
 
@@ -837,9 +839,9 @@ void jkgm::shaders::game_pass_shader::set_translucent_spotlight(
 }
 
 jkgm::shaders::gpu_3do_preview_shader::gpu_3do_preview_shader(
-    fs::path const &root,bool simple_opaque)
+    fs::path const &root,material_shader_variant variant)
     : opengl_shader("gpu_3do_preview",root/"shaders/gpu_3do_preview.vert",
-                   root/"shaders/gpu_3do_preview.frag",fs::path(),simple_opaque)
+                   root/"shaders/gpu_3do_preview.frag",fs::path(),variant)
     , view_right(gl::get_uniform_location(the_program,"view_right"))
     , view_forward(gl::get_uniform_location(the_program,"view_forward"))
     , view_up(gl::get_uniform_location(the_program,"view_up"))
