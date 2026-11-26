@@ -1596,6 +1596,10 @@ namespace jkgm {
                 " misses_avg=",profile_window.gpu_collection_layout_misses/frames,
                 " direct_members_avg=",profile_window.gpu_collection_direct_members/frames,
                 " NOTE=visible_groups_only;frame_local_exact_mesh_state");
+            LOG_INFO("PERF gpu_3do specialized_collection meshes_avg=",
+                profile_window.gpu_specialized_collection_meshes/frames,
+                " groups_avg=",profile_window.gpu_specialized_collection_groups/frames,
+                " NOTE=anchored_ranges_backface_rejected_or_inserted");
             LOG_INFO("PERF gpu_3do instance_buffer bytes_avg=",
                 profile_window.gpu_instance_buffer_bytes/frames,
                 " uploads_avg=",profile_window.gpu_instance_buffer_uploads/frames,
@@ -5449,6 +5453,8 @@ namespace jkgm {
                 !sample_instancing;
             bool const share_model_layout=collect_model_batches &&
                 the_config->experimental_gpu_3do_shared_collection_layout;
+            bool const specialize_model_layout=share_model_layout &&
+                the_config->experimental_gpu_3do_specialized_collection;
             struct indexed_model_member {
                 size_t instance_index;
                 submission_context *context;
@@ -5706,9 +5712,79 @@ namespace jkgm {
                 }
                 size_t const instance_order_base=next_draw_order;
                 if(opaque_order) next_draw_order+=groups.size();
-                for(size_t group_visit=0;group_visit<groups.size();++group_visit) {
-                    size_t const group_index=opaque_order
-                        ?(*opaque_order)[group_visit]:group_visit;
+                // Fully contained ordinary meshes can collect already
+                // anchored groups without touching draw metadata, checking
+                // the frustum or entering material/alpha dispatch. The
+                // partition is shared by exact mesh/state class and rebuilt
+                // only when a new slot is established.
+                std::vector<size_t> const *remaining=nullptr;
+                static thread_local std::vector<size_t> fast_failed;
+                static thread_local std::vector<size_t> fast_fallback;
+                if(specialize_model_layout && mesh_inside && !parallel &&
+                   layout_ranges && opaque_order) {
+                    auto const &fast=model_collector.fast_layout(
+                        model_class,*inst.geometry,*opaque_order);
+                    if(!fast.anchored.empty()) {
+                        fast_failed.clear();
+                        size_t rejected=0U,inserted=0U;
+                        auto const &planes=inst.geometry->face_planes;
+                        // Use the same scalar test as the general path.
+                        // No per-group configuration or profiling branches.
+                        for(auto const &range:fast.anchored) {
+                            if(can_cpu_cull && range.plane_count!=0U) {
+                                bool facing=false;
+                                for(uint32_t k=0;k<range.plane_count;++k) {
+                                    uint32_t const index=range.plane_start+k;
+                                    if(plane_test.planes) {
+                                        auto const &cp=plane_test.planes[index];
+                                        float const side=local_eye[0]*cp.nx+
+                                            local_eye[1]*cp.ny+
+                                            local_eye[2]*cp.nz-cp.d;
+                                        if(side>plane_test.margin) { facing=true;break; }
+                                        if(side< -plane_test.margin)continue;
+                                    }
+                                    auto const &plane=planes[index];
+                                    if(gpu_3do_face_facing_camera(
+                                        local_eye,plane.anchor,plane.normal)) {
+                                        facing=true;break;
+                                    }
+                                }
+                                if(!facing) { ++rejected;continue; }
+                            }
+                            if(model_collector.append(range.slot,
+                                {instance_index,&context}))++inserted;
+                            else fast_failed.push_back(range.group_index);
+                        }
+                        if(gpu_profiling) {
+                            profile_frame.gpu_groups_considered+=rejected+inserted;
+                            profile_frame.gpu_group_frustum_tests_avoided+=rejected+inserted;
+                            profile_frame.gpu_groups_backface_culled+=rejected;
+                            profile_frame.gpu_collection_layout_hits+=inserted;
+                            profile_frame.gpu_collection_direct_members+=inserted;
+                            ++profile_frame.gpu_specialized_collection_meshes;
+                            profile_frame.gpu_specialized_collection_groups+=rejected+inserted;
+                        }
+                        remaining=&fast.remaining;
+                        // Defensive duplicate/out-of-order guard: preserve
+                        // original opaque visit order for exceptional draws.
+                        if(!fast_failed.empty()) {
+                            fast_fallback.clear();
+                            for(size_t index:*opaque_order) {
+                                if(groups[index].count==0U ||
+                                   layout_ranges[index].slot==0U ||
+                                   layout_ranges[index].material==0U ||
+                                   std::find(fast_failed.begin(),fast_failed.end(),
+                                       index)!=fast_failed.end())
+                                    fast_fallback.push_back(index);
+                            }
+                            remaining=&fast_fallback;
+                        }
+                    }
+                }
+                size_t const visit_count=remaining?remaining->size():groups.size();
+                for(size_t group_visit=0;group_visit<visit_count;++group_visit) {
+                    size_t const group_index=remaining?(*remaining)[group_visit]:
+                        (opaque_order?(*opaque_order)[group_visit]:group_visit);
                     auto const &group=groups[group_index];
                     auto const &meta=submission[group_index];
                     if(the_config->profile_renderer)
@@ -5952,7 +6028,8 @@ namespace jkgm {
                             });
                         if(model_collector.append(slot,
                             {instance_index,&context})) {
-                            if(layout)layout->slot=slot;
+                            if(layout)model_collector.mark_collection_slot(
+                                model_class,group_index,slot);
                             // The first visible member is the source-order
                             // anchor; subsequent members need only their
                             // instance/context/order, not full draw records.

@@ -70,6 +70,7 @@ struct profile_sample {
   // Per-frame opaque instancing CPU work, separately from sampled audit.
   uint64_t gpu_instance_buffer_bytes=0,gpu_instance_buffer_uploads=0,gpu_instance_buffer_draws=0;
   uint64_t gpu_collection_layout_hits=0,gpu_collection_layout_misses=0,gpu_collection_direct_members=0;
+  uint64_t gpu_specialized_collection_meshes=0,gpu_specialized_collection_groups=0;
   uint64_t gpu_instancing_prepare_us=0,gpu_instancing_audit_us=0;
   uint64_t gpu_instancing_schedule_us=0,gpu_instancing_reorder_us=0;
   uint64_t gpu_instancing_source_draws=0;
@@ -213,6 +214,8 @@ struct profile_sample {
     gpu_collection_layout_hits+=o.gpu_collection_layout_hits;
     gpu_collection_layout_misses+=o.gpu_collection_layout_misses;
     gpu_collection_direct_members+=o.gpu_collection_direct_members;
+    gpu_specialized_collection_meshes+=o.gpu_specialized_collection_meshes;
+    gpu_specialized_collection_groups+=o.gpu_specialized_collection_groups;
     gpu_instance_buffer_bytes+=o.gpu_instance_buffer_bytes;
     gpu_instance_buffer_uploads+=o.gpu_instance_buffer_uploads;
     gpu_instance_buffer_draws+=o.gpu_instance_buffer_draws;

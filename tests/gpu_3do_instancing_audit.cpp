@@ -329,6 +329,27 @@ int main() {
         assert(collector.append(slot,{3U}));
         assert(!collector.append(slot,{2U}));
         assert(collector.range(slot).members.size()==2U);
+        gpu_3do_geometry partition_geo;
+        partition_geo.groups.resize(2U);
+        partition_geo.face_planes.resize(2U);
+        partition_geo.groups[0].count=3U;
+        partition_geo.groups[0].plane_count=1U;
+        partition_geo.groups[1].count=3U;
+        std::vector<size_t> const partition_order{1U,0U};
+        collector.mark_collection_slot(mesh,0U,slot);
+        auto const &partition=collector.fast_layout(mesh,partition_geo,partition_order);
+        assert(partition.anchored.size()==1U && partition.remaining.size()==1U);
+        assert(partition.anchored[0].group_index==0U &&
+               partition.anchored[0].slot==slot &&
+               partition.anchored[0].plane_count==1U);
+        assert(partition.remaining[0]==1U);
+        auto const second_slot=collector.find_range(mesh,1U,0x1000U,solid,yes);
+        assert(collector.append(second_slot,{3U}));
+        collector.collection_layout(mesh)[1].material=0x1000U;
+        collector.mark_collection_slot(mesh,1U,second_slot);
+        auto const &updated=collector.fast_layout(mesh,partition_geo,partition_order);
+        assert(updated.anchored.size()==2U && updated.remaining.empty());
+        assert(updated.anchored[0].group_index==1U && updated.anchored[1].group_index==0U);
         assert(collector.find_range(mesh,1U,0x1000U,solid,yes)!=slot);
         assert(collector.find_range(mesh,0U,0x2000U,solid,yes)!=slot);
         assert(collector.find_range(mesh,0U,0x1000U,masked,yes)!=slot);

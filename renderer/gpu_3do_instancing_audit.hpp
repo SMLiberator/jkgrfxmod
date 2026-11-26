@@ -389,10 +389,23 @@ public:
         gpu_3do_alpha_mode policy=gpu_3do_alpha_mode::solid;
         size_t slot=0U;
     };
+    // Material order is preserved for the remaining general collector.
+    // Already anchored ranges cannot emit new pending draws, so they can
+    // be visited separately without perturbing draw or alpha ordering.
+    struct fast_collection_range {
+        size_t group_index,slot;
+        uint32_t plane_start,plane_count;
+    };
+    struct fast_collection_layout {
+        std::vector<fast_collection_range> anchored;
+        std::vector<size_t> remaining;
+        bool dirty=true;
+    };
 private:
     struct mesh_class {
         std::vector<size_t> heads;
         std::vector<collection_range> layout;
+        fast_collection_layout fast;
     };
 public:
     struct range_slot {
@@ -423,6 +436,7 @@ public:
             auto &entry=classes[used_classes++];
             entry.heads.assign(group_count,0U);
             entry.layout.clear();
+            entry.fast.dirty=true;
         }
         return found.first->second;
     }
@@ -431,6 +445,35 @@ public:
         if(entry.layout.size()!=entry.heads.size())
             entry.layout.resize(entry.heads.size());
         return entry.layout;
+    }
+    void mark_collection_slot(size_t mesh,size_t group,size_t slot) {
+        auto &entry=classes[mesh];
+        entry.layout[group].slot=slot;
+        entry.fast.dirty=true;
+    }
+    fast_collection_layout const &fast_layout(size_t mesh,
+        gpu_3do_geometry const &geo,std::vector<size_t> const &order) {
+        auto &entry=classes[mesh];
+        auto &fast=entry.fast;
+        if(fast.dirty) {
+            fast.anchored.clear();
+            fast.remaining.clear();
+            for(size_t index:order) {
+                auto const &group=geo.groups[index];
+                auto const &layout=entry.layout[index];
+                if(group.count==0U || layout.slot==0U || layout.material==0U) {
+                    fast.remaining.push_back(index);
+                    continue;
+                }
+                uint32_t const count=(!(group.face_type&0x1U) &&
+                    group.plane_start<=geo.face_planes.size() &&
+                    group.plane_count<=geo.face_planes.size()-group.plane_start)
+                    ?group.plane_count:0U;
+                fast.anchored.push_back({index,layout.slot,group.plane_start,count});
+            }
+            fast.dirty=false;
+        }
+        return fast;
     }
     template<class IsEligible>
     size_t find_range(size_t mesh,size_t group,uintptr_t material,
