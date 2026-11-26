@@ -31,7 +31,7 @@ struct direct_model_identity {
 };
 template<class Read>
 bool read_direct_model_identity(Read const &read,uint32_t rd,
-                                direct_model_identity &out) {
+                                direct_model_identity &out,bool force_lod0=false) {
     out={};
     uint32_t model=0,count=0,base=0,geo_count=0,meshes=0,mesh_count=0;
     int32_t geo=-1;
@@ -41,8 +41,10 @@ bool read_direct_model_identity(Read const &read,uint32_t rd,
     if(!direct_model_span(rd,0x44) ||
        !u32(uint64_t(rd)+4,model) || !direct_model_span(model,0x60) ||
        !u32(uint64_t(model)+0x44,geo_count) ||
-       !read(rd+0x30,&geo,4) || geo_count==0 || geo_count>4 ||
-       (geo==-1 && !read(model+0x50,&geo,4)) ||
+       geo_count==0 || geo_count>4 ||
+       (!force_lod0 && !read(rd+0x30,&geo,4)) ||
+       (force_lod0 ? (geo=0,false) :
+           (geo==-1 && !read(model+0x50,&geo,4))) ||
        geo<0 || uint32_t(geo)>=geo_count ||
        !u32(model+0x54,count) || !u32(model+0x58,base) ||
        count==0 || count>1024 ||
@@ -134,10 +136,11 @@ public:
         revision_=revision;frame_=frame;reliable_=reliable;
     }
     template<class Read>
-    direct_model_plan const *get(Read const &read,uint32_t rd,bool &hit) {
+    direct_model_plan const *get(Read const &read,uint32_t rd,bool &hit,
+                                 bool force_lod0=false) {
         hit=false;
         direct_model_identity key{};
-        if(!read_direct_model_identity(read,rd,key))return nullptr;
+        if(!read_direct_model_identity(read,rd,key,force_lod0))return nullptr;
         uint32_t const id=key.model+0x24+key.geo*8;
         auto it=entries_.find(id);
         if(it!=entries_.end() && it->second.key==key) {

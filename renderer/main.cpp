@@ -1621,7 +1621,9 @@ namespace {
         direct_model_topologies.prepare(mesh_revision::current(),gpu_frame_serial,
                                          mesh_revision::active());
         bool hit=false;
-        auto const *cached=direct_model_topologies.get(direct_audit_read,state.rd,hit);
+        bool const force_lod0=the_config->experimental_auto_3do_lod;
+        auto const *cached=direct_model_topologies.get(
+            direct_audit_read,state.rd,hit,force_lod0);
         if(!cached)return false;
         if(profiling) {
             if(hit)++native_totals.direct_topology_hits;
@@ -1739,6 +1741,7 @@ namespace {
         result=1;
         if(profiling) {
             ++native_totals.direct_drawn;
+            if(force_lod0)++native_totals.model_lod0_forced;
             native_totals.direct_meshes+=meshes;
         }
         return true;
@@ -1809,7 +1812,10 @@ namespace {
             // World position is shared by ALL animated hierarchy meshes.
             // Capture once for Thing occlusion or automatic LOD.
             if(the_config->experimental_3do_occlusion_culling ||
-               the_config->experimental_auto_3do_lod) {
+               the_config->experimental_auto_3do_lod ||
+               (the_config->enable_reflections &&
+                the_config->enable_reflection_capture &&
+                the_config->enable_reflection_probes)) {
                 own_world_position_valid=read(
                     uintptr_t(hud_owner)+0xb8U,
                     own_world_position.data(),sizeof(own_world_position));
@@ -1849,7 +1855,9 @@ namespace {
         float own_lod_radius=0.0f;
         bool own_lod_radius_valid=false;
         if(the_config && the_config->use_gpu_cache &&
-           the_config->experimental_auto_3do_lod &&
+           (the_config->experimental_auto_3do_lod ||
+            (the_config->experimental_3do_occlusion_culling &&
+             the_config->experimental_3do_native_occlusion_culling)) &&
            !camera_hud && own_world_position_valid &&
            have_thing_flags && hud_owner>=0x10000U &&
            uintptr_t(hud_owner)+0xc4U==rd &&
@@ -1877,7 +1885,10 @@ namespace {
         if(shadow_enabled || (the_config && the_config->enable_decals) ||
            (the_config && the_config->experimental_planar_thing_discovery) ||
            (the_config && the_config->experimental_3do_occlusion_culling) ||
-           (the_config && the_config->experimental_auto_3do_lod)) {
+           (the_config && the_config->experimental_auto_3do_lod) ||
+           (the_config && the_config->enable_reflections &&
+            the_config->enable_reflection_capture &&
+            the_config->enable_reflection_probes)) {
             if(have_thing_flags) {
                 uint32_t owner=0,signature=0;
                 if(read(rd+0x44U,&owner,4) &&
@@ -1987,29 +1998,18 @@ namespace {
         if(native_occlusion_enabled && owner_key && have_thing_flags &&
            !camera_hud && !(flags&0x20U) &&
            own_world_position_valid && native_model_ptr>=0x10000U) {
-            uint32_t owner_type=0,owner_model=0;
-            float radius=0.0f;
-            std::array<float,9> owner_basis{};
-            if(read(uintptr_t(hud_owner)+0x0cU,&owner_type,4U) &&
+            uint32_t owner_type=0;
+            if(own_lod_radius_valid &&
+               read(uintptr_t(hud_owner)+0x0cU,&owner_type,4U) &&
                // Exclude player/HUD from this first experiment. The player
                // owns additional first-person and saber-specific callbacks.
-               owner_type>1U && owner_type!=10U &&
-               read(uintptr_t(hud_owner)+0xc8U,&owner_model,4U) &&
-               owner_model==native_model_ptr &&
-               read(uintptr_t(native_model_ptr)+0x5cU,&radius,4U) &&
-               read(uintptr_t(hud_owner)+0x88U,
-                    owner_basis.data(),sizeof(owner_basis))) {
-                // This experiment uses JK's authored Thing-centered sphere,
-                // not the current animated placement of individual meshes.
-                // Placement mismatch must not silently suppress all culling.
-                float const scale=
-                    jkgm::planar_reflection_radius_scale(owner_basis);
+               owner_type>1U && owner_type!=10U) {
+                // Reuse the same authored sphere as automatic LOD.
                 jkgm::gpu_thing_occlusion_bound bound{};
                 bound.center=own_world_position;
-                bound.radius=radius*scale;
+                bound.radius=own_lod_radius;
                 bound.valid=true;
-                if(jkgm::gpu_thing_occlusion_bound_valid(bound) &&
-                   std::isfinite(scale) && scale>0.0f) {
+                if(jkgm::gpu_thing_occlusion_bound_valid(bound)) {
                     jkgm::native_occlusion_candidate candidate{};
                     candidate.owner=owner_key;
                     candidate.model=native_model_ptr;
@@ -2120,26 +2120,34 @@ namespace {
         auto const engine_start=profiling ? std::chrono::steady_clock::now()
                                           : std::chrono::steady_clock::time_point{};
         uint64_t const mesh_before=profiling?native_totals.mesh_ns:0;
-        // Stage 0 of experimental automatic LOD: bypass JK's distance-
-        // selected GeoSet by temporarily overriding only THIS rdThing's
-        // selection. Never change rdModel3::geosetSelect (shared by Things)
-        // or the world's LOD distances. The original field is restored
-        // before returning, including for native fallback / HUD meshes.
-        // Once generated GPU LODs exist, they will be selected downstream
-        // from captured original GeoSet 0 geometry.
-        jkgm::native_3do_lod0_plan lod0{};
-        if(the_config && the_config->use_gpu_cache &&
-           the_config->experimental_auto_3do_lod) {
-            lod0=jkgm::prepare_native_3do_lod0_override(
-                read,native_rd,native_model_ptr);
-            if(lod0.valid) {
-                int32_t const original_geoset=0;
-                std::memcpy(reinterpret_cast<void *>(
-                    lod0.selection_address),&original_geoset,
-                    sizeof(original_geoset));
-                if(profiling)++native_totals.model_lod0_forced;
+        // Only the native fallback/audit needs a temporary GeoSet write.
+        // The direct model topology selects source GeoSet 0 itself.
+        auto begin_native_lod0=[&] {
+            jkgm::native_3do_lod0_plan lod0{};
+            if(the_config && the_config->use_gpu_cache &&
+               the_config->experimental_auto_3do_lod) {
+                lod0=jkgm::prepare_native_3do_lod0_override(
+                    read,native_rd,native_model_ptr);
+                if(lod0.valid) {
+                    int32_t const zero=0;
+                    std::memcpy(reinterpret_cast<void *>(lod0.selection_address),
+                                &zero,sizeof(zero));
+                    if(profiling)++native_totals.model_lod0_forced;
+                }
             }
-        }
+            return lod0;
+        };
+        auto end_native_lod0=[](jkgm::native_3do_lod0_plan const &lod0) {
+            if(lod0.valid)
+                std::memcpy(reinterpret_cast<void *>(lod0.selection_address),
+                    &lod0.previous,sizeof(lod0.previous));
+        };
+        auto draw_native=[&] {
+            auto const lod0=begin_native_lod0();
+            int const result=RealNativeModel(thing,placement);
+            end_native_lod0(lod0);
+            return result;
+        };
         int result=0;
         {
             jkgm::native_draw_scope<native_model_mesh_state> scope(
@@ -2149,22 +2157,21 @@ namespace {
                 direct_model_audit_scope audit{};
                 auto *const previous=active_direct_audit;
                 if(previous)previous->nested=true;
+                auto const lod0=begin_native_lod0();
                 audit.valid=prepare_direct_audit(audit,thing,placement);
                 active_direct_audit=&audit;
                 result=RealNativeModel(thing,placement);
                 active_direct_audit=previous;
                 finish_direct_audit(audit,result);
+                end_native_lod0(lod0);
             } else if(the_config && the_config->use_gpu_cache &&
                       the_config->experimental_gpu_3do_direct_model_draw) {
                 if(!try_direct_model_draw(thing,placement,result)) {
                     if(profiling)++native_totals.direct_fallbacks;
-                    result=RealNativeModel(thing,placement);
+                    result=draw_native();
                 }
-            } else result=RealNativeModel(thing,placement);
+            } else result=draw_native();
         }
-        if(lod0.valid)
-            std::memcpy(reinterpret_cast<void *>(lod0.selection_address),
-                &lod0.previous,sizeof(lod0.previous));
         uint64_t const engine_ns=profiling?elapsed_native_ns(engine_start):0;
         active_native_model_thing_flags=previous_flags;
         active_native_model_camera_hud=previous_camera_hud;

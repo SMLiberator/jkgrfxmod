@@ -5012,12 +5012,16 @@ namespace jkgm {
             };
             // The minimum is per owning SithThing, not per hierarchy rdMesh.
             // Count original main-view mesh nodes before replacing any IDs.
-            std::unordered_map<uint64_t,uint64_t> original_by_owner;
+            struct lod_triangle_budget {uint64_t original=0,proposed=0;};
+            std::unordered_map<uint64_t,lod_triangle_budget> triangle_budgets;
             for(auto const &inst:frame_gpu_3do_instances)
                 if(eligible(inst) && inst.shadow_owner)
-                    original_by_owner[inst.shadow_owner]+=
-                        inst.geometry->indices.size()/3U;
-            auto proposed_by_owner=original_by_owner;
+                    {
+                        auto &budget=triangle_budgets[inst.shadow_owner];
+                        auto const tris=inst.geometry->indices.size()/3U;
+                        budget.original+=tris;
+                        budget.proposed+=tris;
+                    }
             struct planned_lod {
                 gpu_3do_instance *instance=nullptr;
                 std::shared_ptr<gpu_3do_geometry const> geometry;
@@ -5083,9 +5087,9 @@ namespace jkgm {
                 if(level==0U) {++selected[0];continue;}
                 // Skip generating any variants for objects already at the
                 // minimum. This also protects a standalone 12-triangle box.
-                auto const owner_total=original_by_owner.find(inst.shadow_owner);
-                if(owner_total!=original_by_owner.end() &&
-                   owner_total->second<=static_cast<uint64_t>(
+                auto const owner_total=triangle_budgets.find(inst.shadow_owner);
+                if(owner_total!=triangle_budgets.end() &&
+                   owner_total->second.original<=static_cast<uint64_t>(
                        the_config->gpu_3do_auto_lod_min_object_triangles)) {
                     ++selected[0];
                     floor_rejected_owners.insert(inst.shadow_owner);
@@ -5161,9 +5165,9 @@ namespace jkgm {
                     ++selected[0];continue;
                 }
                 if(inst.shadow_owner) {
-                    auto &proposed=proposed_by_owner[inst.shadow_owner];
-                    proposed-=inst.geometry->indices.size()/3U;
-                    proposed+=entry.levels[index]->indices.size()/3U;
+                    auto &budget=triangle_budgets[inst.shadow_owner];
+                    budget.proposed-=inst.geometry->indices.size()/3U;
+                    budget.proposed+=entry.levels[index]->indices.size()/3U;
                 }
                 pending.push_back({&inst,entry.levels[index],entry.ids[index],
                                    inst.shadow_owner,level});
@@ -5173,12 +5177,10 @@ namespace jkgm {
             for(auto const &plan:pending) {
                 bool accept=true;
                 if(plan.owner!=0U) {
-                    auto const original=original_by_owner.find(plan.owner);
-                    auto const proposed=proposed_by_owner.find(plan.owner);
-                    if(original!=original_by_owner.end() &&
-                       proposed!=proposed_by_owner.end())
+                    auto const budget=triangle_budgets.find(plan.owner);
+                    if(budget!=triangle_budgets.end())
                         accept=gpu_3do_auto_lod_object_allows(
-                            original->second,proposed->second,
+                            budget->second.original,budget->second.proposed,
                             static_cast<unsigned>(
                                 the_config->gpu_3do_auto_lod_min_object_triangles));
                 }
@@ -5204,7 +5206,7 @@ namespace jkgm {
                          " generation_budget=",the_config->gpu_3do_auto_lod_generation_budget,
                          " min_object_triangles=",
                          the_config->gpu_3do_auto_lod_min_object_triangles,
-                         " owning_things=",original_by_owner.size(),
+                         " owning_things=",triangle_budgets.size(),
                          " floor_rejected_things=",floor_rejected_owners.size(),
                          " floor_rejected_nodes=",floor_rejected_nodes,
                          " generated_this_frame=",generated,
@@ -5617,6 +5619,11 @@ namespace jkgm {
                     }
                 }
             }
+            // The model query depends on owner and exact Thing center, not
+            // on the node transform. Cache within this collection only:
+            // results may be polled or camera state changed between passes.
+            struct owner_visibility {std::array<float,3> center;bool hidden;};
+            std::unordered_map<uint64_t,owner_visibility> owner_visibility_cache;
             if(!reuse_alpha) for(auto const &inst:instances) {
                 if(!inst.geometry || inst.shadow_only ||
                    (!inst.is_sprite_quad && !inst.is_projected_decal &&
@@ -5640,30 +5647,43 @@ namespace jkgm {
                     !inst.camera_hud && !inst.skybox_vertex_lighting &&
                     !inst.transient_procedural && !inst.saber_trail_active;
                 if(occlusion_eligible) {
-                    auto const visibility_start=the_config->profile_renderer
-                        ?std::chrono::steady_clock::now()
-                        :std::chrono::steady_clock::time_point{};
-                    bool const occluded=sprite_occlusion_eligible
-                        ?thing_occlusion_queries->hidden(
-                            inst.shadow_owner,
-                            gpu_sprite_occlusion_bound(inst.transform),
-                            cam,gpu_3do_present_serial,
-                            uint32_t(inst.sprite_occlusion_resource),
-                            &inst.transform)
-                        :thing_occlusion_queries->hidden(
-                            inst.shadow_owner,inst.owning_thing_world_position,
-                            cam,gpu_3do_present_serial);
-                    if(the_config->profile_renderer) {
-                        thing_occlusion_visibility_ns_window+=uint64_t(
-                            std::chrono::duration_cast<std::chrono::nanoseconds>(
-                                std::chrono::steady_clock::now()-
-                                visibility_start).count());
-                        ++thing_occlusion_visibility_calls_window;
-                        if(occluded) {
-                            ++thing_occlusion_visibility_skips_window;
-                            if(sprite_occlusion_eligible)
-                                ++sprite_occlusion_visibility_skips_window;
+                    bool occluded=false;
+                    auto found=owner_visibility_cache.end();
+                    if(!sprite_occlusion_eligible)
+                        found=owner_visibility_cache.find(inst.shadow_owner);
+                    if(found!=owner_visibility_cache.end() &&
+                       found->second.center==inst.owning_thing_world_position) {
+                        occluded=found->second.hidden;
+                    } else {
+                        auto const visibility_start=gpu_profiling
+                            ?std::chrono::steady_clock::now()
+                            :std::chrono::steady_clock::time_point{};
+                        occluded=sprite_occlusion_eligible
+                            ?thing_occlusion_queries->hidden(
+                                inst.shadow_owner,
+                                gpu_sprite_occlusion_bound(inst.transform),
+                                cam,gpu_3do_present_serial,
+                                uint32_t(inst.sprite_occlusion_resource),
+                                &inst.transform)
+                            :thing_occlusion_queries->hidden(
+                                inst.shadow_owner,inst.owning_thing_world_position,
+                                cam,gpu_3do_present_serial);
+                        if(!sprite_occlusion_eligible)
+                            owner_visibility_cache.insert_or_assign(
+                                inst.shadow_owner,owner_visibility{
+                                    inst.owning_thing_world_position,occluded});
+                        if(gpu_profiling) {
+                            thing_occlusion_visibility_ns_window+=uint64_t(
+                                std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                    std::chrono::steady_clock::now()-
+                                    visibility_start).count());
+                            ++thing_occlusion_visibility_calls_window;
                         }
+                    }
+                    if(gpu_profiling && occluded) {
+                        ++thing_occlusion_visibility_skips_window;
+                        if(sprite_occlusion_eligible)
+                            ++sprite_occlusion_visibility_skips_window;
                     }
                     if(occluded)continue;
                 }

@@ -120,6 +120,13 @@ int main() {
     bool hit=false;
     auto const *full=topology.get(read,uint32_t(rdthing),hit);
     assert(full && !hit && full->nodes.size()==4);
+    // Direct automatic LOD ignores both native selectors without writing
+    // either one. Even an invalid native selection cannot affect GeoSet 0.
+    write(rdthing+0x30,99U);
+    assert(!topology.get(read,uint32_t(rdthing),hit));
+    assert(topology.get(read,uint32_t(rdthing),hit,true)==full && hit);
+    assert(read(rdthing+0x30,&active_geoset,4) && active_geoset==99U);
+    write(rdthing+0x30,0xffffffffU);
     uint32_t live_cuts[4]={1,0,1,0};
     std::vector<uint32_t> order;
     auto visit=[&](direct_model_node const &n) {order.push_back(n.node);return true;};
