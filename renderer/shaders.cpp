@@ -228,6 +228,10 @@ void jkgm::shaders::translucent_sun_uniforms::set_map(
                     define="#define JKGM_SIMPLE_OPAQUE 1\n#define JKGM_DIFFUSE_ONLY 1\n"; break;
                 case material_shader_variant::diffuse_alpha:
                     define="#define JKGM_SIMPLE_ALPHA 1\n#define JKGM_DIFFUSE_ONLY 1\n"; break;
+                case material_shader_variant::world_simple_opaque:
+                    define="#define JKGM_WORLD_SIMPLE 1\n#define JKGM_WORLD_OPAQUE 1\n"; break;
+                case material_shader_variant::world_simple_alpha:
+                    define="#define JKGM_WORLD_SIMPLE 1\n#define JKGM_WORLD_ALPHA 1\n"; break;
                 default: break;
                 }
                 source.insert(newline+1U,define);
@@ -363,10 +367,10 @@ void jkgm::shaders::menu_shader::set_menu_sampler(int sampler)
 }
 
 jkgm::shaders::world_cache_preview_shader::world_cache_preview_shader(
-    fs::path const &root)
+    fs::path const &root,material_shader_variant variant)
     : opengl_shader("world_cache_preview",
                     root/"shaders/world_cache.vert",
-                    root/"shaders/world_cache.frag")
+                    root/"shaders/world_cache.frag",fs::path(),variant)
     , view_right(gl::get_uniform_location(the_program,"view_right"))
     , view_forward(gl::get_uniform_location(the_program,"view_forward"))
     , view_up(gl::get_uniform_location(the_program,"view_up"))

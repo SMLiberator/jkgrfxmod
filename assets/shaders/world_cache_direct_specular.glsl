@@ -174,8 +174,12 @@ vec3 world_direct_specular(vec3 base_color,vec2 uv,
        (translucent_sun_enabled==0 || translucent_sun_color.w<=0.0) &&
        (world_dynamic_light_specular==0 || num_lights==0))
         return vec3(0.0);
+#ifdef JKGM_WORLD_SIMPLE
+    vec3 surf=vec3(1.0);
+#else
     vec3 surf=coating?vec3(1.0):
         (specular_params.w>0.5 ?texture(surface_map,uv).rgb:vec3(1.0));
+#endif
     float strength=coating?coat_strength:max(specular_params.x*surf.r,0.0);
     if(strength<=0.0)return vec3(0.0);
     float roughness=coating?clamp(coat_roughness,0.08,1.0):

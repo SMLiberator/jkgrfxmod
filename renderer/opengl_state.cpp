@@ -504,6 +504,14 @@ jkgm::opengl_state::opengl_state::opengl_state(size<2, int> screen_res,
         world_cache_preview_program =
             std::make_unique<shaders::world_cache_preview_shader>(
                 data_root);
+    if(the_config->use_gpu_cache && the_config->experimental_gpu_world_simple_shaders) {
+        world_cache_simple_opaque_program=
+            std::make_unique<shaders::world_cache_preview_shader>(
+                data_root,material_shader_variant::world_simple_opaque);
+        world_cache_simple_alpha_program=
+            std::make_unique<shaders::world_cache_preview_shader>(
+                data_root,material_shader_variant::world_simple_alpha);
+    }
 
     gl::bind_texture(gl::texture_bind_target::texture_2d, menu_texture);
     gl::tex_image_2d(gl::texture_bind_target::texture_2d,

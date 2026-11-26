@@ -12237,6 +12237,19 @@ namespace jkgm {
         // One MAT binder shared by opaque and transparent world geometry.
         // Matches the GPU 3DO sampler units and factors. Geometry-specific
         // vertex transforms/lighting and sky apertures remain independent.
+        // No advanced map/layer or capture path is allowed to disappear
+        // merely because it happens to be disabled this frame.
+        bool world_cache_simple_material(gpu_3do_texture const &material) const
+        {
+            return material.reflection_mode==0 &&
+                !material.has_environment && !material.has_environment2 &&
+                !material.has_normal && !material.has_normal2 &&
+                !material.has_surface && !material.has_matcap &&
+                get<0>(material.clearcoat_params)<=0.0f &&
+                material.displacement_factor==0.0f &&
+                material.blend!=material_blend_mode::fluid;
+        }
+
         void bind_world_cache_material(
             shaders::world_cache_preview_shader &shader,
             gpu_3do_texture const &material,uint32_t geometry_mode)
@@ -13103,6 +13116,23 @@ namespace jkgm {
                     return a->surface_index<b->surface_index;
                 });
             auto &shader=*ogs->world_cache_preview_program;
+            auto *simple_world=ogs->world_cache_simple_opaque_program.get();
+            auto *active_world=&shader;
+            size_t simple_world_draws=0,world_shader_switches=0;
+            // If the native request-pool layout has not yet been
+            // validated, do NOT copy the unseparated camera-sector tint
+            // onto already locally tinted world faces. Preserve the
+            // previously working world-cache behavior until bridge ready.
+            jk_palette_effect remaining_effect{};
+            if(native_sector_palette_mode().load(
+                   std::memory_order_relaxed)!=0)
+                remaining_effect=read_native_jk_hardware_color_effects();
+            bool const point_specular=the_config->enable_reflections &&
+                the_config->enable_dynamic_light_specular && camera_ready;
+            static std::vector<world_cache_point_light> const no_lights;
+            auto const &active_lights=(pixel_lighting || point_specular)
+                ?point_lights:no_lights;
+            auto initialize_world=[&](shaders::world_cache_preview_shader &shader) {
             shader.use_program();
             shader.set_surface_descriptors(cache.descriptor_mode);
             cache.bind_surface_descriptors();
@@ -13133,14 +13163,6 @@ namespace jkgm {
                                   make_point(0.0f,1.0f,0.0f,1.0f),
                                   make_point(0.0f,0.0f),make_point(0.0f,0.0f),
                                   false,false,0.0f,0);
-            // If the native request-pool layout has not yet been
-            // validated, do NOT copy the unseparated camera-sector tint
-            // onto already locally tinted world faces. Preserve the
-            // previously working world-cache behavior until bridge ready.
-            jk_palette_effect remaining_effect{};
-            if(native_sector_palette_mode().load(
-                   std::memory_order_relaxed)!=0)
-                remaining_effect=read_native_jk_hardware_color_effects();
             shader.set_jk_color_effects(
                 make_point(float(remaining_effect.filter[0]),
                            float(remaining_effect.filter[1]),
@@ -13153,16 +13175,17 @@ namespace jkgm {
                            remaining_effect.add[1]/255.0f,
                            remaining_effect.add[2]/255.0f,
                            remaining_effect.fade));
-            bool const point_specular=the_config->enable_reflections &&
-                the_config->enable_dynamic_light_specular && camera_ready;
-            static std::vector<world_cache_point_light> const no_lights;
-            auto const &active_lights=(pixel_lighting || point_specular)
-                ?point_lights:no_lights;
             shader.set_specular_lighting(pixel_lighting,point_specular);
             set_translucent_sun(shader,the_config->enable_reflections);
             shader.set_lights(active_lights,light_attenuation,
                 frame_saber_light_colors.colors,
                 frame_saber_light_colors.valid);
+            };
+            initialize_world(shader);
+            if(simple_world) {
+                initialize_world(*simple_world);
+                shader.use_program();
+            }
             gl::enable(gl::capability::depth_test);
             gl::set_depth_function(gl::comparison_function::less);
             gl::set_depth_mask(true);
@@ -13314,9 +13337,17 @@ namespace jkgm {
                 }
                 if(world_cache_draws_in_pass(policy,world_cache_pass::opaque)) {
                     material_depth_offset.set(material.depth_bias);
-                    bind_world_cache_material(shader,material,
+                    auto *selected=simple_world && world_cache_simple_material(material)
+                        ?simple_world:&shader;
+                    if(selected!=active_world) {
+                        selected->use_program();
+                        active_world=selected;
+                        ++world_shader_switches;
+                    }
+                    if(selected==simple_world)++simple_world_draws;
+                    bind_world_cache_material(*selected,material,
                                               first->geometry_mode);
-                    shader.set_alpha_policy(false,world_cache_alpha_mode(policy),
+                    selected->set_alpha_policy(false,world_cache_alpha_mode(policy),
                                             material.alpha_cutoff,1.0f);
                     counts.clear();
                     offsets.clear();
@@ -13347,6 +13378,10 @@ namespace jkgm {
                 else skipped_alpha+=end-i;
                 i=end;
             }
+            if(active_world!=&shader)shader.use_program();
+            if(simple_world && mat_probe)
+                LOG_INFO("PERF world_simple_opaque groups=",simple_world_draws,
+                         " total_groups=",groups," switches=",world_shader_switches);
             gl::bind_vertex_array(gl::vertex_array_view(0U));
             gl::disable(gl::capability::cull_face);
             glDisable(GL_POLYGON_OFFSET_FILL);
@@ -13520,6 +13555,34 @@ namespace jkgm {
                     return da>db;
                 });
             auto &shader=*ogs->world_cache_preview_program;
+            auto *simple_world=ogs->world_cache_simple_alpha_program.get();
+            auto *active_world=&shader;
+            size_t simple_world_draws=0,world_shader_switches=0;
+            // Alpha-only worlds must initialize these independently of
+            // any opaque GPU world draws earlier in the frame.
+            // Share the exact native camera snapshot with the opaque pass;
+            // if opaque rendering was skipped, this lazily captures it here.
+            auto const &world_lights=snapshot_world_frame_lights();
+            auto const &point_lights=world_lights.point_lights;
+            bool const camera_lights_ready=world_lights.ready;
+            float const light_attenuation=world_lights.attenuation;
+            bool const pixel_lighting=world_cache_use_pixel_lights(
+                the_config->gpu_pixel_lighting,camera_lights_ready);
+            bool const point_specular=the_config->enable_reflections &&
+                the_config->enable_dynamic_light_specular &&
+                camera_lights_ready;
+            static std::vector<world_cache_point_light> const no_lights;
+            auto const &active_lights=(pixel_lighting || point_specular)
+                ?point_lights:no_lights;
+            // If the native request-pool layout has not yet been
+            // validated, do NOT copy the unseparated camera-sector tint
+            // onto already locally tinted world faces. Preserve the
+            // previously working world-cache behavior until bridge ready.
+            jk_palette_effect remaining_effect{};
+            if(native_sector_palette_mode().load(
+                   std::memory_order_relaxed)!=0)
+                remaining_effect=read_native_jk_hardware_color_effects();
+            auto initialize_world_alpha=[&](shaders::world_cache_preview_shader &shader) {
             shader.use_program();
             shader.set_surface_descriptors(cache.descriptor_mode);
             cache.bind_surface_descriptors();
@@ -13538,22 +13601,6 @@ namespace jkgm {
                 the_config->enable_normal_mapped_diffuse);
             shader.set_reflection_camera(cam.position,cam.right,
                                          cam.forward,cam.up);
-            // Alpha-only worlds must initialize these independently of
-            // any opaque GPU world draws earlier in the frame.
-            // Share the exact native camera snapshot with the opaque pass;
-            // if opaque rendering was skipped, this lazily captures it here.
-            auto const &world_lights=snapshot_world_frame_lights();
-            auto const &point_lights=world_lights.point_lights;
-            bool const camera_lights_ready=world_lights.ready;
-            float const light_attenuation=world_lights.attenuation;
-            bool const pixel_lighting=world_cache_use_pixel_lights(
-                the_config->gpu_pixel_lighting,camera_lights_ready);
-            bool const point_specular=the_config->enable_reflections &&
-                the_config->enable_dynamic_light_specular &&
-                camera_lights_ready;
-            static std::vector<world_cache_point_light> const no_lights;
-            auto const &active_lights=(pixel_lighting || point_specular)
-                ?point_lights:no_lights;
             shader.set_specular_lighting(pixel_lighting,point_specular);
             shader.set_lights(active_lights,light_attenuation,
                 frame_saber_light_colors.colors,
@@ -13575,6 +13622,40 @@ namespace jkgm {
             // framebuffer receiving translucent world fragments. The 3DO
             // shader already uses texture unit 8 for this same image.
             shader.set_scene_depth(8);
+            // This variant owns its own uniforms; do not rely on an opaque
+            // draw to have initialized the camera or native color effects.
+            if(&shader==simple_world) {
+            auto const &frame=frame_world_cache_camera;
+            auto const &m=frame.native_view;
+            shader.set_view_matrix(
+                make_point(m[0],m[1],m[2],0.0f),
+                make_point(m[3],m[4],m[5],0.0f),
+                make_point(m[6],m[7],m[8],0.0f),
+                make_point(m[9],m[10],m[11],1.0f));
+            shader.set_projection(make_point(
+                std::tan(cam.fov*0.008726646259971648f),
+                get<x>(internal_scr_res_f)/get<y>(internal_scr_res_f),
+                1.0f/frame.far_plane,0.0f));
+            shader.set_jk_color_effects(
+                make_point(float(remaining_effect.filter[0]),
+                           float(remaining_effect.filter[1]),
+                           float(remaining_effect.filter[2]),
+                           remaining_effect.active?1.0f:0.0f),
+                make_point(remaining_effect.tint[0],
+                           remaining_effect.tint[1],
+                           remaining_effect.tint[2],0.0f),
+                make_point(remaining_effect.add[0]/255.0f,
+                           remaining_effect.add[1]/255.0f,
+                           remaining_effect.add[2]/255.0f,
+                           remaining_effect.fade));
+            }
+            };
+            // Preserve full shader's established camera/color state.
+            initialize_world_alpha(shader);
+            if(simple_world) {
+                initialize_world_alpha(*simple_world);
+                shader.use_program();
+            }
             if(has_fluid || ssr_ready) {
                 gl::set_active_texture_unit(8);
                 gl::bind_texture(gl::texture_bind_target::texture_2d,
@@ -13604,12 +13685,20 @@ namespace jkgm {
                 auto const &material=draw.material->texture;
                 material_depth_offset.set(material.depth_bias);
                 auto const policy=draw.policy;
-                shader.set_alpha_policy(true,world_cache_alpha_mode(policy),
+                auto *selected=simple_world && world_cache_simple_material(material)
+                    ?simple_world:&shader;
+                if(selected!=active_world) {
+                    selected->use_program();
+                    active_world=selected;
+                    ++world_shader_switches;
+                }
+                if(selected==simple_world)++simple_world_draws;
+                selected->set_alpha_policy(true,world_cache_alpha_mode(policy),
                         material.alpha_cutoff,
                         (face->face_type&0x2U)?90.0f/255.0f:1.0f,
                         static_cast<int>(material.blend),
                         material.emissive_only);
-                shader.set_fluid_thickness(material.blend==material_blend_mode::fluid
+                selected->set_fluid_thickness(material.blend==material_blend_mode::fluid
                     ?material.fluid_thickness:0.0f);
                 switch(material.blend) {
                 case material_blend_mode::additive:
@@ -13628,7 +13717,7 @@ namespace jkgm {
                         gl::blend_function::one_minus_source_alpha);
                     break;
                 }
-                bind_world_cache_material(shader,material,face->geometry_mode);
+                bind_world_cache_material(*selected,material,face->geometry_mode);
                 gl::draw_elements(gl::element_type::triangles,
                     face->count,gl::index_type::uint32,
                     static_cast<ptrdiff_t>(
@@ -13658,7 +13747,11 @@ namespace jkgm {
                 }
             }
             gl::bind_vertex_array(gl::vertex_array_view(0U));
+            if(active_world!=&shader)shader.use_program();
             shader.set_alpha_policy(false,0,0.5f,1.0f);
+            if(simple_world && material_probe)
+                LOG_INFO("PERF world_simple_alpha ranges=",simple_world_draws,
+                         " total_ranges=",draws.size()," switches=",world_shader_switches);
             gl::disable(gl::capability::cull_face);
             gl::set_blend_function(gl::blend_function::one,
                                    gl::blend_function::one_minus_source_alpha);

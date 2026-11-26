@@ -1,4 +1,9 @@
 #version 330 core
+#ifdef JKGM_WORLD_SIMPLE
+#undef JKGM_MATCAP_LAYER
+#undef JKGM_CLEARCOAT_LAYER
+#undef JKGM_REFLECTION_PROBE
+#endif
 #include "gbuffer_normal_packed.glsl"
 // GPU-first opaque SithWorld G-buffer. Native depth-tested fallback follows.
 // Static JK lighting is evaluated at vertices and interpolated in RGB.
@@ -30,7 +35,12 @@ uniform vec2 emissive_scroll;
 uniform vec2 uv_scale,uv_scroll;
 // GPU 3DO-compatible EnvMap samplers, reflection modes, material parameters.
 uniform sampler2D surface_map,normal_map,normal_map2,env_map,env_map2;
-uniform vec4 specular_params,normal_specular_params,environment_info;
+uniform vec4 specular_params,environment_info;
+#ifdef JKGM_WORLD_SIMPLE
+const vec4 normal_specular_params=vec4(0.0,1.0,0.0,1.0);
+#else
+uniform vec4 normal_specular_params;
+#endif
 // Matcap color is an artist-authored sRGB image. Its per-pixel intensity
 // and roughness are LINEAR mask channels, completely separate from GGX.
 #ifdef JKGM_MATCAP_LAYER
@@ -45,7 +55,11 @@ uniform vec4 clearcoat_params; // strength, roughness, transmission
 uniform int clearcoat_enabled,clearcoat_has_surface,clearcoat_has_normal;
 #endif
 uniform vec4 projection; // same FOV factors as world_cache.vert
+#ifdef JKGM_WORLD_SIMPLE
+const int normal_mapped_diffuse=0;
+#else
 uniform int normal_mapped_diffuse; // opt-in added lights, not baked JK RGB
+#endif
 uniform vec2 normal_specular_scroll,normal_specular_scroll2;
 uniform vec3 camera_world_origin,camera_right_axis;
 uniform vec3 camera_forward_axis,camera_up_axis;
@@ -73,7 +87,13 @@ uniform sampler2D palette_fullbright_mask;
 uniform int has_palette_fullbright;
 uniform int alpha_cutout; // explicit cutout MATs on solid adjoins
 uniform float alpha_cutoff;
+#if defined(JKGM_WORLD_OPAQUE)
+const int transparent_pass=0;
+#elif defined(JKGM_WORLD_ALPHA)
+const int transparent_pass=1;
+#else
 uniform int transparent_pass; // 0 G-buffer, 1 sorted forward alpha
+#endif
 uniform int alpha_mode; // 0 solid, 1 mixed, 2 mask, 3 blended, 4 dither
 uniform float face_opacity; // 90/255 when rdFace.type includes 0x2
 uniform int blend_mode; // normal=0, additive=1, multiply=2, fluid=3
@@ -82,7 +102,11 @@ uniform float fluid_thickness; // Beer-Lambert absorption coefficient
 uniform int fluid_debug_mode; // GPU world Fluid diagnostics; 0 preserves ordinary rendering
 uniform vec4 fog_params; // start/end/opacity, w=0 planar linear,1 radial linear,2 radial exp
 uniform vec3 fog_color;
+#ifdef JKGM_WORLD_SIMPLE
+const int sky_mode=0;
+#else
 uniform int sky_mode;
+#endif
 uniform vec4 sky_horizon; // x=horizonDistance*tanHalfFOV, y=pixels/rev, z=tanHalfFOV
 uniform vec3 sky_angles; // pitch/yaw/roll in JK degrees
 uniform vec3 sky_camera_origin,sky_camera_right;
@@ -492,8 +516,12 @@ void main() {
     // Do not clip combined authored and dynamic HDR lighting.
     lighting=mix(max(lighting,vec3(0.0)),vec3(1.0),fullbright);
     float env_metalness=0.0;
+#ifdef JKGM_WORLD_SIMPLE
+    vec3 env_reflection=vec3(0.0);
+#else
     vec3 env_reflection=world_environment_reflection(
         albedo,material_texcoord,env_metalness);
+#endif
     vec3 direct_specular=world_direct_specular(albedo,material_texcoord);
     vec3 coat_specular=vec3(0.0);
     float base_diffuse_trans=1.0,base_specular_trans=1.0;
@@ -555,6 +583,7 @@ void main() {
         // MatCap adds authored color but no dynamically evaluated
         // specular highlight; forward fog attenuates the artistic layer.
         vec3 specular=layered_specular*(1.0-fog);
+#ifndef JKGM_WORLD_SIMPLE
         if(blend_mode==3) {
             // Match game_trns_pass.frag's *native* Fluid composition.
             // Native material/texture alpha changes destination blending,
@@ -638,7 +667,9 @@ void main() {
             // Just as in native Fluid, emission and reflection are
             // independent of pigment absorption and alpha.
             out_color=vec4(diffuse+emission+specular,opacity);
-        } else if(blend_mode==2) {
+        } else
+#endif
+        if(blend_mode==2) {
             // (DST_COLOR, ZERO) needs a neutral multiplier at alpha zero.
             out_color=vec4(mix(vec3(1.0),
                 clamp(lit+emission+specular*coverage,0.0,1.0),

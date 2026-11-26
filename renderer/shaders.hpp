@@ -11,7 +11,7 @@
 namespace jkgm {
     enum class material_shader_variant {
         full, simple_opaque, simple_alpha, simple_flare, simple_decal, simple_fluid,
-        diffuse_opaque, diffuse_alpha
+        diffuse_opaque, diffuse_alpha, world_simple_opaque, world_simple_alpha
     };
 
     class opengl_shader {
@@ -124,7 +124,8 @@ namespace jkgm {
             std::vector<gl::uniform_location_id> light_position_radius,light_intensity,light_color;
         public:
             translucent_sun_uniforms translucent_sun;
-            explicit world_cache_preview_shader(fs::path const &data_root);
+            explicit world_cache_preview_shader(fs::path const &data_root,
+                material_shader_variant variant=material_shader_variant::full);
             void set_surface_descriptors(int mode);
             void set_view_matrix(point<4,float> right,point<4,float> forward,
                                  point<4,float> up,point<4,float> origin);
