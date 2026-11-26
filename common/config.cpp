@@ -566,6 +566,18 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             j.at("experimental_gpu_world_simple_shaders").get_to(
                 rv->experimental_gpu_world_simple_shaders);
         }
+        if(j.contains("experimental_gpu_3do_rigid_normals")) {
+            j.at("experimental_gpu_3do_rigid_normals").get_to(
+                rv->experimental_gpu_3do_rigid_normals);
+        }
+        if(j.contains("experimental_gpu_3do_unlit_shaders")) {
+            j.at("experimental_gpu_3do_unlit_shaders").get_to(
+                rv->experimental_gpu_3do_unlit_shaders);
+        }
+        if(j.contains("experimental_gpu_3do_alpha_instancing")) {
+            j.at("experimental_gpu_3do_alpha_instancing").get_to(
+                rv->experimental_gpu_3do_alpha_instancing);
+        }
         if(j.contains("experimental_gpu_3do_buffered_instancing")) {
             j.at("experimental_gpu_3do_buffered_instancing").get_to(
                 rv->experimental_gpu_3do_buffered_instancing);

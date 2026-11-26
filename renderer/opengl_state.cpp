@@ -481,6 +481,14 @@ jkgm::opengl_state::opengl_state::opengl_state(size<2, int> screen_res,
                 std::make_unique<shaders::gpu_3do_preview_shader>(
                     data_root,material_shader_variant::diffuse_alpha);
         }
+        if(the_config->use_gpu_cache && the_config->experimental_gpu_3do_unlit_shaders) {
+            gpu_3do_hud_only_program=
+                std::make_unique<shaders::gpu_3do_preview_shader>(
+                    data_root,material_shader_variant::hud_only);
+            gpu_3do_emission_only_program=
+                std::make_unique<shaders::gpu_3do_preview_shader>(
+                    data_root,material_shader_variant::emission_only);
+        }
         if(the_config->experimental_gpu_3do_simple_alpha_shader) {
             if(the_config->use_gpu_cache) {
                 gpu_3do_simple_alpha_program=

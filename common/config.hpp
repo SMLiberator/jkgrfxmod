@@ -104,6 +104,9 @@ namespace jkgm {
         bool experimental_gpu_3do_simple_alpha_shader = false;
         bool experimental_gpu_3do_diffuse_only_shader = false;
         bool experimental_gpu_world_simple_shaders = false;
+        bool experimental_gpu_3do_rigid_normals = false;
+        bool experimental_gpu_3do_unlit_shaders = false;
+        bool experimental_gpu_3do_alpha_instancing = false;
         bool experimental_gpu_3do_buffered_instancing = false; // shared affine transform and membership buffer
         bool experimental_gpu_3do_material_instancing = false; // shared reflective material effects
         bool experimental_gpu_3do_indexed_instancing = true; // collect exact mesh range batches directly

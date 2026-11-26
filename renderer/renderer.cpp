@@ -5283,6 +5283,11 @@ namespace jkgm {
                 :nullptr;
             bool flare_program_initialized=false,fluid_program_initialized=false;
             bool diffuse_program_initialized=false;
+            auto *hud_program=post_exempt && !decals_only
+                ?ogs->gpu_3do_hud_only_program.get():nullptr;
+            auto *emission_program=transparent && !post_exempt && !decals_only
+                ?ogs->gpu_3do_emission_only_program.get():nullptr;
+            bool hud_program_initialized=false,emission_program_initialized=false;
             bool const crossing_buffer_ready=
                 the_config->enable_sector_crossing_lighting &&
                 !post_exempt && !decals_only &&
@@ -5336,6 +5341,7 @@ namespace jkgm {
             auto initialize_preview_program=[&](shaders::gpu_3do_preview_shader &prog) {
             prog.use_program();
             prog.set_smoke_half_resolution(false);
+            prog.set_rigid_normal_transform(false);
             prog.set_light_brightness_limit(
                 authored_light_limit(the_config->enable_baked_overbright));
             // Persistent GL program: reset instancing before every draw pass,
@@ -5444,6 +5450,7 @@ namespace jkgm {
                 std::array<float,3> local_eye{};
                 bool has_local_eye=false;
                 bool reversed_winding=false;
+                bool rigid_basis=false;
                 gpu_3do_gl_mesh *mesh=nullptr;
             };
             struct pending_draw {
@@ -5774,6 +5781,8 @@ namespace jkgm {
                 }
                 auto &context=contexts.emplace_back();
                 context.modelview=modelview;
+                context.rigid_basis=the_config->experimental_gpu_3do_rigid_normals &&
+                    gpu_3do_orthonormal_basis(modelview);
                 if(parallel) {
                     context.has_local_eye=parallel->has_local_eye;
                     context.local_eye=parallel->local_eye;
@@ -6527,6 +6536,15 @@ namespace jkgm {
             auto *active_preview_program=&prog;
             uint64_t simple_draw_calls=0,full_draw_calls=0,shader_switches=0;
             uint64_t simple_flare_draws=0,simple_fluid_draws=0,diffuse_draws=0;
+            uint64_t hud_draws=0,emission_draws=0,rigid_draws=0;
+            uint64_t alpha_instance_calls=0,alpha_instance_ranges=0;
+            int last_rigid=-1;
+            // Avoid rechecking large opaque instance memberships per MAT.
+            // If any context is affine, conservatively retain the full
+            // normal transform for all instanced draws in this pass.
+            bool const all_contexts_rigid=the_config->experimental_gpu_3do_rigid_normals &&
+                std::all_of(contexts.begin(),contexts.end(),
+                    [](auto const &c){return c.rigid_basis;});
             // Filtering is texture-object state, not texture-unit state.
             // Repeated 3DO draw groups often use the exact same GL texture;
             // three glTexParameter calls for every bind become extremely
@@ -6639,9 +6657,19 @@ namespace jkgm {
                    !(specular.first>0.0f &&
                      (sun_active || point_specular_active)))
                     candidate_program=diffuse_program;
+                bool const unlit_emission=emission_program && simple_eligible &&
+                    !inst.is_sprite_flare && !inst.is_projected_decal &&
+                    material.emissive_only && material.opacity==0.0f &&
+                    get<3>(material.tint)==0.0f &&
+                    (material.blend==material_blend_mode::normal ||
+                     material.blend==material_blend_mode::additive) &&
+                    !(specular.first>0.0f && (sun_active || point_specular_active));
+                bool const unlit_hud=hud_program && inst.camera_hud &&
+                    !inst.is_sprite_flare && !inst.is_projected_decal;
                 bool const simple=candidate_program && simple_eligible;
-                auto *selected_program=simple?candidate_program:
-                    ogs->gpu_3do_preview_program.get();
+                auto *selected_program=unlit_hud?hud_program:
+                    unlit_emission?emission_program:
+                    simple?candidate_program:ogs->gpu_3do_preview_program.get();
                 if(active_preview_program!=selected_program) {
                     // Initialize auxiliary programs only on first use in
                     // this pass, not every frame in scenes without VFX.
@@ -6660,7 +6688,16 @@ namespace jkgm {
                         initialize_preview_program(*selected_program);
                         diffuse_program_initialized=true;
                     }
+                    if(unlit_hud && !hud_program_initialized) {
+                        initialize_preview_program(*selected_program);
+                        hud_program_initialized=true;
+                    }
+                    if(unlit_emission && !emission_program_initialized) {
+                        initialize_preview_program(*selected_program);
+                        emission_program_initialized=true;
+                    }
                     selected_program->use_program();
+                    last_rigid=-1;
                     active_preview_program=selected_program;
                     active_instance=nullptr;
                     // Each program retains its own material uniforms.
@@ -6671,7 +6708,9 @@ namespace jkgm {
                 }
                 auto &prog=*selected_program;
                 if(gpu_profiling) {
-                    if(simple) {
+                    if(unlit_hud)++hud_draws;
+                    else if(unlit_emission)++emission_draws;
+                    else if(simple) {
                         ++simple_draw_calls;
                         if(selected_program==simple_flare_program)++simple_flare_draws;
                         if(selected_program==simple_fluid_program)++simple_fluid_draws;
@@ -6715,6 +6754,42 @@ namespace jkgm {
                     if(end>draw_start+1) {
                         draw_end=end;
                         model_batch_count=end-draw_start;
+                    }
+                }
+                // Adjacent exact-state alpha instances only. Do not reorder
+                // even one transparent range, and do not batch view-dependent
+                // materials, fades, per-Thing lights, or special effects.
+                if(transparent && !post_exempt && !decals_only &&
+                   the_config->enable_gpu_3do_instancing &&
+                   the_config->experimental_gpu_3do_alpha_instancing &&
+                   !inst.is_sprite_quad && simple_eligible &&
+                   material.blend==material_blend_mode::normal &&
+                   !(specular.first>0.0f && (sun_active || point_specular_active)) &&
+                   gpu_3do_instancing_instance_candidate(inst) &&
+                   !group.saber_trail_join && !group.saber_trail_tip_bridge) {
+                    std::array<uint32_t,11> state{};
+                    if(gpu_3do_instancing_capture_state(inst,
+                           draw.context->reversed_winding,state)) {
+                        size_t end=draw_start+1;
+                        while(end<draws.size() &&
+                              end-draw_start<shaders::gpu_3do_preview_shader::max_sprite_instances) {
+                            auto const &next=draws[end];
+                            auto const &other=*next.instance;
+                            std::array<uint32_t,11> other_state{};
+                            if(other.id!=inst.id || other.geometry.get()!=inst.geometry.get() ||
+                               next.group!=draw.group || next.texture!=draw.texture ||
+                               next.policy!=draw.policy || next.instance==draw.instance ||
+                               !gpu_3do_instancing_instance_candidate(other) ||
+                               other.sprite_depth_bias!=0.0f ||
+                               !gpu_3do_instancing_capture_state(other,
+                                   next.context->reversed_winding,other_state) ||
+                               other_state!=state)break;
+                            ++end;
+                        }
+                        if(end>draw_start+1) {
+                            draw_end=end;
+                            model_batch_count=end-draw_start;
+                        }
                     }
                 }
                 if(draw.sprite_batch_group!=0U) {
@@ -7198,6 +7273,16 @@ namespace jkgm {
                 // a single glDrawElements can replace a multi-draw when
                 // the exact index sequence would remain unchanged.
                 size_t emitted_subranges=1U;
+                if(the_config->experimental_gpu_3do_rigid_normals) {
+                    bool const rigid=(compact_members || sprite_batch_count>1 ||
+                                      model_batch_count>1)
+                        ?all_contexts_rigid:context.rigid_basis;
+                    if(last_rigid!=int(rigid)) {
+                        prog.set_rigid_normal_transform(rigid);
+                        last_rigid=int(rigid);
+                    }
+                    if(rigid && gpu_profiling)++rigid_draws;
+                }
                 if(buffered_model_batches && compact_members) {
                     prog.set_buffered_instances(static_cast<int>(
                         model_collector.range(draw.model_batch_group).buffer_offset));
@@ -7334,9 +7419,13 @@ namespace jkgm {
                         profile_frame.gpu_sprite_instancing_eligible+=
                             sprite_batch_count>1 ? sprite_batch_count : 1U;
                     if(model_batch_count>1) {
-                        ++profile_frame.gpu_3do_instanced_calls;
-                        profile_frame.gpu_3do_instanced_ranges+=
-                            model_batch_count;
+                        if(transparent) {
+                            ++alpha_instance_calls;
+                            alpha_instance_ranges+=model_batch_count;
+                        } else {
+                            ++profile_frame.gpu_3do_instanced_calls;
+                            profile_frame.gpu_3do_instanced_ranges+=model_batch_count;
+                        }
                     }
                     if(sprite_batch_count>1) {
                         ++profile_frame.gpu_sprite_instanced_calls;
@@ -7383,6 +7472,17 @@ namespace jkgm {
                          " flare_draws=",simple_flare_draws,
                          " fluid_draws=",simple_fluid_draws,
                          " diffuse_draws=",diffuse_draws);
+            if(gpu_profiling && gpu_3do_present_serial%120U==0U &&
+               (the_config->experimental_gpu_3do_rigid_normals ||
+                hud_program || emission_program ||
+                the_config->experimental_gpu_3do_alpha_instancing))
+                LOG_INFO("PERF geometry_specializations alpha=",transparent?1:0,
+                         " hud_pass=",post_exempt?1:0,
+                         " decals=",decals_only?1:0,
+                         " rigid_draws=",rigid_draws," hud_draws=",hud_draws,
+                         " emission_draws=",emission_draws,
+                         " alpha_instance_calls=",alpha_instance_calls,
+                         " alpha_instance_ranges=",alpha_instance_ranges);
             if(split_smoke && !smoke_draws.empty()) {
                 // No depth attachment in the half-res smoke target. Suspend
                 // polygon offset before switching FBOs and post composition.
@@ -7401,6 +7501,7 @@ namespace jkgm {
                 prog.use_program();
                 active_preview_program=&prog;
                 active_instance=nullptr;
+                last_rigid=-1;
                 prev_specular_active=prev_albedo_transition=
                     prev_advanced_material=prev_parallax=true;
                 auto const dims=make_size(

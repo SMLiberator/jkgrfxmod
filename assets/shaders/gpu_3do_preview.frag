@@ -1025,11 +1025,17 @@ void main() {
     if(transparent_pass!=0 && advanced_material_params.x>0.5 &&
        depth_clip_rejected(effective_depth)) discard;
     vec2 uv=gpu_parallax_uv(pixel_uv*uv_scale);
+#ifdef JKGM_EMISSION_ONLY
+    // Eligible materials have exactly zero base opacity and no specular
+    // or additional layers; base RGB cannot contribute to this pass.
+    vec4 albedo=vec4(0.0);
+#else
     vec4 texel=gpu_material_sample_albedo(
         albedo_map,albedo_map2,uv,albedo_scroll,has_texture,
         albedo_transition.x>0.5?1:2,
         albedo_transition.z>0.5?albedo_transition.y:0.0);
     vec4 albedo=texel*albedo_factor;
+#endif
     albedo.a*=native_face_opacity;
     if(decal_receiver_lighting!=0) {
         // Feather the actual box boundary per pixel, not per vertex:
@@ -1087,6 +1093,14 @@ void main() {
         out_pigment=vec4(0.0);
         return;
     }
+#ifdef JKGM_EMISSION_ONLY
+    // Existing normal/additive forward composition at exactly alpha=0.
+    out_color=vec4(emission,0.0);
+    out_emissive=vec4(0.0);
+    out_normal=vec4(0.0);
+    out_depth=vec4(0.0);
+    out_pigment=vec4(0.0);
+#elif !defined(JKGM_HUD_ONLY)
     // GPU view-position units are JK units; fog/depth use 32x JK units.
     // Scene depth, HUD exemptions, and Fluid absorption remain unchanged.
     float fog_depth=fog_params.w>0.5
@@ -1330,4 +1344,5 @@ void main() {
     out_depth=vec4(effective_depth,
                    albedo.rgb+matcap_lit*base_diffuse_trans);
     out_pigment=vec4(albedo.rgb+matcap_lit*base_diffuse_trans,1.0);
+#endif
 }

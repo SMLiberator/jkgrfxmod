@@ -206,11 +206,14 @@ void jkgm::shaders::translucent_sun_uniforms::set_map(
                     source.insert(newline+1U,"#define JKGM_CLEARCOAT_LAYER 1\n");
                 }
             }
-            bool const diffuse=variant==material_shader_variant::diffuse_opaque ||
-                               variant==material_shader_variant::diffuse_alpha;
+            bool const specialize_vertex=
+                variant==material_shader_variant::diffuse_opaque ||
+                variant==material_shader_variant::diffuse_alpha ||
+                variant==material_shader_variant::hud_only ||
+                variant==material_shader_variant::emission_only;
             if(variant!=material_shader_variant::full &&
                (type==gl::shader_type::fragment ||
-                (diffuse && type==gl::shader_type::vertex))) {
+                (specialize_vertex && type==gl::shader_type::vertex))) {
                 auto const newline=source.find('\n');
                 char const *define="";
                 switch(variant) {
@@ -232,6 +235,10 @@ void jkgm::shaders::translucent_sun_uniforms::set_map(
                     define="#define JKGM_WORLD_SIMPLE 1\n#define JKGM_WORLD_OPAQUE 1\n"; break;
                 case material_shader_variant::world_simple_alpha:
                     define="#define JKGM_WORLD_SIMPLE 1\n#define JKGM_WORLD_ALPHA 1\n"; break;
+                case material_shader_variant::hud_only:
+                    define="#define JKGM_HUD_ONLY 1\n"; break;
+                case material_shader_variant::emission_only:
+                    define="#define JKGM_SIMPLE_ALPHA 1\n#define JKGM_EMISSION_ONLY 1\n"; break;
                 default: break;
                 }
                 source.insert(newline+1U,define);
@@ -876,6 +883,8 @@ jkgm::shaders::gpu_3do_preview_shader::gpu_3do_preview_shader(
           the_program,"sprite_instance_matrix[0]"))
     , buffered_instance_offset(gl::get_uniform_location(
           the_program,"buffered_instance_offset"))
+    , rigid_normal_transform(gl::get_uniform_location(
+          the_program,"rigid_normal_transform"))
     , procedural_sprite(gl::get_uniform_location(the_program,"procedural_sprite"))
     , procedural_sprite_uv(gl::get_uniform_location(the_program,"procedural_sprite_uv"))
     , procedural_sprite_light(gl::get_uniform_location(the_program,"procedural_sprite_light"))
@@ -1134,6 +1143,10 @@ void jkgm::shaders::gpu_3do_preview_shader::set_sprite_instances(
 void jkgm::shaders::gpu_3do_preview_shader::set_buffered_instances(int texel_offset)
 {
     gl::set_uniform_integer(buffered_instance_offset,texel_offset);
+}
+void jkgm::shaders::gpu_3do_preview_shader::set_rigid_normal_transform(bool enabled)
+{
+    gl::set_uniform_integer(rigid_normal_transform,enabled?1:0);
 }
 void jkgm::shaders::gpu_3do_preview_shader::set_projection(
     point<4,float> p)

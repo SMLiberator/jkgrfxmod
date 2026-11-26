@@ -17,7 +17,13 @@ uniform samplerBuffer gpu_3do_face_descriptors; // two RGBA32F texels per descri
 uniform float ambient_light;
 uniform float jk_light_limit; // authored cap; 1 restores vanilla saturation
 uniform float effective_light_mode; // captured per Thing
+#if defined(JKGM_HUD_ONLY) || defined(JKGM_EMISSION_ONLY)
+// Both specializations consume no interpolated JK lighting.
+const int camera_hud_thing=1;
+#else
 uniform int camera_hud_thing; // SithThing type=camera: unlit textured 3DO
+#endif
+uniform int rigid_normal_transform;
 // Native JK applies these to RGB8 *vertex colors* before texturing.
 uniform vec3 colormap_tint; // nonidentity CMP header RGB multiplier
 uniform vec4 jk_color_filter; // XYZ selected channel mask, W active
@@ -227,10 +233,15 @@ void main() {
     // Constant across each instance: reuse the cofactors already needed
     // by the G-buffer and vertex lighting. No extra varying bandwidth.
     vec3 r=model_right.xyz,f=model_forward.xyz,u=model_up.xyz;
-    vec3 cr=cross(f,u),cf=cross(u,r),cu=cross(r,f);
-    float det=dot(r,cr);
-    mat3 normal_transform=abs(det)>1e-8
-        ?mat3(sign(det)*cr,sign(det)*cf,sign(det)*cu):mat3(r,f,u);
+    vec3 cr=vec3(0.0),cf=vec3(0.0),cu=vec3(0.0);
+    float det=1.0;
+    mat3 normal_transform=mat3(r,f,u);
+    if(rigid_normal_transform==0 || nonrigid_light_transform!=0) {
+        cr=cross(f,u);cf=cross(u,r);cu=cross(r,f);
+        det=dot(r,cr);
+        if(abs(det)>1e-8)
+            normal_transform=mat3(sign(det)*cr,sign(det)*cf,sign(det)*cu);
+    }
     // Nonrigid point-light distances still require raw affine columns.
     // That uncommon path reconstructs its normal transform in fragments.
     fragment_basis_right=nonrigid_light_transform!=0?r:normal_transform[0];
