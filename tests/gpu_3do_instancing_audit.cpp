@@ -368,6 +368,51 @@ int main() {
         assert(collector.append(fresh_slot,{0U}));
     }
 
+    // SIMD lanes classify different groups. Exact edge-on and near-edge
+    // lanes must not be classified without the original face test.
+    {
+        struct simd_test_member { size_t instance_index; };
+        using collector_type=gpu_3do_indexed_instancing_collector<simd_test_member>;
+        collector_type::fast_plane_block block{};
+        block.nx={{1,1,1,1}};
+        block.d={{-2,2,0,0.00001f}};
+        auto const result=block.classify({{0,0,0}},0.0001f);
+        assert(result.facing==1U && result.uncertain==12U);
+        collector_type collector;
+        gpu_3do_geometry geo;
+        geo.groups.resize(7U);
+        geo.face_planes.resize(8U);
+        std::vector<size_t> order{0,1,2,3,4,5,6};
+        auto const mesh=collector.classify(1,1,{},7U);
+        auto &layout=collector.collection_layout(mesh);
+        for(size_t i=0;i<7U;++i) {
+            geo.groups[i].count=3U;
+            geo.groups[i].plane_start=uint32_t(i);
+            geo.groups[i].plane_count=1U;
+            geo.face_planes[i].normal={{1,0,0}};
+            geo.face_planes[i].anchor={{float(i)-3,0,0}};
+            layout[i].material=1U;
+            collector.mark_collection_slot(mesh,i,i+1U);
+        }
+        geo.groups[1].face_type=1U; // double-sided
+        geo.groups[6].plane_count=2U; // multi-plane
+        auto const &fast=collector.fast_layout(mesh,geo,order,true);
+        if(collector_type::simd_backfaces_supported) {
+            assert(fast.plane_blocks.size()==1U);
+            assert(fast.scalar_indices.size()==3U);
+            auto const &b=fast.plane_blocks[0];
+            assert((b.indices==std::array<size_t,4>{{0,2,3,4}}));
+            auto const eye=std::array<float,3>{{0,0,0}};
+            auto const test=prepare_gpu_3do_face_plane_test(geo,eye,true);
+            auto const masks=b.classify(eye,test.margin);
+            assert(masks.facing==3U && masks.uncertain==4U);
+            collector.reset();
+            auto const fresh=collector.classify(1,1,{},7U);
+            collector.collection_layout(fresh);
+            auto const &cleared=collector.fast_layout(fresh,geo,order,true);
+            assert(cleared.plane_blocks.empty() && cleared.remaining.size()==7U);
+        }
+    }
     // Duplicate owner records stay separate, while distinct owners batch
     // in first-appearance order even when their records are interleaved.
     rows={record(a,shared->groups[0],0x1000U,0x11U),

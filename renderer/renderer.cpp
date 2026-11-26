@@ -1600,6 +1600,10 @@ namespace jkgm {
                 profile_window.gpu_specialized_collection_meshes/frames,
                 " groups_avg=",profile_window.gpu_specialized_collection_groups/frames,
                 " NOTE=anchored_ranges_backface_rejected_or_inserted");
+            LOG_INFO("PERF gpu_3do simd_backfaces groups_avg=",
+                profile_window.gpu_simd_backface_groups/frames,
+                " uncertain_avg=",profile_window.gpu_simd_backface_uncertain/frames,
+                " NOTE=four_single_plane_groups_per_SSE_block;uncertain_uses_original");
             LOG_INFO("PERF gpu_3do instance_buffer bytes_avg=",
                 profile_window.gpu_instance_buffer_bytes/frames,
                 " uploads_avg=",profile_window.gpu_instance_buffer_uploads/frames,
@@ -5722,38 +5726,88 @@ namespace jkgm {
                 static thread_local std::vector<size_t> fast_fallback;
                 if(specialize_model_layout && mesh_inside && !parallel &&
                    layout_ranges && opaque_order) {
+                    bool const use_simd=the_config->experimental_gpu_3do_simd_backfaces &&
+                        can_cpu_cull && plane_test.planes &&
+                        decltype(model_collector)::simd_backfaces_supported;
                     auto const &fast=model_collector.fast_layout(
-                        model_class,*inst.geometry,*opaque_order);
+                        model_class,*inst.geometry,*opaque_order,use_simd);
                     if(!fast.anchored.empty()) {
                         fast_failed.clear();
                         size_t rejected=0U,inserted=0U;
                         auto const &planes=inst.geometry->face_planes;
-                        // Use the same scalar test as the general path.
-                        // No per-group configuration or profiling branches.
-                        for(auto const &range:fast.anchored) {
-                            if(can_cpu_cull && range.plane_count!=0U) {
-                                bool facing=false;
-                                for(uint32_t k=0;k<range.plane_count;++k) {
-                                    uint32_t const index=range.plane_start+k;
-                                    if(plane_test.planes) {
-                                        auto const &cp=plane_test.planes[index];
-                                        float const side=local_eye[0]*cp.nx+
-                                            local_eye[1]*cp.ny+
-                                            local_eye[2]*cp.nz-cp.d;
-                                        if(side>plane_test.margin) { facing=true;break; }
-                                        if(side< -plane_test.margin)continue;
-                                    }
-                                    auto const &plane=planes[index];
-                                    if(gpu_3do_face_facing_camera(
-                                        local_eye,plane.anchor,plane.normal)) {
-                                        facing=true;break;
-                                    }
-                                }
-                                if(!facing) { ++rejected;continue; }
-                            }
+                        auto insert_range=[&](auto const &range) {
                             if(model_collector.append(range.slot,
                                 {instance_index,&context}))++inserted;
                             else fast_failed.push_back(range.group_index);
+                        };
+                        auto scalar_range=[&](auto const &range) {
+                            if(can_cpu_cull && range.plane_count!=0U) {
+                                auto const &group=groups[range.group_index];
+                                if(!gpu_3do_group_has_facing_plane(
+                                    *inst.geometry,group,local_eye,plane_test)) {
+                                    ++rejected;return;
+                                }
+                            }
+                            insert_range(range);
+                        };
+                        // All ranges already have anchors. Slots belong to
+                        // distinct source groups, so collecting in blocks
+                        // cannot change per-slot instance or alpha ordering.
+                        if(use_simd && !fast.plane_blocks.empty()) {
+                            size_t uncertain_count=0U;
+                            for(auto const &block:fast.plane_blocks) {
+                                auto const result=block.classify(local_eye,plane_test.margin);
+                                unsigned facing=result.facing;
+                                if(result.uncertain) {
+                                    for(unsigned i=0;i<4;++i) {
+                                        unsigned const bit=1U<<i;
+                                        if(!(result.uncertain&bit))continue;
+                                        ++uncertain_count;
+                                        auto const &range=fast.anchored[block.indices[i]];
+                                        auto const &plane=planes[range.plane_start];
+                                        if(gpu_3do_face_facing_camera(
+                                            local_eye,plane.anchor,plane.normal))
+                                            facing|=bit;
+                                    }
+                                }
+                                for(unsigned i=0;i<4;++i) {
+                                    if(facing&(1U<<i))
+                                        insert_range(fast.anchored[block.indices[i]]);
+                                    else ++rejected;
+                                }
+                            }
+                            for(size_t i:fast.scalar_indices)
+                                scalar_range(fast.anchored[i]);
+                            if(gpu_profiling) {
+                                profile_frame.gpu_simd_backface_groups+=4U*fast.plane_blocks.size();
+                                profile_frame.gpu_simd_backface_uncertain+=uncertain_count;
+                            }
+                        } else {
+                            // Retain the previous tight scalar loop for the
+                            // control configuration and unsupported CPUs.
+                            for(auto const &range:fast.anchored) {
+                                if(can_cpu_cull && range.plane_count!=0U) {
+                                    bool facing=false;
+                                    for(uint32_t k=0;k<range.plane_count;++k) {
+                                        uint32_t const index=range.plane_start+k;
+                                        if(plane_test.planes) {
+                                            auto const &cp=plane_test.planes[index];
+                                            float const side=local_eye[0]*cp.nx+
+                                                local_eye[1]*cp.ny+
+                                                local_eye[2]*cp.nz-cp.d;
+                                            if(side>plane_test.margin) { facing=true;break; }
+                                            if(side< -plane_test.margin)continue;
+                                        }
+                                        auto const &plane=planes[index];
+                                        if(gpu_3do_face_facing_camera(
+                                            local_eye,plane.anchor,plane.normal)) {
+                                            facing=true;break;
+                                        }
+                                    }
+                                    if(!facing) { ++rejected;continue; }
+                                }
+                                insert_range(range);
+                            }
                         }
                         if(gpu_profiling) {
                             profile_frame.gpu_groups_considered+=rejected+inserted;

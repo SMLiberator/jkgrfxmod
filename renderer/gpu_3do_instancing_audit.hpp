@@ -13,6 +13,12 @@
 #include <tuple>
 #include <unordered_map>
 #include <vector>
+#if defined(_M_X64) || (defined(_M_IX86_FP) && _M_IX86_FP >= 2) || defined(__SSE2__)
+#include <emmintrin.h>
+#define JKGM_3DO_SSE2 1
+#else
+#define JKGM_3DO_SSE2 0
+#endif
 
 namespace jkgm {
 // Profile-only multi-reason bitmask. Reasons may overlap for one pending
@@ -396,10 +402,42 @@ public:
         size_t group_index,slot;
         uint32_t plane_start,plane_count;
     };
+    // Each lane belongs to a different already anchored single-plane
+    // group. No gathers or horizontal dot products in the hot loop.
+    struct fast_plane_block {
+        std::array<size_t,4> indices{};
+        std::array<float,4> nx{},ny{},nz{},d{};
+        struct result { unsigned facing,uncertain; };
+        result classify(std::array<float,3> const &eye,float margin) const {
+#if JKGM_3DO_SSE2
+            __m128 side=_mm_sub_ps(_mm_add_ps(_mm_add_ps(
+                _mm_mul_ps(_mm_set1_ps(eye[0]),_mm_loadu_ps(nx.data())),
+                _mm_mul_ps(_mm_set1_ps(eye[1]),_mm_loadu_ps(ny.data()))),
+                _mm_mul_ps(_mm_set1_ps(eye[2]),_mm_loadu_ps(nz.data()))),
+                _mm_loadu_ps(d.data()));
+            unsigned const facing=unsigned(_mm_movemask_ps(
+                _mm_cmpgt_ps(side,_mm_set1_ps(margin))));
+            unsigned const away=unsigned(_mm_movemask_ps(
+                _mm_cmplt_ps(side,_mm_set1_ps(-margin))));
+            return {facing,15U & ~(facing|away)};
+#else
+            unsigned facing=0U,uncertain=0U;
+            for(unsigned i=0;i<4;++i) {
+                float const side=eye[0]*nx[i]+eye[1]*ny[i]+eye[2]*nz[i]-d[i];
+                if(side>margin)facing|=1U<<i;
+                else if(!(side< -margin))uncertain|=1U<<i;
+            }
+            return {facing,uncertain};
+#endif
+        }
+    };
+    static constexpr bool simd_backfaces_supported=JKGM_3DO_SSE2!=0;
     struct fast_collection_layout {
         std::vector<fast_collection_range> anchored;
         std::vector<size_t> remaining;
-        bool dirty=true;
+        std::vector<fast_plane_block> plane_blocks;
+        std::vector<size_t> scalar_indices;
+        bool dirty=true,simd_ready=false;
     };
 private:
     struct mesh_class {
@@ -452,7 +490,8 @@ public:
         entry.fast.dirty=true;
     }
     fast_collection_layout const &fast_layout(size_t mesh,
-        gpu_3do_geometry const &geo,std::vector<size_t> const &order) {
+        gpu_3do_geometry const &geo,std::vector<size_t> const &order,
+        bool use_simd=false) {
         auto &entry=classes[mesh];
         auto &fast=entry.fast;
         if(fast.dirty) {
@@ -472,6 +511,36 @@ public:
                 fast.anchored.push_back({index,layout.slot,group.plane_start,count});
             }
             fast.dirty=false;
+            fast.simd_ready=false;
+        }
+        if(use_simd && simd_backfaces_supported && !fast.simd_ready) {
+            fast.plane_blocks.clear();
+            fast.scalar_indices.clear();
+            auto const &cache=geo.cached_compact_planes();
+            if(cache.valid) {
+                fast_plane_block block{};
+                unsigned lane=0;
+                for(size_t i=0;i<fast.anchored.size();++i) {
+                    auto const &range=fast.anchored[i];
+                    if(range.plane_count!=1U) {
+                        fast.scalar_indices.push_back(i);
+                        continue;
+                    }
+                    auto const &plane=cache.planes[range.plane_start];
+                    block.indices[lane]=i;
+                    block.nx[lane]=plane.nx;
+                    block.ny[lane]=plane.ny;
+                    block.nz[lane]=plane.nz;
+                    block.d[lane]=plane.d;
+                    if(++lane==4U) {
+                        fast.plane_blocks.push_back(block);
+                        lane=0U;
+                    }
+                }
+                for(unsigned i=0;i<lane;++i)
+                    fast.scalar_indices.push_back(block.indices[i]);
+            }
+            fast.simd_ready=true;
         }
         return fast;
     }
