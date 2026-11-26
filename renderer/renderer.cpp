@@ -5557,7 +5557,7 @@ namespace jkgm {
                         result.orthogonality_error,
                         std::abs(d)/(std::sqrt(lengths2[a])*std::sqrt(lengths2[b])));
                 }
-                if(gpu_3do_orthonormal_basis(m))result.category=0;
+                if(gpu_3do_orthonormal_basis(m,0.0001f))result.category=0;
                 else if(std::max(result.norm_error,raw_dot_error)<=0.001f)
                     result.category=1;
                 else if(result.orthogonality_error>0.0001f)result.category=4;
@@ -6628,9 +6628,9 @@ namespace jkgm {
             uint64_t hud_draws=0,emission_draws=0,rigid_draws=0;
             uint64_t alpha_instance_calls=0,alpha_instance_ranges=0;
             int last_rigid=-1;
-            // Avoid rechecking large opaque instance memberships per MAT.
-            // If any context is affine, conservatively retain the full
-            // normal transform for all instanced draws in this pass.
+            // Fast accept for passes containing only near-unit bases.
+            // Otherwise inspect just the submitted batch, never unrelated
+            // HUD, sprite, or affine contexts elsewhere in the pass.
             bool const all_contexts_rigid=the_config->experimental_gpu_3do_rigid_normals &&
                 std::all_of(contexts.begin(),contexts.end(),
                     [](auto const &c){return c.rigid_basis;});
@@ -7363,9 +7363,22 @@ namespace jkgm {
                 // the exact index sequence would remain unchanged.
                 size_t emitted_subranges=1U;
                 if(the_config->experimental_gpu_3do_rigid_normals) {
-                    bool const rigid=(compact_members || sprite_batch_count>1 ||
-                                      model_batch_count>1)
-                        ?all_contexts_rigid:context.rigid_basis;
+                    bool const batched=compact_members || sprite_batch_count>1 ||
+                        model_batch_count>1;
+                    bool rigid=context.rigid_basis;
+                    if(batched && rigid && !all_contexts_rigid) {
+                        if(compact_members) {
+                            for(size_t n=0;n<model_batch_count;++n)
+                                if(!(*compact_members)[compact_offset+n].context->rigid_basis) {
+                                    rigid=false;break;
+                                }
+                        } else {
+                            for(size_t n=draw_start;n<draw_end;++n)
+                                if(!draws[n].context->rigid_basis) {
+                                    rigid=false;break;
+                                }
+                        }
+                    }
                     if(last_rigid!=int(rigid)) {
                         prog.set_rigid_normal_transform(rigid);
                         last_rigid=int(rigid);
@@ -7377,23 +7390,9 @@ namespace jkgm {
                             ++audit_requested;
                             if(inst.nonrigid_light_transform)++audit_shader_override;
                         }
-                        bool const batched=compact_members || sprite_batch_count>1 ||
-                            model_batch_count>1;
                         if(batched) {
                             ++audit_batches;
-                            bool batch_rigid=true;
-                            if(compact_members) {
-                                for(size_t n=0;n<model_batch_count;++n)
-                                    if(!(*compact_members)[compact_offset+n].context->rigid_basis) {
-                                        batch_rigid=false;break;
-                                    }
-                            } else {
-                                for(size_t n=draw_start;n<draw_end;++n)
-                                    if(!draws[n].context->rigid_basis) {
-                                        batch_rigid=false;break;
-                                    }
-                            }
-                            if(batch_rigid) {
+                            if(rigid) {
                                 ++audit_batch_all_rigid;
                                 if(!all_contexts_rigid)++audit_batch_global_block;
                             }
@@ -7600,7 +7599,7 @@ namespace jkgm {
                     " camera_norm_error=",std::to_string(camera.norm_error),
                     " camera_dot_error=",std::to_string(camera.orthogonality_error),
                     " nonrigid_light_contexts=",audit_nonrigid_light,
-                    " NOTE=collected_contexts_not_unique_things;near_unit_threshold_0.001_is_diagnostic_only");
+                    " NOTE=collected_contexts_not_unique_things;near_unit_threshold_0.001_is_accepted;strict_unit_threshold_0.0001");
             }
             if(rigid_audit)
                 LOG_INFO("PERF rigid_draw_audit alpha=",transparent?1:0,
@@ -7609,7 +7608,7 @@ namespace jkgm {
                     " shader_override=",audit_shader_override,
                     " direct_nonrigid=",audit_direct_nonrigid,
                     " batches=",audit_batches," batch_all_rigid=",audit_batch_all_rigid,
-                    " batch_global_block=",audit_batch_global_block,
+                    " batch_global_block_avoided=",audit_batch_global_block,
                     " NOTE=primary_submission_only;counts_GL_calls_not_vertices;shader_override_subset_of_requested");
             if((simple_program || diffuse_program) && gpu_profiling &&
                gpu_3do_present_serial%120U==0U)

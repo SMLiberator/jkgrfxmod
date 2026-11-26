@@ -38,9 +38,9 @@ namespace jkgm {
     // Orthogonal unit columns (including mirrors) have the same direction
     // as their inverse-transpose. Reject scale/shear and invalid bases.
     // Use a small tolerance only for native floating-point rotation drift.
-    inline bool gpu_3do_orthonormal_basis(gpu_3do_matrix34 const &m)
+    inline bool gpu_3do_orthonormal_basis(gpu_3do_matrix34 const &m,
+                                           float tolerance=0.001f)
     {
-        constexpr float tolerance=0.0001f;
         for(int a=0;a<3;++a)for(int b=a;b<3;++b) {
             float const d=m[a*3]*m[b*3]+m[a*3+1]*m[b*3+1]+m[a*3+2]*m[b*3+2];
             if(!std::isfinite(d) || std::abs(d-(a==b?1.0f:0.0f))>tolerance)
