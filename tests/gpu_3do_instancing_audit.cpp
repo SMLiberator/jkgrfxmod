@@ -302,6 +302,13 @@ int main() {
         size_t const mesh=collector.classify(
             first.mesh_id,first.geometry,first.state,2U);
         assert(collector.classify(first.mesh_id,first.geometry,first.state,2U)==mesh);
+        auto &layout=collector.collection_layout(mesh);
+        assert(layout.size()==2U && layout[0].material==0U && layout[0].slot==0U);
+        layout[0].material=0x1000U;
+        layout[0].policy=gpu_3do_alpha_mode::masked;
+        layout[0].slot=17U;
+        assert(collector.collection_layout(mesh)[0].slot==17U);
+        assert(collector.collection_layout(mesh)[1].material==0U);
         auto alternate_state=first.state;
         ++alternate_state[0];
         size_t const other=collector.classify(
@@ -333,6 +340,8 @@ int main() {
         assert(collector.find_range(mesh,0U,0x1000U,solid,yes)==slot);
         collector.reset();
         auto const fresh=collector.classify(first.mesh_id,first.geometry,first.state,2U);
+        assert(collector.collection_layout(fresh)[0].material==0U);
+        assert(collector.collection_layout(fresh)[0].slot==0U);
         auto const fresh_slot=collector.find_range(fresh,0U,0x1000U,solid,yes);
         assert(collector.range(fresh_slot).members.empty());
         assert(collector.append(fresh_slot,{0U}));

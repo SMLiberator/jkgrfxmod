@@ -1591,6 +1591,11 @@ namespace jkgm {
                      " schedule=",profile_window.gpu_instancing_schedule_us/frames,
                      " reorder=",profile_window.gpu_instancing_reorder_us/frames,
                      " NOTE=CPU_us_per_frame;audit_opt_in_sampled_every_30_frames");
+            LOG_INFO("PERF gpu_3do collection_layout hits_avg=",
+                profile_window.gpu_collection_layout_hits/frames,
+                " misses_avg=",profile_window.gpu_collection_layout_misses/frames,
+                " direct_members_avg=",profile_window.gpu_collection_direct_members/frames,
+                " NOTE=visible_groups_only;frame_local_exact_mesh_state");
             LOG_INFO("PERF gpu_3do instance_buffer bytes_avg=",
                 profile_window.gpu_instance_buffer_bytes/frames,
                 " uploads_avg=",profile_window.gpu_instance_buffer_uploads/frames,
@@ -5438,6 +5443,8 @@ namespace jkgm {
             bool const collect_model_batches=submit_instancing &&
                 the_config->experimental_gpu_3do_indexed_instancing &&
                 !sample_instancing;
+            bool const share_model_layout=collect_model_batches &&
+                the_config->experimental_gpu_3do_shared_collection_layout;
             struct indexed_model_member {
                 size_t instance_index;
                 submission_context *context;
@@ -5664,6 +5671,22 @@ namespace jkgm {
                     gpu_3do_instancing_capture_state(
                         inst,context.reversed_winding,model_state);
                 bool model_class_ready=false;
+                // All omitted state is instance-invariant for this strict
+                // candidate subset. The class includes exact geometry,
+                // geometry mode, lighting state and winding. No sprite,
+                // HUD, animated trail, fading or lit-instance shortcuts.
+                using collection_range=typename gpu_3do_indexed_instancing_collector<
+                    indexed_model_member>::collection_range;
+                collection_range *layout_ranges=nullptr;
+                if(share_model_layout && indexed_state_valid &&
+                   !inst.is_sprite_flare &&
+                   gpu_3do_instancing_instance_candidate(inst)) {
+                    model_class=model_collector.classify(
+                        inst.id,reinterpret_cast<uintptr_t>(inst.geometry.get()),
+                        model_state,groups.size());
+                    model_class_ready=true;
+                    layout_ranges=model_collector.collection_layout(model_class).data();
+                }
                 size_t const instance_order_base=next_draw_order;
                 if(opaque_order) next_draw_order+=groups.size();
                 for(size_t group_visit=0;group_visit<groups.size();++group_visit) {
@@ -5722,75 +5745,103 @@ namespace jkgm {
                             continue;
                         }
                     }
-                    // Cache MAT resolution per material/cel for the complete
-                    // frame. Multiple cars using the same MAT no longer
-                    // trigger thousands of redundant VirtualQuery lookups.
-                    bool const solid=inst.effective_geometry_mode==3 ||
-                        group.solid_color;
-                    // Reserve two high bits of the per-frame material key
-                    // for solid-mode and Camera HUD identity-CMP palette.
-                    // The same MAT may be drawn textured and solid in one frame.
-                    uint64_t const mat_key=
-                        meta.main_material_key |
-                        (solid?(uint64_t(1)<<63):0U) |
-                        (solid && inst.camera_hud?(uint64_t(1)<<62):0U);
-                    auto &mat_cache=post_exempt
-                        ? deferred_gpu_hud_material_cache
-                        : gpu_frame_material_cache;
-                    auto found=mat_cache.find(mat_key);
-                    if(found==mat_cache.end()) {
-                        // The late Camera HUD pass must not dereference a
-                        // native rdMaterial from the next engine tick.
-                        // Missing entries were not visible in the originating
-                        // scene pass, so skip instead of making a late lookup.
-                        if(post_exempt) continue;
-                        auto item=solid
-                            ?resolve_gpu_3do_solid_material(group,inst.camera_hud)
-                            :resolve_gpu_3do_material(group);
-                        found=mat_cache.emplace(mat_key,std::move(item)).first;
-                        if(the_config->profile_renderer)
-                            ++profile_frame.gpu_material_resolves;
+                    auto *layout=layout_ranges?&layout_ranges[group_index]:nullptr;
+                    bool const layout_hit=layout && layout->material!=0U;
+                    if(layout_hit) {
+                        if(gpu_profiling)++profile_frame.gpu_collection_layout_hits;
+                        // A cached slot already has its first draw anchor.
+                        // Solid/masked candidates cannot belong to the
+                        // alpha list: append directly after visibility.
+                        if(layout->slot!=0U && model_collector.append(
+                               layout->slot,{instance_index,&context})) {
+                            if(gpu_profiling)++profile_frame.gpu_collection_direct_members;
+                            continue;
+                        }
+                    } else if(layout && gpu_profiling)
+                        ++profile_frame.gpu_collection_layout_misses;
+                    gpu_3do_texture const *resolved_texture=nullptr;
+                    gpu_3do_alpha_mode policy=gpu_3do_alpha_mode::solid;
+                    if(layout_hit) {
+                        resolved_texture=reinterpret_cast<gpu_3do_texture const *>(
+                            layout->material);
+                        policy=layout->policy;
+                    } else {
+                        // Cache MAT resolution per material/cel for the complete
+                        // frame. Multiple cars using the same MAT no longer
+                        // trigger thousands of redundant VirtualQuery lookups.
+                        bool const solid=inst.effective_geometry_mode==3 ||
+                            group.solid_color;
+                        // Reserve two high bits of the per-frame material key
+                        // for solid-mode and Camera HUD identity-CMP palette.
+                        // The same MAT may be drawn textured and solid in one frame.
+                        uint64_t const mat_key=
+                            meta.main_material_key |
+                            (solid?(uint64_t(1)<<63):0U) |
+                            (solid && inst.camera_hud?(uint64_t(1)<<62):0U);
+                        auto &mat_cache=post_exempt
+                            ? deferred_gpu_hud_material_cache
+                            : gpu_frame_material_cache;
+                        auto found=mat_cache.find(mat_key);
+                        if(found==mat_cache.end()) {
+                            // The late Camera HUD pass must not dereference a
+                            // native rdMaterial from the next engine tick.
+                            // Missing entries were not visible in the originating
+                            // scene pass, so skip instead of making a late lookup.
+                            if(post_exempt) continue;
+                            auto item=solid
+                                ?resolve_gpu_3do_solid_material(group,inst.camera_hud)
+                                :resolve_gpu_3do_material(group);
+                            found=mat_cache.emplace(mat_key,std::move(item)).first;
+                            if(the_config->profile_renderer)
+                                ++profile_frame.gpu_material_resolves;
+                        }
+                        resolved_texture=&found->second;
+                        auto const &tex=*resolved_texture;
+                        // Native MAT/D3D handles can be destroyed on the frame
+                        // entering a 2D menu. Never show the GPU debug-magenta
+                        // placeholder in a Camera HUD late pass: omit that
+                        // unresolved draw until the material is resident again.
+                        if(post_exempt && tex.albedo_source==0)
+                            continue;
+                        // Camera Things are an instance-level HUD layer. The
+                        // same 3DO and MAT on an ordinary Thing remain in-scene.
+                        if(!post_exempt && inst.camera_hud)
+                            frame_has_exempt_gpu=true;
+                        if(inst.camera_hud!=post_exempt) continue;
+                        // Projected SPRs are always alpha-composited over
+                        // the existing opaque architecture and depth-tested.
+                        // The MAT may be fully opaque; its native SPR instance
+                        // opacity (including SetSpriteInfo) is independent.
+                        bool const fading_3do=!inst.is_sprite_quad &&
+                            !inst.is_projected_decal &&
+                            inst.thing_opacity<0.999f;
+                        auto const material_policy=
+                            (inst.is_projected_decal || inst.is_sprite_flare)
+                            ? gpu_3do_alpha_mode::blend_only
+                            : choose_gpu_3do_alpha_mode(
+                                (group.face_type&0x2U)!=0 ||
+                                    (inst.is_sprite_quad && inst.sprite_opacity<0.999f) ||
+                                    (fading_3do && !inst.thing_dither),
+                                tex.alpha,tex.masked,
+                                tex.special||tex.emissive_only,
+                                tex.opacity,tex.dithered ||
+                                    (fading_3do && inst.thing_dither));
+                        // A live saber SideMat can contain fully opaque core
+                        // texels. The ordinary "mixed" route writes those to
+                        // the opaque depth buffer, which then rejects the final
+                        // joining triangle even if it is submitted last.
+                        // Composite the COMPLETE active trail in the alpha pass
+                        // with depth tests against world/other opaque surfaces,
+                        // but no saber-to-saber depth writes. The 3D fan can now
+                        // reliably cover both blades and the tip bridge.
+                        policy=gpu_3do_trail_alpha_mode(
+                            material_policy,inst.saber_trail_active);
+                        if(layout) {
+                            layout->material=reinterpret_cast<uintptr_t>(resolved_texture);
+                            layout->policy=policy;
+                        }
                     }
-                    auto const &tex=found->second;
-                    // Native MAT/D3D handles can be destroyed on the frame
-                    // entering a 2D menu. Never show the GPU debug-magenta
-                    // placeholder in a Camera HUD late pass: omit that
-                    // unresolved draw until the material is resident again.
-                    if(post_exempt && tex.albedo_source==0)
-                        continue;
-                    // Camera Things are an instance-level HUD layer. The
-                    // same 3DO and MAT on an ordinary Thing remain in-scene.
-                    if(!post_exempt && inst.camera_hud)
-                        frame_has_exempt_gpu=true;
-                    if(inst.camera_hud!=post_exempt) continue;
-                    // Projected SPRs are always alpha-composited over
-                    // the existing opaque architecture and depth-tested.
-                    // The MAT may be fully opaque; its native SPR instance
-                    // opacity (including SetSpriteInfo) is independent.
-                    bool const fading_3do=!inst.is_sprite_quad &&
-                        !inst.is_projected_decal &&
-                        inst.thing_opacity<0.999f;
-                    auto const material_policy=
-                        (inst.is_projected_decal || inst.is_sprite_flare)
-                        ? gpu_3do_alpha_mode::blend_only
-                        : choose_gpu_3do_alpha_mode(
-                            (group.face_type&0x2U)!=0 ||
-                                (inst.is_sprite_quad && inst.sprite_opacity<0.999f) ||
-                                (fading_3do && !inst.thing_dither),
-                            tex.alpha,tex.masked,
-                            tex.special||tex.emissive_only,
-                            tex.opacity,tex.dithered ||
-                                (fading_3do && inst.thing_dither));
-                    // A live saber SideMat can contain fully opaque core
-                    // texels. The ordinary "mixed" route writes those to
-                    // the opaque depth buffer, which then rejects the final
-                    // joining triangle even if it is submitted last.
-                    // Composite the COMPLETE active trail in the alpha pass
-                    // with depth tests against world/other opaque surfaces,
-                    // but no saber-to-saber depth writes. The 3D fan can now
-                    // reliably cover both blades and the tip bridge.
-                    auto const policy=gpu_3do_trail_alpha_mode(
-                        material_policy,inst.saber_trail_active);
+                    auto const &tex=*resolved_texture;
                     // Mixed-alpha faces belong to BOTH ordinary draw lists.
                     // Classify once without changing per-pass face ordering.
                     bool const opaque_eligible=prepare_both &&
@@ -5871,7 +5922,7 @@ namespace jkgm {
                         candidate.sprite_batch_group=index+1U;
                         sprite_buckets[index].draws.push_back(
                             std::move(candidate));
-                    } else if(indexed_state_valid &&
+                    } else if(!layout_hit && indexed_state_valid &&
                         gpu_3do_instancing_conservative_candidate(
                             inst,group,policy,false)) {
                         // A compatible class shares the exact snapshot,
@@ -5890,6 +5941,7 @@ namespace jkgm {
                             });
                         if(model_collector.append(slot,
                             {instance_index,&context})) {
+                            if(layout)layout->slot=slot;
                             // The first visible member is the source-order
                             // anchor; subsequent members need only their
                             // instance/context/order, not full draw records.

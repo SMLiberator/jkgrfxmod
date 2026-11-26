@@ -78,14 +78,9 @@ inline uint32_t gpu_3do_instancing_float_bits(float x) {
 }
 // Solid or masked opaque model draws without per-Thing lights or
 // view-dependent state. The live scheduler also uses this strict predicate.
-inline bool gpu_3do_instancing_conservative_candidate(
-    gpu_3do_instance const &inst,gpu_3do_group const &group,
-    gpu_3do_alpha_mode policy,bool material_view_dependent)
+inline bool gpu_3do_instancing_instance_candidate(gpu_3do_instance const &inst)
 {
     return inst.id!=0 && !!inst.geometry &&
-        gpu_3do_instancing_opaque_policy(policy) &&
-        (group.face_type&0x2U)==0U &&
-        !material_view_dependent &&
         !inst.shadow_only && !inst.is_projected_decal &&
         !inst.is_sprite_quad && !inst.transient_procedural &&
         !inst.saber_trail_active && !inst.camera_hud &&
@@ -93,6 +88,14 @@ inline bool gpu_3do_instancing_conservative_candidate(
         !inst.thing_dither && inst.thing_opacity==1.0f &&
         inst.num_lights==0U && !inst.crossing_lighting &&
         !inst.nonrigid_light_transform;
+}
+inline bool gpu_3do_instancing_conservative_candidate(
+    gpu_3do_instance const &inst,gpu_3do_group const &group,
+    gpu_3do_alpha_mode policy,bool material_view_dependent)
+{
+    return gpu_3do_instancing_instance_candidate(inst) &&
+        gpu_3do_instancing_opaque_policy(policy) &&
+        (group.face_type&0x2U)==0U && !material_view_dependent;
 }
 // The rejection mask mirrors eligibility and distinguishes material features.
 // material_rejections must be computed from the resolved material.
@@ -377,8 +380,19 @@ inline bool gpu_3do_instance_buffer_can_fit(
 template<class Member>
 class gpu_3do_indexed_instancing_collector {
     using mesh_key=std::tuple<uint64_t,uintptr_t,std::array<uint32_t,11>>;
+public:
+    // Lazily populated after visibility, valid for this collection pass
+    // only. Nonzero material means policy is resolved; slot is nonzero
+    // only after a visible, eligible anchor has been emitted.
+    struct collection_range {
+        uintptr_t material=0U;
+        gpu_3do_alpha_mode policy=gpu_3do_alpha_mode::solid;
+        size_t slot=0U;
+    };
+private:
     struct mesh_class {
         std::vector<size_t> heads;
+        std::vector<collection_range> layout;
     };
 public:
     struct range_slot {
@@ -406,9 +420,17 @@ public:
             mesh_key{mesh_id,geometry,state},used_classes);
         if(found.second) {
             if(classes.size()<=used_classes)classes.emplace_back();
-            classes[used_classes++].heads.assign(group_count,0U);
+            auto &entry=classes[used_classes++];
+            entry.heads.assign(group_count,0U);
+            entry.layout.clear();
         }
         return found.first->second;
+    }
+    std::vector<collection_range> &collection_layout(size_t mesh) {
+        auto &entry=classes[mesh];
+        if(entry.layout.size()!=entry.heads.size())
+            entry.layout.resize(entry.heads.size());
+        return entry.layout;
     }
     template<class IsEligible>
     size_t find_range(size_t mesh,size_t group,uintptr_t material,
