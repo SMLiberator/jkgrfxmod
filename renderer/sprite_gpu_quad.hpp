@@ -114,10 +114,10 @@ inline bool make_gpu_sprite_pose(
     if(!compute_sprite_axes(type,object,camera,axes))return false;
     float const angle=std::fmod(roll,360.0f)*0.01745329251994329577f;
     float const cs=std::cos(angle),sn=std::sin(angle);
-    // Classic billboards and flares reserve authored Y for render-depth.
-    // X/Z remain camera-relative geometry; other SPR types are unchanged.
-    float const geometric_y=(type==sprite_default || sprite_is_flare(type))
-        ?0.0f:offset[1];
+    // Vanilla Type 0 translates its quad in camera-space XYZ, including
+    // perspective size/position changes from Y. Only Type 4 reserves Y
+    // for its center-only render-depth comparison.
+    float const geometric_y=sprite_is_flare(type)?0.0f:offset[1];
     for(int i=0;i<3;++i) {
         out[i]=size[2]*w*(cs*axes.right[i]+sn*axes.up[i]);
         out[i+3]=axes.look[i];

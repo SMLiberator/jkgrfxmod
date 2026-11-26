@@ -837,11 +837,12 @@ namespace jkgm {
         // Lazy CPU simplification per immutable source, keyed by original
         // GPU mesh ID. Variant GL IDs are distinct from the authored mesh.
         struct auto_3do_lod_entry {
-            std::shared_ptr<gpu_3do_geometry const> source;
+            // The native mesh cache owns the immutable source. A variant
+            // must not extend its lifetime or expire while it is still cached.
+            std::weak_ptr<gpu_3do_geometry const> source;
             std::array<std::shared_ptr<gpu_3do_geometry const>,2> levels{};
             std::array<uint64_t,2> ids{};
             std::array<bool,2> attempted{{false,false}};
-            uint64_t last_seen=0;
         };
         std::unordered_map<uint64_t,auto_3do_lod_entry> auto_3do_lod_cache;
         // Hysteresis is per owning Thing, shared by ALL hierarchy nodes.
@@ -4995,10 +4996,13 @@ namespace jkgm {
             if((gpu_3do_present_serial&63U)==0U) {
                 for(auto it=auto_3do_lod_cache.begin();
                     it!=auto_3do_lod_cache.end();) {
-                    if(gpu_3do_present_serial>=it->second.last_seen &&
-                       gpu_3do_present_serial-it->second.last_seen>96U)
+                    if(it->second.source.expired()) {
+                        for(uint64_t old_id:it->second.ids)if(old_id) {
+                            gpu_3do_gl_cache.erase(old_id);
+                            gpu_3do_last_drawn.erase(old_id);
+                        }
                         it=auto_3do_lod_cache.erase(it);
-                    else ++it;
+                    } else ++it;
                 }
                 for(auto it=auto_3do_lod_history.begin();
                     it!=auto_3do_lod_history.end();) {
@@ -5115,7 +5119,7 @@ namespace jkgm {
                 // LOD decision; variants are still cached per rdMesh.
                 uint64_t const source_id=inst.id;
                 auto &entry=auto_3do_lod_cache[source_id];
-                if(entry.source!=inst.geometry) {
+                if(entry.source.lock()!=inst.geometry) {
                     // Live SetModelMesh may replace geometry under the same
                     // native mesh ID. Never reuse a stale variant GL buffer.
                     for(uint64_t old_id:entry.ids)if(old_id) {
@@ -5125,7 +5129,6 @@ namespace jkgm {
                     entry={};
                     entry.source=inst.geometry;
                 }
-                entry.last_seen=gpu_3do_present_serial;
                 unsigned const index=level-1U;
                 if(!entry.attempted[index] &&
                    gpu_3do_auto_lod_budget_allows(
@@ -5136,7 +5139,7 @@ namespace jkgm {
                         ?std::chrono::steady_clock::now()
                         :std::chrono::steady_clock::time_point{};
                     entry.levels[index]=generate_gpu_3do_auto_lod(
-                        *entry.source,level);
+                        *inst.geometry,level);
                     uint64_t cpu_ns=0U;
                     if(the_config->profile_renderer) {
                         cpu_ns=static_cast<uint64_t>(
@@ -5158,7 +5161,7 @@ namespace jkgm {
                         // Include resource identity AND the generated level:
                         // GL buffers may not alias base-mesh GPU cache IDs.
                         uint64_t const pointer=static_cast<uint64_t>(
-                            reinterpret_cast<uintptr_t>(entry.source.get()));
+                            reinterpret_cast<uintptr_t>(inst.geometry.get()));
                         entry.ids[index]=source_id ^
                             (pointer*0x9e3779b97f4a7c15ULL) ^
                             (uint64_t(level)*0xbf58476d1ce4e5b9ULL);

@@ -15,9 +15,8 @@ int main() {
     float size[4]={1,1,1,1};
     float offset[3]={1,-2,2};
     gpu_3do_matrix34 out{};
-    // Native offset X/Z still translates the billboard in camera axes.
-    // Y is intentionally absent from geometric placement for GPU type 0/4.
-    for(uint32_t type:{sprite_default,sprite_center_occluded_flare}) {
+    // Type 4 keeps the camera-relative X/Z offset and render-only Y.
+    for(uint32_t type:{sprite_center_occluded_flare}) {
         assert(make_gpu_sprite_pose(
             type,thing,camera,size,offset,1,1,0,out));
         assert(eq(out[9],3));
@@ -32,11 +31,16 @@ int main() {
         assert(farther==out); // authored Y never changes size or placement
         offset[1]=original_y;
     }
-    // Keep authored Y geometric for cylindrical and fixed SPRs.
-    for(uint32_t type:{sprite_billboard,sprite_fixed}) {
+    // Vanilla Type 0 and the oriented types retain actual geometric Y.
+    for(uint32_t type:{sprite_default,sprite_billboard,sprite_fixed}) {
         assert(make_gpu_sprite_pose(
             type,thing,camera,size,offset,1,1,0,out));
         assert(eq(out[10],8));
+        assert(eq(out[9],3) && eq(out[11],5));
+        offset[1]=3;
+        assert(make_gpu_sprite_pose(type,thing,camera,size,offset,1,1,0,out));
+        assert(eq(out[10],13));
+        offset[1]=-2;
     }
     sprite_flare_center center{};
     assert(project_gpu_sprite_flare_center(

@@ -7104,9 +7104,8 @@ namespace {
         instance.transform=placement;
         instance.is_sprite_quad=true;
         instance.is_sprite_flare=jkgm::sprite_is_flare(type);
-        instance.sprite_depth_bias=
-            (type==jkgm::sprite_default || instance.is_sprite_flare)
-                ?offset[1]:0.0f;
+        instance.sprite_depth_bias=instance.is_sprite_flare
+            ?offset[1]:0.0f;
         instance.sprite_opacity=info.opacity;
         // The visible billboard does not cast from its camera-facing pose.
         instance.casts_sun_shadows=false;
