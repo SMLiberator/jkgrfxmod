@@ -169,6 +169,7 @@
     <ClInclude Include="mots_native_collision_query.hpp" />
     <ClInclude Include="mots_native_mesh_snapshot.hpp" />
     <ClInclude Include="mots_sphere_tree.hpp" />
+    <ClInclude Include="native_3do_draw_memo.hpp" />
     <ClInclude Include="native_3do_profile.hpp" />
     <ClInclude Include="native_3do_lod_override.hpp" />
     <ClInclude Include="native_mesh_revision.hpp" />

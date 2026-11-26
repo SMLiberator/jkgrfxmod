@@ -383,6 +383,9 @@
     <ClInclude Include="mots_sphere_tree.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="native_3do_draw_memo.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="native_3do_profile.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
