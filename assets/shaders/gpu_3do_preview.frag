@@ -246,14 +246,19 @@ vec3 pixel_jk_diffuse_lighting(vec3 mapped_diffuse_normal)
 // Transform shaded normals with the node's inverse transpose. Raw
 // R/L/U columns are valid for vertex positions but not for normals on a
 // nonuniformly scaled 3DO node. Mirrored nodes retain their signed parity.
+// Per-fragment surface state prepared once after alpha/HUD rejection.
+mat3 surface_normal_transform;
+mat3 surface_tangent_frame;
+bool surface_tangent_valid;
+vec3 surface_geometric_normal;
+vec3 surface_base_local, surface_base_view, surface_coat_view;
+vec3 surface_to_eye, surface_map_value;
+
 vec3 gpu_view_normal_from_local(vec3 local_n)
 {
-    vec3 r=fragment_view_right, f=fragment_view_forward, u=fragment_view_up;
-    vec3 cr=cross(f,u), cf=cross(u,r), cu=cross(r,f);
-    float det=dot(r,cr);
-    vec3 n=abs(det)>1e-8
-        ? sign(det)*(cr*local_n.x+cf*local_n.y+cu*local_n.z)
-        : r*local_n.x+f*local_n.y+u*local_n.z;
+    vec3 n=surface_normal_transform[0]*local_n.x+
+           surface_normal_transform[1]*local_n.y+
+           surface_normal_transform[2]*local_n.z;
     vec3 projected=vec3(n.x,n.z,n.y);
     return dot(projected,projected)>1e-16
         ? normalize(projected) : vec3(0.0,0.0,1.0);
@@ -261,7 +266,7 @@ vec3 gpu_view_normal_from_local(vec3 local_n)
 
 vec3 mapped_local_normal(vec2 uv)
 {
-    vec3 n=normalize(local_fragment_normal);
+    vec3 n=surface_geometric_normal;
     if(normal_specular_params.x<0.5 && normal_specular_params.z<0.5)
         return n;
     vec2 slope=vec2(0.0);
@@ -273,17 +278,8 @@ vec3 mapped_local_normal(vec2 uv)
         vec3 texn2=texture(normal_map2,uv+normal_specular_scroll2).xyz*2.0-1.0;
         slope+=texn2.xy/max(texn2.z,0.05)*normal_specular_params.w;
     }
-    vec3 dp1=dFdx(local_fragment_position);
-    vec3 dp2=dFdy(local_fragment_position);
-    vec2 du1=dFdx(pixel_uv*uv_scale);
-    vec2 du2=dFdy(pixel_uv*uv_scale);
-    vec3 t=cross(dp2,n)*du1.x+cross(n,dp1)*du2.x;
-    vec3 b=cross(dp2,n)*du1.y+cross(n,dp1)*du2.y;
-    float basis=max(dot(t,t),dot(b,b));
-    if(basis<1e-16) return n;
-    float inv_basis=inversesqrt(basis);
-    return normalize(mat3(t*inv_basis,b*inv_basis,n)*
-                     normalize(vec3(slope,1.0)));
+    if(!surface_tangent_valid)return n;
+    return normalize(surface_tangent_frame*normalize(vec3(slope,1.0)));
 }
 
 #ifdef JKGM_MATCAP_LAYER
@@ -296,7 +292,7 @@ vec3 gpu_matcap_effect(vec2 uv)
     float roughness=clamp(matcap_params.w*mask.g,0.0,1.0);
     // Surface normals include the existing tangent-space normal layers,
     // but bypass reflection-direction, Fresnel and metalness calculations.
-    vec3 n=gpu_view_normal_from_local(mapped_local_normal(uv));
+    vec3 n=surface_base_view;
     if(n.z>0.0)n=-n;
     vec2 map_uv=clamp(
         vec2(0.5+0.5*n.x,0.5-0.5*n.y),vec2(0.001),vec2(0.999));
@@ -310,19 +306,12 @@ vec3 gpu_matcap_effect(vec2 uv)
 #ifdef JKGM_CLEARCOAT_LAYER
 vec3 gpu_clearcoat_local_normal(vec2 uv)
 {
-    vec3 n=normalize(local_fragment_normal);
+    vec3 n=surface_geometric_normal;
     if(clearcoat_has_normal==0)return n;
     vec3 texn=texture(clearcoat_normal_map,uv).xyz*2.0-1.0;
     vec2 slope=texn.xy/max(texn.z,0.05);
-    vec3 dp1=dFdx(local_fragment_position),dp2=dFdy(local_fragment_position);
-    vec2 du1=dFdx(pixel_uv*uv_scale),du2=dFdy(pixel_uv*uv_scale);
-    vec3 t=cross(dp2,n)*du1.x+cross(n,dp1)*du2.x;
-    vec3 b=cross(dp2,n)*du1.y+cross(n,dp1)*du2.y;
-    float basis=max(dot(t,t),dot(b,b));
-    if(basis<1e-16)return n;
-    float inv_basis=inversesqrt(basis);
-    return normalize(mat3(t*inv_basis,b*inv_basis,n)*
-                     normalize(vec3(slope,1.0)));
+    if(!surface_tangent_valid)return n;
+    return normalize(surface_tangent_frame*normalize(vec3(slope,1.0)));
 }
 vec3 gpu_clearcoat_values(vec2 uv)
 {
@@ -336,9 +325,7 @@ vec3 gpu_clearcoat_values(vec2 uv)
 }
 float gpu_clearcoat_fresnel(vec3 N)
 {
-    vec3 vp=fragment_native_view_position;
-    vec3 V=-normalize(vec3(vp.x,vp.z,vp.y));
-    float nv=clamp(abs(dot(normalize(N),V)),0.0,1.0);
+    float nv=clamp(abs(dot(normalize(N),surface_to_eye)),0.0,1.0);
     return 0.04+0.96*pow(1.0-nv,5.0);
 }
 #endif
@@ -352,13 +339,13 @@ vec3 point_light_specular(vec3 base_color,vec2 uv,
 {
     if((coating?coat_strength<=0.0:specular_params.x<=0.0) ||
        num_lights==0)return vec3(0.0);
-    vec3 N=coating?coat_normal:mapped_local_normal(uv);
+    vec3 N=coating?coat_normal:surface_base_local;
     vec3 V=local_eye-local_fragment_position;
     if(nonrigid_light_transform!=0) {
         // Match scaled-mesh diffuse light attenuation: an affine local
         // distance is not a world distance. Normal and directions must
         // share a rigid camera-space basis for correct specular response.
-        N=gpu_view_normal_from_local(N);
+        N=coating?surface_coat_view:surface_base_view;
         vec3 v=fragment_view_right*V.x+
                fragment_view_forward*V.y+fragment_view_up*V.z;
         V=vec3(v.x,v.z,v.y);
@@ -367,7 +354,7 @@ vec3 point_light_specular(vec3 base_color,vec2 uv,
     if(dot(N,V)<0.0) N=-N;
     float NdotV=max(dot(N,V),0.0001);
     vec3 map_value=coating?vec3(1.0):
-        (specular_params.w>0.5?texture(surface_map,uv).rgb:vec3(1.0));
+        surface_map_value;
     float strength=coating?coat_strength:
         max(specular_params.x*map_value.r,0.0);
     if(strength<=0.0)return vec3(0.0);
@@ -431,7 +418,7 @@ vec3 gpu_environment_reflection(vec3 base_color,vec2 uv,out float metalness,
        (coating?coat_strength<=0.0:specular_params.x<=0.0))
         return vec3(0.0);
     vec3 surf=coating?vec3(1.0):
-        (specular_params.w>0.5?texture(surface_map,uv).rgb:vec3(1.0));
+        surface_map_value;
     float strength=coating?coat_strength:max(specular_params.x*surf.r,0.0);
     if(strength<=0.0)return vec3(0.0);
     float roughness=coating?coat_roughness:
@@ -440,10 +427,8 @@ vec3 gpu_environment_reflection(vec3 base_color,vec2 uv,out float metalness,
         clamp(specular_params.z*surf.b,0.0,1.0)*
         max(mix(environment_info.x,environment_info.z,
                 environment_info.w),has_hemi?1.0:0.0);
-    vec3 n_local=coating?coat_normal:mapped_local_normal(uv);
-    vec3 n=gpu_view_normal_from_local(n_local);
-    vec3 vp=fragment_native_view_position;
-    vec3 v=normalize(vec3(vp.x,vp.z,vp.y)); // camera -> surface
+    vec3 n=coating?surface_coat_view:surface_base_view;
+    vec3 v=-surface_to_eye; // camera -> surface
     if(dot(n,v)>0.0) n=-n;
     vec3 reflection=reflect(v,n);
     vec3 dir=reflection;
@@ -602,17 +587,16 @@ vec3 gpu_sun_specular(vec3 base_color,vec2 uv,
        sun_color_intensity.w<=0.0 || sun_direction.w<0.5)
         return vec3(0.0);
     vec3 surface=coating?vec3(1.0):
-        (specular_params.w>0.5?texture(surface_map,uv).rgb:vec3(1.0));
+        surface_map_value;
     float strength=coating?coat_strength:
         max(specular_params.x*surface.r,0.0);
     if(strength<=0.0)return vec3(0.0);
     float roughness=coating?clamp(coat_roughness,0.08,1.0):
         clamp(specular_params.y*surface.g,0.08,1.0);
     float metalness=coating?0.0:clamp(specular_params.z*surface.b,0.0,1.0);
-    vec3 n_local=coating?coat_normal:mapped_local_normal(uv);
-    vec3 N=gpu_view_normal_from_local(n_local);
+    vec3 N=coating?surface_coat_view:surface_base_view;
     vec3 vp=fragment_native_view_position;
-    vec3 V=-normalize(vec3(vp.x,vp.z,vp.y));
+    vec3 V=surface_to_eye;
     if(dot(N,V)<0.0) N=-N;
     vec3 L=normalize(sun_direction.xyz);
     float NdotL=max(dot(N,L),0.0),NdotV=max(dot(N,V),0.0);
@@ -861,6 +845,57 @@ float dither_threshold()
     return gpu_material_dither_threshold();
 }
 
+void prepare_fragment_surface(vec2 uv)
+{
+    bool base_spec=specular_params.x>0.0;
+    bool base_mapped=normal_specular_params.x>0.5 ||
+                     normal_specular_params.z>0.5;
+    bool base_needed=base_spec || (normal_mapped_diffuse!=0 && base_mapped);
+    bool coat_needed=false,coat_mapped=false;
+#ifdef JKGM_MATCAP_LAYER
+    base_needed=base_needed || matcap_enabled!=0;
+#endif
+#ifdef JKGM_CLEARCOAT_LAYER
+    coat_needed=clearcoat_enabled!=0;
+    coat_mapped=coat_needed && clearcoat_has_normal!=0;
+#endif
+    if(!base_needed && !coat_needed)return;
+    vec3 r=fragment_view_right,f=fragment_view_forward,u=fragment_view_up;
+    vec3 cr=cross(f,u),cf=cross(u,r),cu=cross(r,f);
+    float det=dot(r,cr);
+    surface_normal_transform=abs(det)>1e-8
+        ?mat3(sign(det)*cr,sign(det)*cf,sign(det)*cu):mat3(r,f,u);
+    surface_geometric_normal=normalize(local_fragment_normal);
+    surface_tangent_valid=false;
+    // Use draw-uniform conditions for derivatives, not per-pixel coat masks.
+    if((base_needed && base_mapped) || coat_mapped) {
+        vec3 n=surface_geometric_normal;
+        vec3 dp1=dFdx(local_fragment_position);
+        vec3 dp2=dFdy(local_fragment_position);
+        vec2 du1=dFdx(pixel_uv*uv_scale);
+        vec2 du2=dFdy(pixel_uv*uv_scale);
+        vec3 t=cross(dp2,n)*du1.x+cross(n,dp1)*du2.x;
+        vec3 b=cross(dp2,n)*du1.y+cross(n,dp1)*du2.y;
+        float basis=max(dot(t,t),dot(b,b));
+        if(basis>=1e-16) {
+            float inv_basis=inversesqrt(basis);
+            surface_tangent_frame=mat3(t*inv_basis,b*inv_basis,n);
+            surface_tangent_valid=true;
+        }
+    }
+    if(base_needed) {
+        surface_base_local=mapped_local_normal(uv);
+        surface_base_view=gpu_view_normal_from_local(surface_base_local);
+    }
+    if(base_spec)
+        surface_map_value=specular_params.w>0.5
+            ?texture(surface_map,uv).rgb:vec3(1.0);
+    if(base_spec || coat_needed) {
+        vec3 vp=fragment_native_view_position;
+        surface_to_eye=-normalize(vec3(vp.x,vp.z,vp.y));
+    }
+}
+
 void main() {
     // gl_FragCoord.w is 1/clip.w, and clip.w is camera-forward Y.
     // This is the exact native 1/rhw linear depth (32*Y) even on large
@@ -985,6 +1020,7 @@ void main() {
     // The material's original baked JK RGB is untouched. The optional
     // perturbed normal is used only for ADDED sun, spotlight and pixel-point
     // light. Keep the geometric normal if this face has no normal texture.
+    prepare_fragment_surface(uv);
     vec3 diffuse_local_normal=local_fragment_normal;
     vec3 diffuse_view_normal=view_normal;
     bool const_normal_mapped_diffuse=
@@ -996,8 +1032,8 @@ void main() {
         world_lighting_exempt==0 && sprite_receiver==0 &&
         decal_receiver_lighting==0;
     if(const_normal_mapped_diffuse) {
-        diffuse_local_normal=mapped_local_normal(uv);
-        vec3 n=gpu_view_normal_from_local(diffuse_local_normal);
+        diffuse_local_normal=surface_base_local;
+        vec3 n=surface_base_view;
         float sh=max(projection.x,0.0001);
         float sv=sh/max(projection.y,0.0001);
         diffuse_view_normal=normalize(vec3(n.x*sh,n.y*sv,n.z));
@@ -1013,8 +1049,12 @@ void main() {
         // Evaluate derivatives before any per-pixel coverage branch.
         coat_local_normal=gpu_clearcoat_local_normal(uv);
         if(coat_values.x>0.0) {
-            vec3 coat_view_normal=gpu_view_normal_from_local(coat_local_normal);
-            float f=gpu_clearcoat_fresnel(coat_view_normal);
+            // Unmapped base and coat use the exact same normal.
+            surface_coat_view=(specular_params.x>0.0 &&
+                normal_specular_params.x<0.5 &&
+                normal_specular_params.z<0.5 && clearcoat_has_normal==0)
+                ?surface_base_view:gpu_view_normal_from_local(coat_local_normal);
+            float f=gpu_clearcoat_fresnel(surface_coat_view);
             base_specular_trans=clamp(1.0-coat_values.x*f,0.0,1.0);
             base_diffuse_trans=base_specular_trans*
                                mix(1.0,coat_values.z,coat_values.x);
