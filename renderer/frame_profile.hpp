@@ -57,6 +57,9 @@ struct profile_sample {
   uint64_t native_direct_pose_refreshes=0;
   uint64_t native_direct_rollbacks=0;
   uint64_t native_direct_queue_ns=0;
+  uint64_t native_prepared_hits=0;
+  uint64_t native_prepared_misses=0;
+  uint64_t native_prepared_empty_hits=0;
   uint64_t native_mesh_gpu_calls=0,native_mesh_native_calls=0;
   std::array<uint64_t,5> sprite_type_calls{};
   uint64_t sprite_other_type_calls=0,sprite_hidden_calls=0;
@@ -204,6 +207,9 @@ struct profile_sample {
     native_direct_pose_refreshes+=o.native_direct_pose_refreshes;
     native_direct_rollbacks+=o.native_direct_rollbacks;
     native_direct_queue_ns+=o.native_direct_queue_ns;
+    native_prepared_hits+=o.native_prepared_hits;
+    native_prepared_misses+=o.native_prepared_misses;
+    native_prepared_empty_hits+=o.native_prepared_empty_hits;
     native_mesh_gpu_calls+=o.native_mesh_gpu_calls;
     native_mesh_native_calls+=o.native_mesh_native_calls;
     for(size_t i=0;i<sprite_type_calls.size();++i)

@@ -151,6 +151,29 @@ public:
         return &fresh.plan;
     }
 };
+// Frame-local prepared submission records, shared by all instances of a
+// GeoSet and indexed by joint ID. Epochs cover source/model edits and native
+// MAT warmup; never retain a raw mesh-cache iterator across calls.
+template<class Slot> class direct_model_prepared_cache {
+    std::unordered_map<uint32_t,std::vector<Slot>> entries_;
+    uint64_t frame_=0,revision_=0,upload_=0;
+public:
+    void clear() {entries_.clear();frame_=revision_=upload_=0;}
+    void prepare(uint64_t frame,uint64_t revision,uint64_t upload) {
+        if(frame_!=frame || revision_!=revision || upload_!=upload)entries_.clear();
+        frame_=frame;revision_=revision;upload_=upload;
+    }
+    std::vector<Slot> &get(direct_model_plan const &plan) {
+        auto it=entries_.find(plan.geoset_address);
+        if(it==entries_.end()) {
+            if(entries_.size()>=4096U)entries_.clear();
+            it=entries_.emplace(plan.geoset_address,std::vector<Slot>{}).first;
+        }
+        auto &slots=it->second;
+        if(slots.size()!=plan.node_count)slots.assign(plan.node_count,Slot{});
+        return slots;
+    }
+};
 // The root is always visited; skipping a cut node skips its entire subtree,
 // including hierarchy nodes that have no mesh. Callback may fail a transaction.
 template<class Visit>

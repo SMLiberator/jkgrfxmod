@@ -37,6 +37,9 @@ namespace jkgm {
         uint64_t direct_pose_refreshes=0;
         uint64_t direct_rollbacks=0;
         uint64_t direct_queue_ns=0;
+        uint64_t prepared_hits=0;
+        uint64_t prepared_misses=0;
+        uint64_t prepared_empty_hits=0;
         void add(native_3do_sample const &o) {
             model_calls+=o.model_calls;
             model_lod0_forced+=o.model_lod0_forced;
@@ -84,6 +87,9 @@ namespace jkgm {
             direct_pose_refreshes+=o.direct_pose_refreshes;
             direct_rollbacks+=o.direct_rollbacks;
             direct_queue_ns+=o.direct_queue_ns;
+            prepared_hits+=o.prepared_hits;
+            prepared_misses+=o.prepared_misses;
+            prepared_empty_hits+=o.prepared_empty_hits;
         }
     };
     native_3do_sample consume_native_3do_sample();

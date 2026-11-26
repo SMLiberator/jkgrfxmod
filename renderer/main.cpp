@@ -195,7 +195,17 @@ namespace {
     struct native_static_receiver_state {
         uint32_t owner=0,signature=0,world=0;
     };
+    struct prepared_native_mesh;
+    struct native_camera_light_header {
+        uintptr_t camera=0;
+        float ambient=0,attenuation=0;
+        int32_t count=0;
+    };
     struct native_model_mesh_state {
+        prepared_native_mesh *prepared_slot=nullptr;
+        bool prepared_model=false;
+        jkgm::native_draw_memo<std::array<float,3>> colormap;
+        jkgm::native_draw_memo<native_camera_light_header> lighting_header;
         jkgm::native_draw_memo<jkgm::engine_camera> camera;
         jkgm::native_draw_memo<native_mesh_frustum_state> frustum;
         jkgm::native_draw_memo<std::optional<int32_t>> geo_mode,light_mode;
@@ -335,6 +345,15 @@ namespace {
         bool ready_for_frame=false;
     };
     std::unordered_map<void const *,cached_gpu_mesh> gpu_mesh_cache;
+    struct prepared_native_mesh {
+        void const *mesh=nullptr;
+        native_mesh header{};
+        int32_t geo_mode=0;
+        bool empty_source=false;
+        uint64_t id=0,source_signature=0;
+        std::shared_ptr<jkgm::gpu_3do_geometry const> geometry;
+    };
+    jkgm::direct_model_prepared_cache<prepared_native_mesh> prepared_native_models;
     // Shared by Planar/Shared/Hemi/Cube acquisitions; keyed by native model
     // revision and world, never by a particular reflection camera.
     jkgm::planar_reflection_model_topology_cache gpu_offscreen_model_topology;
@@ -653,9 +672,10 @@ namespace {
     }
 
     bool gpu_mesh_outside_native_frustum(native_mesh const &m,void const *matrix,
-                                         jkgm::engine_camera const &camera)
+                                         jkgm::engine_camera const &camera,
+                                         bool validated_matrix=false)
     {
-        if(!gpu_span_readable(matrix,12*sizeof(float))) return false;
+        if(!validated_matrix && !gpu_span_readable(matrix,12*sizeof(float))) return false;
         auto const state=jkgm::native_draw_read(active_model_mesh_state,
             &native_model_mesh_state::frustum,read_native_mesh_frustum);
         if(!state.valid)return false;
@@ -690,21 +710,32 @@ namespace {
                                     float const *placement,
                                     jkgm::gpu_3do_instance &instance)
     {
-        constexpr uintptr_t camera_global=0x0073A418U;
-        if(!gpu_span_readable(reinterpret_cast<void const *>(camera_global),4))
-            return false; // invalid camera, not a light-count fallback
-        uintptr_t camera=0;
-        std::memcpy(&camera,reinterpret_cast<void const *>(camera_global),4);
-        // Native x86 rdCamera: ambient=0x54, count=0x58,
-        // 64 light pointers=0x5c, world positions=0x15c, attenuation=0x45c.
-        if(camera<0x10000U ||
-           !gpu_span_readable(reinterpret_cast<void const *>(camera),0x464U))
-            return false;
-        float ambient=0.0f,attenuation=0.0f;
-        int32_t count=0;
-        std::memcpy(&ambient,reinterpret_cast<void const *>(camera+0x54),4);
-        std::memcpy(&count,reinterpret_cast<void const *>(camera+0x58),4);
-        std::memcpy(&attenuation,reinterpret_cast<void const *>(camera+0x45c),4);
+        auto read_header=[] {
+            native_camera_light_header h{};
+            constexpr uintptr_t camera_global=0x0073A418U;
+            if(!gpu_span_readable(reinterpret_cast<void const *>(camera_global),4))
+                return h;
+            uintptr_t camera=0;
+            std::memcpy(&camera,reinterpret_cast<void const *>(camera_global),4);
+            if(camera<0x10000U ||
+               !gpu_span_readable(reinterpret_cast<void const *>(camera),0x464U))
+                return h;
+            h.camera=camera;
+            std::memcpy(&h.ambient,reinterpret_cast<void const *>(camera+0x54),4);
+            std::memcpy(&h.count,reinterpret_cast<void const *>(camera+0x58),4);
+            std::memcpy(&h.attenuation,reinterpret_cast<void const *>(camera+0x45c),4);
+            return h;
+        };
+        // The active rdCamera header is shared by all nodes of this direct
+        // model. Keep light selection and transforms live per mesh.
+        auto const header=jkgm::native_draw_read(
+            active_model_mesh_state && active_model_mesh_state->prepared_model
+                ?active_model_mesh_state:nullptr,
+            &native_model_mesh_state::lighting_header,read_header);
+        uintptr_t const camera=header.camera;
+        if(!camera)return false;
+        float ambient=header.ambient,attenuation=header.attenuation;
+        int32_t count=header.count;
         // Corrupted light metadata may reduce illumination, never geometry.
         if(!std::isfinite(ambient)) {
             ambient=instance.ambient;
@@ -1640,6 +1671,13 @@ namespace {
         direct_scope.state.geo_mode={true,std::optional<int32_t>(state.modes.geo)};
         direct_scope.state.light_mode={true,std::optional<int32_t>(state.modes.light)};
         direct_scope.state.decal_geoset={true,plan.geoset};
+        std::vector<prepared_native_mesh> *prepared=nullptr;
+        if(the_config->experimental_gpu_3do_prepared_models && mesh_revision::active()) {
+            prepared_native_models.prepare(gpu_frame_serial,mesh_revision::current(),
+                native_mat_upload_generation.load(std::memory_order_relaxed));
+            prepared=&prepared_native_models.get(plan);
+            direct_scope.state.prepared_model=true;
+        }
         // Submit with the existing cache/material/lighting logic. Roll back
         // both pending draws AND their occurrence counters if any mesh needs
         // native warmup or cannot be represented. Cache warmup is retained.
@@ -1651,7 +1689,10 @@ namespace {
             [&](jkgm::direct_model_node const &node) {
                 auto *mesh=reinterpret_cast<void *>(uintptr_t(node.mesh));
                 auto *matrix=reinterpret_cast<void *>(uintptr_t(matrices)+node.node*48U);
-                if(!jkgm::queue_gpu_3do_mesh(mesh,matrix))return false;
+                direct_scope.state.prepared_slot=prepared?&(*prepared)[node.node]:nullptr;
+                bool const ok=jkgm::queue_gpu_3do_mesh(mesh,matrix);
+                direct_scope.state.prepared_slot=nullptr;
+                if(!ok)return false;
                 ++meshes;
                 return true;
             });
@@ -2574,6 +2615,107 @@ bool native_mesh_overlaps_shadow_light(native_mesh const &mesh,
     }
     return false;
 }
+
+// One assembly path for prepared and legacy queue submissions.
+bool submit_gpu_3do_instance(void const *mesh,native_mesh const &m,
+                             void const *matrix,int32_t current_geo_mode,
+                             bool shadow_only,bool casts_sun_shadows,
+                             uint64_t id,uint64_t source_signature,
+                             std::shared_ptr<jkgm::gpu_3do_geometry const> const &geometry)
+{
+    jkgm::gpu_3do_instance inst;
+    inst.id=id;
+    inst.geometry=geometry;
+    // Copied once per owning Thing in rdModel3_Draw, not per mesh callback.
+    inst.thing_opacity=active_native_thing_opacity.opacity;
+    inst.thing_dither=active_native_thing_opacity.dither;
+    inst.shadow_only=shadow_only;
+    inst.effective_geometry_mode=static_cast<uint32_t>(
+        jkgm::gpu_3do_effective_geo_mode(current_geo_mode,m.geometry_mode));
+    inst.camera_hud=active_native_model_camera_hud;
+    inst.camera_hud_world_depth=jkgm::camera_hud_uses_world_depth(
+        inst.camera_hud,active_native_model_thing_flags);
+    inst.skybox_vertex_lighting=jkgm::thing_uses_skybox_vertex_lights(
+        active_native_model_thing_flags,inst.camera_hud);
+    inst.casts_sun_shadows=casts_sun_shadows;
+    // Receiving sunlight/SSAO is distinct from writing shadow depth.
+    // SithThing flag 0x20 and Camera HUDs remain light-exempt.
+    inst.world_lighting_exempt=!casts_sun_shadows;
+    inst.shadow_owner=active_native_shadow_owner;
+    inst.spotlight_shadow_family=active_native_spotlight_family;
+    inst.dynamic_sun_caster=active_native_shadow_dynamic;
+    // Snapshot ONCE from rdModel3_Draw; every hierarchy node inherits
+    // identical Thing radius/center even if animated node matrices differ.
+    inst.owning_thing_world_position=active_native_model_world_position;
+    inst.owning_thing_world_position_valid=
+        active_native_model_world_position_valid;
+    inst.owning_thing_lod_radius=active_native_model_lod_radius;
+    inst.owning_thing_lod_radius_valid=active_native_model_lod_radius_valid;
+    // Depth-only casters need no native MAT residency, point lights,
+    // colormap or per-Thing lighting cap. Preserve the native render call.
+    std::memcpy(inst.transform.data(),matrix,sizeof(float)*12);
+    for(float v:inst.transform)if(!std::isfinite(v))return false;
+    if(!shadow_only && !inst.camera_hud) {
+        // Skybox ThingFlag 0x20 retains its authored JK lighting, but
+        // never inherits the owning sector's CMP/sector color effects.
+        // Keep the instance's neutral colormap/tint/sector defaults.
+        if(!inst.skybox_vertex_lighting) {
+            inst.colormap_tint=jkgm::native_draw_read(
+                active_model_mesh_state && active_model_mesh_state->prepared_model
+                    ?active_model_mesh_state:nullptr,
+                &native_model_mesh_state::colormap,read_gpu_3do_colormap_tint);
+            inst.sector_tint=active_native_model_sector_tint;
+            inst.sector_tint_valid=active_native_model_sector_tint_valid;
+            inst.owning_sector_id=active_native_model_sector_id;
+            inst.owning_sector_valid=active_native_model_sector_id_valid;
+        }
+        // curLightingMode (rdModel3_Draw's effective Thing/global cap):
+        // the verified rdModel3 global block is +0x48 from original JK.
+        // This is sampled per instance because COG can change it each frame.
+        constexpr uintptr_t effective_light_mode_addr=0x0073C218U;
+        auto const light_mode=jkgm::native_draw_read(active_model_mesh_state,
+            &native_model_mesh_state::light_mode,[&]() -> std::optional<int32_t> {
+                if(!gpu_span_readable(reinterpret_cast<void const *>(effective_light_mode_addr),4))
+                    return std::nullopt;
+                int32_t value=0;
+                std::memcpy(&value,reinterpret_cast<void const *>(effective_light_mode_addr),4);
+                return value;
+            });
+        if(!light_mode)return false;
+        int32_t const lighting_cap=*light_mode;
+        if(lighting_cap<0) {
+            if(the_config->profile_renderer) ++gpu_native_stats.lighting_native;
+            gpu_log_fallback(m,"unsupported_thing_lighting_mode");
+            return false;
+        }
+        inst.effective_light_mode=
+            static_cast<float>(std::min(lighting_cap,3));
+        if(!snapshot_gpu_3do_lighting(m,inst.transform.data(),inst)) {
+            if(the_config->profile_renderer) ++gpu_native_stats.lighting_native;
+            gpu_log_fallback(m,"unsupported_dynamic_lighting_or_light_count");
+            return false;
+        }
+    }
+    // Register identity only for a successfully enqueued visible mesh;
+    // native fallback/invalid lighting must not consume node occurrences.
+    if(!shadow_only && active_native_decal_receiver &&
+       active_native_shadow_owner && active_native_decal_model) {
+        inst.decal_receiver_thing=active_native_shadow_owner;
+        inst.decal_receiver_model=active_native_decal_model;
+        inst.decal_receiver_mesh=reinterpret_cast<uintptr_t>(mesh);
+        inst.decal_receiver_geoset=native_draw_decal_geoset();
+        inst.decal_receiver_revision=source_signature;
+        inst.decal_receiver_occurrence=++moving_mesh_occurrences[
+            {active_native_shadow_owner,reinterpret_cast<uintptr_t>(mesh)}];
+    }
+    if(!shadow_only && !inst.camera_hud &&
+       the_config->profile_renderer &&
+       inst.nonrigid_light_transform)
+        ++gpu_native_stats.nonrigid_lit_cached;
+    pending_gpu_instances.emplace_back(std::move(inst));
+    if(the_config->profile_renderer) ++gpu_native_stats.queued;
+    return !shadow_only;
+}
 }
 
 bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
@@ -2615,6 +2757,44 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
     // Excluded/invisible Things never enter either shadow map; they still
     // render normally through JK or the visible GPU 3DO path.
     if(shadow_only && !casts_sun_shadows)return false;
+    auto *slot=(!shadow_only && !force_shadow_only && active_model_mesh_state)
+        ?active_model_mesh_state->prepared_slot:nullptr;
+    if(slot && mesh && matrix && pending_gpu_instances.size()<16384 &&
+       slot->mesh==mesh && active_model_mesh_state->geo_mode.ready &&
+       active_model_mesh_state->geo_mode.value &&
+       (slot->empty_source ||
+        (slot->geometry && slot->geo_mode==*active_model_mesh_state->geo_mode.value))) {
+        if(the_config->profile_renderer)++native_totals.prepared_hits;
+        if(slot->empty_source) {
+            if(the_config->profile_renderer) {
+                ++gpu_native_stats.empty_mesh_native;
+                ++native_totals.prepared_empty_hits;
+            }
+            return true;
+        }
+        auto const &m=slot->header;
+        if(the_config->profile_renderer)++gpu_native_stats.attempted;
+        auto const camera=jkgm::native_draw_read(active_model_mesh_state,
+            &native_model_mesh_state::camera,[] {
+                if(the_config->profile_renderer)++native_totals.mesh_camera_reads;
+                return jkgm::read_active_render_camera();
+            });
+        if(!camera.valid) {
+            if(the_config->profile_renderer)++gpu_native_stats.lighting_native;
+            gpu_log_fallback(m,"camera_unavailable");
+            return false;
+        }
+        bool const near_shadow=shadow_enabled &&
+            native_mesh_overlaps_shadow_light(m,matrix);
+        if(gpu_mesh_outside_native_frustum(m,matrix,camera,true) && !near_shadow) {
+            if(the_config->profile_renderer)++gpu_native_stats.culled;
+            return true;
+        }
+        if(the_config->profile_renderer)++gpu_native_stats.cache_hits;
+        return submit_gpu_3do_instance(mesh,m,matrix,slot->geo_mode,
+            false,casts_sun_shadows,slot->id,slot->source_signature,slot->geometry);
+    }
+    if(slot && the_config->profile_renderer)++native_totals.prepared_misses;
     if(!the_config || (!the_config->use_gpu_cache && !shadow_only) ||
        !mesh || !matrix || pending_gpu_instances.size()>=16384 ||
        // Single VirtualQuery per candidate, including the optional RGB
@@ -2635,6 +2815,7 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
             ++gpu_native_stats.empty_mesh_native;
         // JK has no faces or positions to draw for an empty hierarchy node.
         // Avoid revalidating it as broken geometry on every frame.
+        if(slot && !shadow_only)*slot={mesh,m,0,true,0,0,{}};
         return !shadow_only;
     }
     float const *vertex_rgb=nullptr;
@@ -2962,95 +3143,15 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
         }
         return false;
     }
-    gpu_3do_instance inst;
-    inst.id=it->second.id;
-    inst.geometry=it->second.geometry;
-    // Copied once per owning Thing in rdModel3_Draw, not per mesh callback.
-    inst.thing_opacity=active_native_thing_opacity.opacity;
-    inst.thing_dither=active_native_thing_opacity.dither;
-    inst.shadow_only=shadow_only;
-    inst.effective_geometry_mode=static_cast<uint32_t>(
-        jkgm::gpu_3do_effective_geo_mode(current_geo_mode,m.geometry_mode));
-    inst.camera_hud=active_native_model_camera_hud;
-    inst.camera_hud_world_depth=jkgm::camera_hud_uses_world_depth(
-        inst.camera_hud,active_native_model_thing_flags);
-    inst.skybox_vertex_lighting=jkgm::thing_uses_skybox_vertex_lights(
-        active_native_model_thing_flags,inst.camera_hud);
-    inst.casts_sun_shadows=casts_sun_shadows;
-    // Receiving sunlight/SSAO is distinct from writing shadow depth.
-    // SithThing flag 0x20 and Camera HUDs remain light-exempt.
-    inst.world_lighting_exempt=!casts_sun_shadows;
-    inst.shadow_owner=active_native_shadow_owner;
-    inst.spotlight_shadow_family=active_native_spotlight_family;
-    inst.dynamic_sun_caster=active_native_shadow_dynamic;
-    // Snapshot ONCE from rdModel3_Draw; every hierarchy node inherits
-    // identical Thing radius/center even if animated node matrices differ.
-    inst.owning_thing_world_position=active_native_model_world_position;
-    inst.owning_thing_world_position_valid=
-        active_native_model_world_position_valid;
-    inst.owning_thing_lod_radius=active_native_model_lod_radius;
-    inst.owning_thing_lod_radius_valid=active_native_model_lod_radius_valid;
-    // Depth-only casters need no native MAT residency, point lights,
-    // colormap or per-Thing lighting cap. Preserve the native render call.
-    std::memcpy(inst.transform.data(),matrix,sizeof(float)*12);
-    for(float v:inst.transform)if(!std::isfinite(v))return false;
-    if(!shadow_only && !inst.camera_hud) {
-        // Skybox ThingFlag 0x20 retains its authored JK lighting, but
-        // never inherits the owning sector's CMP/sector color effects.
-        // Keep the instance's neutral colormap/tint/sector defaults.
-        if(!inst.skybox_vertex_lighting) {
-            inst.colormap_tint=read_gpu_3do_colormap_tint();
-            inst.sector_tint=active_native_model_sector_tint;
-            inst.sector_tint_valid=active_native_model_sector_tint_valid;
-            inst.owning_sector_id=active_native_model_sector_id;
-            inst.owning_sector_valid=active_native_model_sector_id_valid;
-        }
-        // curLightingMode (rdModel3_Draw's effective Thing/global cap):
-        // the verified rdModel3 global block is +0x48 from original JK.
-        // This is sampled per instance because COG can change it each frame.
-        constexpr uintptr_t effective_light_mode_addr=0x0073C218U;
-        auto const light_mode=jkgm::native_draw_read(active_model_mesh_state,
-            &native_model_mesh_state::light_mode,[&]() -> std::optional<int32_t> {
-                if(!gpu_span_readable(reinterpret_cast<void const *>(effective_light_mode_addr),4))
-                    return std::nullopt;
-                int32_t value=0;
-                std::memcpy(&value,reinterpret_cast<void const *>(effective_light_mode_addr),4);
-                return value;
-            });
-        if(!light_mode)return false;
-        int32_t const lighting_cap=*light_mode;
-        if(lighting_cap<0) {
-            if(the_config->profile_renderer) ++gpu_native_stats.lighting_native;
-            gpu_log_fallback(m,"unsupported_thing_lighting_mode");
-            return false;
-        }
-        inst.effective_light_mode=
-            static_cast<float>(std::min(lighting_cap,3));
-        if(!snapshot_gpu_3do_lighting(m,inst.transform.data(),inst)) {
-            if(the_config->profile_renderer) ++gpu_native_stats.lighting_native;
-            gpu_log_fallback(m,"unsupported_dynamic_lighting_or_light_count");
-            return false;
-        }
+    if(slot && !shadow_only) {
+        // Publish only validated source and current-mode residency. Per-Thing
+        // transforms, culling, lighting and decal identity remain live.
+        *slot={mesh,m,current_geo_mode,false,it->second.id,
+               it->second.source_signature,it->second.geometry};
     }
-    // Register identity only for a successfully enqueued visible mesh;
-    // native fallback/invalid lighting must not consume node occurrences.
-    if(!shadow_only && active_native_decal_receiver &&
-       active_native_shadow_owner && active_native_decal_model) {
-        inst.decal_receiver_thing=active_native_shadow_owner;
-        inst.decal_receiver_model=active_native_decal_model;
-        inst.decal_receiver_mesh=reinterpret_cast<uintptr_t>(mesh);
-        inst.decal_receiver_geoset=native_draw_decal_geoset();
-        inst.decal_receiver_revision=it->second.source_signature;
-        inst.decal_receiver_occurrence=++moving_mesh_occurrences[
-            {active_native_shadow_owner,reinterpret_cast<uintptr_t>(mesh)}];
-    }
-    if(!shadow_only && !inst.camera_hud &&
-       the_config->profile_renderer &&
-       inst.nonrigid_light_transform)
-        ++gpu_native_stats.nonrigid_lit_cached;
-    pending_gpu_instances.emplace_back(std::move(inst));
-    if(the_config->profile_renderer) ++gpu_native_stats.queued;
-    return !shadow_only;
+    return submit_gpu_3do_instance(mesh,m,matrix,current_geo_mode,
+        shadow_only,casts_sun_shadows,it->second.id,it->second.source_signature,
+        it->second.geometry);
 }
 // Read-only offscreen 3DO geometry acquisition, completely independent of
 // native rdModel3_Draw traversal and the main camera's portal visibility.
@@ -3433,6 +3534,7 @@ void jkgm::reset_gpu_3do_instances()
     gpu_mesh_cache.clear(); // level/renderer reset, never memory-pressure eviction
     gpu_offscreen_model_topology.clear(); // levels can recycle model pointers
     direct_model_topologies.clear();
+    prepared_native_models.clear();
     clear_thing_opacity(); // levels may recycle Thing pointers/signatures
     gpu_mesh_cache_peak=0;
     gpu_mesh_cache_last_trim_frame=0;

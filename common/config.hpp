@@ -94,6 +94,7 @@ namespace jkgm {
         bool experimental_gpu_3do_model_draw_memo = false;
         bool experimental_gpu_3do_direct_model_audit = false;
         bool experimental_gpu_3do_direct_model_draw = false;
+        bool experimental_gpu_3do_prepared_models = false;
         bool experimental_gpu_3do_simd_backfaces = false;
         bool experimental_gpu_3do_specialized_collection = false;
         bool experimental_gpu_3do_compact_backfaces = false; // cached plane equations

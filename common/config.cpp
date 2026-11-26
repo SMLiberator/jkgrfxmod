@@ -517,6 +517,9 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             j.at("experimental_procedural_sprite_quads").get_to(
                 rv->experimental_procedural_sprite_quads);
         }
+        if(j.contains("experimental_gpu_3do_prepared_models")) {
+            j.at("experimental_gpu_3do_prepared_models").get_to(rv->experimental_gpu_3do_prepared_models);
+        }
         if(j.contains("experimental_gpu_3do_direct_model_draw")) {
             j.at("experimental_gpu_3do_direct_model_draw").get_to(rv->experimental_gpu_3do_direct_model_draw);
         }
