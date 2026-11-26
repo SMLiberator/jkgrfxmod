@@ -358,6 +358,18 @@ schedule_gpu_3do_instancing(
     }
     return ordered;
 }
+// Three RGBA32F texels store affine rows; directions have w=0, origin w=1.
+inline std::array<std::array<float,4>,3> gpu_3do_instance_transform_texels(
+    std::array<float,12> const &m) {
+    return {{{{m[0],m[3],m[6],m[9]}},
+             {{m[1],m[4],m[7],m[10]}},
+             {{m[2],m[5],m[8],m[11]}}}};
+}
+inline bool gpu_3do_instance_buffer_can_fit(
+    size_t transforms,size_t membership_texels,size_t max_texels) {
+    return transforms<=16777216U && transforms<=max_texels/3U &&
+        membership_texels<=max_texels-transforms*3U;
+}
 // Main-camera collector: classify a mesh once per source instance, then
 // address its immutable group slots directly. All slot IDs are frame-local;
 // zero is the empty sentinel. Exact material/policy variants get distinct
@@ -373,6 +385,7 @@ public:
         uintptr_t material=0U;
         gpu_3do_alpha_mode policy=gpu_3do_alpha_mode::solid;
         size_t next=0U;
+        size_t buffer_offset=0U;
         bool eligible=false;
         std::vector<Member> members;
     };

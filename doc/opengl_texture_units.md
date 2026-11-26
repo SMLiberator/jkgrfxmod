@@ -30,6 +30,9 @@ reference the same unit within a program.
 | 23 | Local hemi/cube or shared reflection array | Shared reflection array | Unused | Unused |
 | 24–25 | MatCap color (sRGB) and surface mask (linear) | MatCap color (sRGB) and surface mask (linear) | Unused | Unused |
 | 26–27 | Clearcoat surface and normal maps (linear) | Clearcoat surface and normal maps (linear) | Unused | Unused |
+| 28 | Face descriptor buffer | Unused | Unused | Unused |
+| 29 | Instance transform/membership buffer | Surface descriptor buffer | Unused | Unused |
+| 30 | Unused | Sector descriptor buffer | Unused | Unused |
 
 The separate dielectric clearcoat layer uses linear `sampler2D` units
 26 and 27, and `JKGM_CLEARCOAT_LAYER` is compiled only on devices

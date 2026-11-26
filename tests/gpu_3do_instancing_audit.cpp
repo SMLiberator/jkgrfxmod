@@ -31,6 +31,17 @@ static gpu_3do_instancing_audit_record record(
     return r;
 }
 int main() {
+    {
+        std::array<float,12> const matrix{{1,2,3,4,5,6,7,8,9,10,11,12}};
+        auto const rows=gpu_3do_instance_transform_texels(matrix);
+        for(size_t row=0;row<3U;++row)
+            for(size_t col=0;col<4U;++col)
+                assert(rows[row][col]==matrix[col*3U+row]);
+        assert(gpu_3do_instance_buffer_can_fit(10U,5U,35U));
+        assert(!gpu_3do_instance_buffer_can_fit(10U,5U,34U));
+        assert(!gpu_3do_instance_buffer_can_fit(10U,0U,29U));
+        assert(!gpu_3do_instance_buffer_can_fit(16777217U,0U,100000000U));
+    }
     // Filename is purposefully absent from the identity key. CloneModel can
     // retain "gen_empty.3do" while every mesh/material is independently edited.
     char const *filename="gen_empty.3do";

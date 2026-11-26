@@ -880,6 +880,8 @@ namespace jkgm {
         std::vector<sector_crossing_plane_range> sector_crossing_ranges;
         GLuint sector_crossing_plane_texture=0;
         GLuint sector_crossing_plane_buffer=0;
+        GLuint model_instance_texture=0,model_instance_buffer=0;
+        GLint model_instance_max_texels=-1;
         // The scene is rendered AFTER the prior scene is presented. Retain
         // the camera used to transform these 3DOs, not the live rdCamera from
         // the next frame when Camera Thing HUDs are composited.
@@ -1589,6 +1591,11 @@ namespace jkgm {
                      " schedule=",profile_window.gpu_instancing_schedule_us/frames,
                      " reorder=",profile_window.gpu_instancing_reorder_us/frames,
                      " NOTE=CPU_us_per_frame;audit_opt_in_sampled_every_30_frames");
+            LOG_INFO("PERF gpu_3do instance_buffer bytes_avg=",
+                profile_window.gpu_instance_buffer_bytes/frames,
+                " uploads_avg=",profile_window.gpu_instance_buffer_uploads/frames,
+                " draws_avg=",profile_window.gpu_instance_buffer_draws/frames,
+                " NOTE=affine_rows_and_membership_texels");
             LOG_INFO("PERF gpu_3do_instancing enabled=",
                       the_config->enable_gpu_3do_instancing?1:0,
                       " calls_avg=",
@@ -2228,6 +2235,8 @@ namespace jkgm {
             // disappears. If the context is already gone, its objects go
             // away with it; do not issue GL calls on an invalid context.
             if(hGLRC && wglGetCurrentContext()==hGLRC) {
+                if(model_instance_texture)glDeleteTextures(1,&model_instance_texture);
+                if(model_instance_buffer)glDeleteBuffers(1,&model_instance_buffer);
                 if(smoke_half_stencil) {
                     glDeleteRenderbuffers(1,&smoke_half_stencil);
                     smoke_half_stencil=0;
@@ -5193,6 +5202,7 @@ namespace jkgm {
                 std::array<std::array<float,12>,
                     shaders::gpu_3do_preview_shader::max_sprite_instances> none{};
                 prog.set_sprite_instances(none,0);
+                prog.set_buffered_instances(-1);
             }
             bool const crossing_buffer_ready=
                 the_config->enable_sector_crossing_lighting &&
@@ -6097,6 +6107,72 @@ namespace jkgm {
                                     draws.begin()+tail+1);
                 }
             }
+            // One streaming texture buffer for this opaque pass. Transform
+            // rows use stable context indices, membership lists pack four IDs
+            // per texel. Capacity failure preserves 32-instance batches.
+            bool buffered_model_batches=false;
+            if(collect_model_batches &&
+               the_config->experimental_gpu_3do_buffered_instancing) {
+                if(model_instance_max_texels<0) {
+                    GLint combined=0,vertex=0;
+                    glGetIntegerv(GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS,&combined);
+                    glGetIntegerv(GL_MAX_VERTEX_TEXTURE_IMAGE_UNITS,&vertex);
+                    model_instance_max_texels=0;
+                    if(combined>texture_units::forward_model_instance_data &&
+                       vertex>=3)
+                        glGetIntegerv(GL_MAX_TEXTURE_BUFFER_SIZE,
+                                      &model_instance_max_texels);
+                }
+                size_t membership_texels=0U;
+                for(auto const &anchor:draws) {
+                    if(anchor.model_batch_group==0U)continue;
+                    auto const n=model_collector.range(
+                        anchor.model_batch_group).members.size();
+                    membership_texels+=(n+3U)/4U;
+                }
+                if(membership_texels!=0U &&
+                   gpu_3do_instance_buffer_can_fit(contexts.size(),
+                       membership_texels,size_t(std::max(model_instance_max_texels,0)))) {
+                    static thread_local std::vector<std::array<float,4>> texels;
+                    texels.clear();
+                    texels.reserve(contexts.size()*3U+membership_texels);
+                    for(auto const &context:contexts) {
+                        auto const rows=gpu_3do_instance_transform_texels(context.modelview);
+                        texels.insert(texels.end(),rows.begin(),rows.end());
+                    }
+                    for(auto const &anchor:draws) {
+                        if(anchor.model_batch_group==0U)continue;
+                        auto &slot=model_collector.range(anchor.model_batch_group);
+                        slot.buffer_offset=texels.size();
+                        for(size_t i=0;i<slot.members.size();i+=4U) {
+                            std::array<float,4> ids{};
+                            for(size_t j=0;j<4U && i+j<slot.members.size();++j)
+                                ids[j]=float(slot.members[i+j].context-contexts.data());
+                            texels.push_back(ids);
+                        }
+                    }
+                    if(!model_instance_buffer)glGenBuffers(1,&model_instance_buffer);
+                    if(!model_instance_texture)glGenTextures(1,&model_instance_texture);
+                    if(model_instance_buffer && model_instance_texture) {
+                        for(unsigned i=0;i<8U && glGetError()!=GL_NO_ERROR;++i) {}
+                        glBindBuffer(GL_TEXTURE_BUFFER,model_instance_buffer);
+                        glBufferData(GL_TEXTURE_BUFFER,
+                            static_cast<GLsizeiptr>(texels.size()*sizeof(texels[0])),
+                            texels.data(),GL_STREAM_DRAW);
+                        gl::set_active_texture_unit_raw(texture_units::forward_model_instance_data);
+                        gl::bind_texture_raw(GL_TEXTURE_BUFFER,model_instance_texture);
+                        glTexBuffer(GL_TEXTURE_BUFFER,GL_RGBA32F,model_instance_buffer);
+                        glBindBuffer(GL_TEXTURE_BUFFER,0U);
+                        gl::set_active_texture_unit_raw(0);
+                        buffered_model_batches=glGetError()==GL_NO_ERROR;
+                        if(gpu_profiling && buffered_model_batches) {
+                            profile_frame.gpu_instance_buffer_bytes+=
+                                texels.size()*sizeof(texels[0]);
+                            ++profile_frame.gpu_instance_buffer_uploads;
+                        }
+                    }
+                }
+            }
             if(gpu_profiling)
                 profile_frame.gpu_preview_sort_us[pass_index]+=
                     elapsed_profile_us(sort_begin,profile_clock::now());
@@ -6223,9 +6299,10 @@ namespace jkgm {
                 size_t sprite_batch_count=0;
                 size_t model_batch_count=0;
                 if(compact_members) {
-                    model_batch_count=std::min(
-                        compact_members->size()-compact_offset,
-                        size_t(shaders::gpu_3do_preview_shader::max_sprite_instances));
+                    model_batch_count=buffered_model_batches
+                        ?compact_members->size()-compact_offset
+                        :std::min(compact_members->size()-compact_offset,
+                            size_t(shaders::gpu_3do_preview_shader::max_sprite_instances));
                 } else if(draw.model_batch_group!=0U && !transparent) {
                     size_t end=draw_start+1;
                     while(end<draws.size() &&
@@ -6727,7 +6804,19 @@ namespace jkgm {
                 // a single glDrawElements can replace a multi-draw when
                 // the exact index sequence would remain unchanged.
                 size_t emitted_subranges=1U;
-                if(sprite_batch_count>1 || model_batch_count>1) {
+                if(buffered_model_batches && compact_members) {
+                    prog.set_buffered_instances(static_cast<int>(
+                        model_collector.range(draw.model_batch_group).buffer_offset));
+                    glDrawElementsInstanced(GL_TRIANGLES,
+                        static_cast<GLsizei>(group.count),
+                        gpu_mesh.raw_index_type(),
+                        reinterpret_cast<void const *>(
+                            gpu_mesh.index_offset(group.offset)),
+                        static_cast<GLsizei>(model_batch_count));
+                    prog.set_buffered_instances(-1);
+                    active_instance=nullptr;
+                    if(gpu_profiling)++profile_frame.gpu_instance_buffer_draws;
+                } else if(sprite_batch_count>1 || model_batch_count>1) {
                     // Existing SPR array supports the same rigid 3DO matrices.
                     std::array<std::array<float,12>,
                         shaders::gpu_3do_preview_shader::max_sprite_instances>

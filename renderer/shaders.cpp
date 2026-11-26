@@ -841,6 +841,8 @@ jkgm::shaders::gpu_3do_preview_shader::gpu_3do_preview_shader(
           the_program,"sprite_instance_count"))
     , sprite_instance_matrix(gl::get_uniform_location(
           the_program,"sprite_instance_matrix[0]"))
+    , buffered_instance_offset(gl::get_uniform_location(
+          the_program,"buffered_instance_offset"))
     , procedural_sprite(gl::get_uniform_location(the_program,"procedural_sprite"))
     , procedural_sprite_uv(gl::get_uniform_location(the_program,"procedural_sprite_uv"))
     , procedural_sprite_light(gl::get_uniform_location(the_program,"procedural_sprite_light"))
@@ -1095,6 +1097,10 @@ void jkgm::shaders::gpu_3do_preview_shader::set_sprite_instances(
     glUniform4fv(sprite_instance_matrix.get(),
                  static_cast<GLsizei>(count*4U),packed.data());
     gl::set_uniform_integer(sprite_instance_count,static_cast<int>(count));
+}
+void jkgm::shaders::gpu_3do_preview_shader::set_buffered_instances(int texel_offset)
+{
+    gl::set_uniform_integer(buffered_instance_offset,texel_offset);
 }
 void jkgm::shaders::gpu_3do_preview_shader::set_projection(
     point<4,float> p)

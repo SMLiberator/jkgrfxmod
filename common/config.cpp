@@ -517,6 +517,10 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             j.at("experimental_procedural_sprite_quads").get_to(
                 rv->experimental_procedural_sprite_quads);
         }
+        if(j.contains("experimental_gpu_3do_buffered_instancing")) {
+            j.at("experimental_gpu_3do_buffered_instancing").get_to(
+                rv->experimental_gpu_3do_buffered_instancing);
+        }
         if(j.contains("experimental_gpu_3do_indexed_instancing")) {
             j.at("experimental_gpu_3do_indexed_instancing").get_to(
                 rv->experimental_gpu_3do_indexed_instancing);

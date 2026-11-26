@@ -47,6 +47,8 @@ uniform vec4 view_right, view_forward, view_up, view_origin;
 // Visible SPRs: GL 3.3 gl_InstanceID selects one cached quad transform
 // from a packed uniform array. Ordinary models continue to use view_*.
 uniform int sprite_instance_count;
+uniform samplerBuffer gpu_3do_instance_data;
+uniform int buffered_instance_offset; // negative disables indexed buffer path
 uniform vec4 sprite_instance_matrix[128]; // 32 instances * (right, forward, up, origin)
 uniform vec4 projection; // tan(half horizontal FOV), aspect, inverse far
 uniform float sprite_depth_bias; // authored Y, affects clip-space Z only
@@ -144,7 +146,18 @@ void main() {
     vec4 model_forward=view_forward;
     vec4 model_up=view_up;
     vec4 model_origin=view_origin;
-    if(sprite_instance_count>0) {
+    if(buffered_instance_offset>=0) {
+        vec4 ids=texelFetch(gpu_3do_instance_data,
+                           buffered_instance_offset+gl_InstanceID/4);
+        int base=int(ids[gl_InstanceID%4])*3;
+        vec4 r0=texelFetch(gpu_3do_instance_data,base);
+        vec4 r1=texelFetch(gpu_3do_instance_data,base+1);
+        vec4 r2=texelFetch(gpu_3do_instance_data,base+2);
+        model_right=vec4(r0.x,r1.x,r2.x,0.0);
+        model_forward=vec4(r0.y,r1.y,r2.y,0.0);
+        model_up=vec4(r0.z,r1.z,r2.z,0.0);
+        model_origin=vec4(r0.w,r1.w,r2.w,1.0);
+    } else if(sprite_instance_count>0) {
         int base=gl_InstanceID*4;
         model_right=sprite_instance_matrix[base];
         model_forward=sprite_instance_matrix[base+1];

@@ -317,6 +317,7 @@ namespace jkgm {
         class gpu_3do_preview_shader : public opengl_shader {
             gl::uniform_location_id view_right,view_forward,view_up,view_origin;
             gl::uniform_location_id sprite_instance_count,sprite_instance_matrix;
+            gl::uniform_location_id buffered_instance_offset;
             gl::uniform_location_id procedural_sprite,procedural_sprite_uv,
                                     procedural_sprite_light;
             gl::uniform_location_id projection;
@@ -404,6 +405,7 @@ namespace jkgm {
             void set_sprite_instances(
                 std::array<std::array<float,12>,max_sprite_instances> const &models,
                 size_t count);
+            void set_buffered_instances(int texel_offset);
             void set_projection(point<4,float> projection_params);
             void set_packed_vertex_format(int format);
             void set_procedural_sprite(bool enabled,point<4,float> uv,
