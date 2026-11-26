@@ -40,6 +40,7 @@
     "experimental_gpu_3do_indexed_instancing": true,
     "experimental_gpu_3do_buffered_instancing": false,
     "experimental_gpu_3do_shared_collection_layout": false,
+    "experimental_gpu_3do_whole_mesh_acceptance": false,
     "profile_audio": false,
     "use_gpu_cache": true,
     "gpu_3do_vertex_format": 1,

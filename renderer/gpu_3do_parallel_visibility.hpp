@@ -18,7 +18,8 @@ struct gpu_3do_parallel_visibility {
     gpu_3do_matrix34 modelview{};
     std::array<float,3> local_eye{};
     std::vector<gpu_3do_cull_reason> groups;
-    bool ready=false,mesh_outside=false;
+    bool ready=false,mesh_outside=false,mesh_inside=false;
+    size_t group_frustum_tests_avoided=0U;
     bool has_local_eye=false,reversed_winding=false;
 };
 
@@ -29,10 +30,13 @@ inline void prepare_gpu_3do_parallel_visibility(
     gpu_3do_matrix34 const &native_view,
     gpu_3do_native_frustum const &frustum,
     bool have_perspective_frustum,
-    gpu_3do_parallel_visibility &out)
+    gpu_3do_parallel_visibility &out,
+    bool accept_whole_mesh=false)
 {
     out.ready=false;
     out.mesh_outside=false;
+    out.mesh_inside=false;
+    out.group_frustum_tests_avoided=0U;
     if(!inst.geometry)return;
     auto const &geo=*inst.geometry;
     out.modelview=gpu_3do_native_modelview(native_view,inst.transform);
@@ -40,7 +44,8 @@ inline void prepare_gpu_3do_parallel_visibility(
     if(have_perspective_frustum &&
        geo.cached_group_bounds(mesh_min,mesh_max) &&
        gpu_3do_batch_outside_frustum(
-           frustum,out.modelview,mesh_min,mesh_max)) {
+           frustum,out.modelview,mesh_min,mesh_max,
+           accept_whole_mesh?&out.mesh_inside:nullptr)) {
         out.mesh_outside=true;
         out.ready=true;
         return;
@@ -51,7 +56,9 @@ inline void prepare_gpu_3do_parallel_visibility(
     for(size_t i=0;i<geo.groups.size();++i) {
         auto const &group=geo.groups[i];
         auto reason=gpu_3do_cull_reason::visible;
-        if(have_perspective_frustum &&
+        bool const accepted=out.mesh_inside && group.count!=0U;
+        if(accepted)++out.group_frustum_tests_avoided;
+        if(have_perspective_frustum && !accepted &&
            gpu_3do_batch_outside_frustum(
                frustum,out.modelview,
                group.bounds_min,group.bounds_max)) {

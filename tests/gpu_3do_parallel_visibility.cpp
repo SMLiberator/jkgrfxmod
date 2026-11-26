@@ -79,6 +79,24 @@ int main() {
         }
     }
 
+    // Acceptance must preserve every cull reason for contained and
+    // intersecting meshes, including double-sided and back-facing groups.
+    gpu_3do_parallel_visibility accepted{};
+    prepare_gpu_3do_parallel_visibility(base,identity(),f,true,accepted,true);
+    assert(!accepted.mesh_inside && accepted.groups==expected.groups);
+    auto contained_geo=std::make_shared<gpu_3do_geometry>(*geo);
+    contained_geo->groups[2].bounds_min=contained_geo->groups[0].bounds_min;
+    contained_geo->groups[2].bounds_max=contained_geo->groups[0].bounds_max;
+    auto contained=base;
+    contained.geometry=contained_geo;
+    gpu_3do_parallel_visibility legacy{};
+    prepare_gpu_3do_parallel_visibility(contained,identity(),f,true,legacy);
+    prepare_gpu_3do_parallel_visibility(contained,identity(),f,true,accepted,true);
+    assert(accepted.mesh_inside && accepted.group_frustum_tests_avoided==4U);
+    assert(accepted.groups==legacy.groups);
+    prepare_gpu_3do_parallel_visibility(contained,identity(),f,false,accepted,true);
+    assert(!accepted.mesh_inside && accepted.group_frustum_tests_avoided==0U);
+
     // A worker exception must finish the barrier and permit safe serial
     // fallback. Subsequent dispatches should still be usable.
     assert(!workers.execute([](unsigned lane) {

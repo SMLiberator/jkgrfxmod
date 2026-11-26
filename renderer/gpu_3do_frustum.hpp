@@ -54,8 +54,10 @@ namespace jkgm {
         gpu_3do_native_frustum const &f,
         gpu_3do_matrix34 const &m,
         std::array<float,3> const &lo,
-        std::array<float,3> const &hi)
+        std::array<float,3> const &hi,
+        bool *fully_inside=nullptr)
     {
+        if(fully_inside)*fully_inside=false;
         if(!std::isfinite(f.near_plane)||!std::isfinite(f.far_plane)||
            !std::isfinite(f.far_left)||!std::isfinite(f.right)||
            !std::isfinite(f.far_top)||!std::isfinite(f.bottom))
@@ -86,6 +88,39 @@ namespace jkgm {
             return true;
         if(v[2]-f.far_top*v[1]-ez-std::fabs(f.far_top)*ey>0)
             return true;
-        return v[2]-f.bottom*v[1]+ez+std::fabs(f.bottom)*ey<0;
+        if(v[2]-f.bottom*v[1]+ez+std::fabs(f.bottom)*ey<0)
+            return true;
+        if(fully_inside) {
+            // Same conservative camera-space enclosure as rejection.
+            // Opposite support points must be strictly inside EVERY
+            // active plane. Keep touching/near-boundary boxes on the
+            // legacy group-test path, allowing for float roundoff.
+            double magnitude=1.0;
+            for(int axis=0;axis<3;++axis) {
+                double axis_bound=std::fabs(double(m[9+axis]));
+                for(int k=0;k<3;++k)
+                    axis_bound+=std::fabs(double(m[3*k+axis]))*
+                        std::max(std::fabs(double(lo[k])),std::fabs(double(hi[k])));
+                magnitude=std::max(magnitude,axis_bound);
+            }
+            double const slope=std::max({1.0,std::fabs(double(f.far_left)),
+                std::fabs(double(f.right)),std::fabs(double(f.far_top)),
+                std::fabs(double(f.bottom))});
+            double const margin=1e-5*(magnitude*slope+
+                std::fabs(double(f.near_plane))+
+                (f.clip_far?std::fabs(double(f.far_plane)):0.0));
+            *fully_inside=
+                double(v[1])-ey-double(f.near_plane)>margin &&
+                (!f.clip_far || double(f.far_plane)-v[1]-ey>margin) &&
+                double(v[0])-double(f.far_left)*v[1]-ex-
+                    std::fabs(double(f.far_left))*ey>margin &&
+                double(f.right)*v[1]-v[0]-ex-
+                    std::fabs(double(f.right))*ey>margin &&
+                double(f.far_top)*v[1]-v[2]-ez-
+                    std::fabs(double(f.far_top))*ey>margin &&
+                double(v[2])-double(f.bottom)*v[1]-ez-
+                    std::fabs(double(f.bottom))*ey>margin;
+        }
+        return false;
     }
 }

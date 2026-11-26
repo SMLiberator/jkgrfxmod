@@ -36,5 +36,16 @@ int main() {
     assert(!bounds_out({{-1,8,-1}},{{1,12,1}},mirror));
     auto stretched=id;stretched[0]=25;
     assert(!bounds_out({{-1,8,-1}},{{1,12,1}},stretched));
+    bool inside=false;
+    assert(!jkgm::gpu_3do_batch_outside_frustum(f,id,{{-1,8,-1}},{{1,12,1}},&inside) && inside);
+    assert(!jkgm::gpu_3do_batch_outside_frustum(f,id,{{9,8,-1}},{{12,12,1}},&inside) && !inside);
+    assert(jkgm::gpu_3do_batch_outside_frustum(f,id,{{20,8,-1}},{{24,12,1}},&inside) && !inside);
+    assert(!jkgm::gpu_3do_batch_outside_frustum(f,id,{{-1,1,-1}},{{1,3,1}},&inside) && !inside);
+    assert(!jkgm::gpu_3do_batch_outside_frustum(f,id,{{-1,98,-1}},{{1,100,1}},&inside) && !inside);
+    assert(!jkgm::gpu_3do_batch_outside_frustum(f,mirror,{{-1,8,-1}},{{1,12,1}},&inside) && inside);
+    assert(!jkgm::gpu_3do_batch_outside_frustum(f,stretched,{{-1,8,-1}},{{1,12,1}},&inside) && !inside);
+    f.clip_far=0;
+    assert(!jkgm::gpu_3do_batch_outside_frustum(f,id,{{-1,120,-1}},{{1,125,1}},&inside) && inside);
+    assert(!jkgm::gpu_3do_batch_outside_frustum(f,id,{{2,8,-1}},{{1,12,1}},&inside) && !inside);
     return 0;
 }

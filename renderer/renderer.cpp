@@ -2133,6 +2133,10 @@ namespace jkgm {
                          " backface_culled_avg=",
                          profile_window.gpu_groups_backface_culled/frames,
                          " NOTE=actual_group_walks_shared_ordinary_alpha_counted_once");
+                LOG_INFO("PERF gpu_3do frustum_acceptance meshes_avg=",
+                         profile_window.gpu_mesh_frustum_accepted/frames,
+                         " group_tests_avoided_avg=",
+                         profile_window.gpu_group_frustum_tests_avoided/frames);
             }
             LOG_INFO("PERF geometry tris avg/max=", profile_window.tris / frames,
                      "/", peak_triangles,
@@ -5546,7 +5550,8 @@ namespace jkgm {
                                 prepare_gpu_3do_parallel_visibility(
                                     instances[index],native_view,native_frustum,
                                     have_perspective_frustum,
-                                    prepared_visibility[index]);
+                                    prepared_visibility[index],
+                                    the_config->experimental_gpu_3do_whole_mesh_acceptance);
                             }
                         });
                         if(gpu_profiling) {
@@ -5622,11 +5627,14 @@ namespace jkgm {
                 auto const modelview=parallel ?parallel->modelview:
                     gpu_3do_native_modelview(native_view,inst.transform);
                 std::array<float,3> mesh_min{},mesh_max{};
+                bool mesh_inside=parallel && parallel->mesh_inside;
                 if((parallel && parallel->mesh_outside) ||
                    (!parallel && have_perspective_frustum &&
                     inst.geometry->cached_group_bounds(mesh_min,mesh_max) &&
                     gpu_3do_batch_outside_frustum(
-                        native_frustum,modelview,mesh_min,mesh_max))) {
+                        native_frustum,modelview,mesh_min,mesh_max,
+                        the_config->experimental_gpu_3do_whole_mesh_acceptance
+                            ?&mesh_inside:nullptr))) {
                     // The entire immutable mesh is offscreen. Preserve the
                     // existing group profiling totals without walking every
                     // material range. No GPU uploads or uniforms are needed.
@@ -5637,6 +5645,11 @@ namespace jkgm {
                             inst.geometry->groups.size();
                     }
                     continue;
+                }
+                if(gpu_profiling && mesh_inside) {
+                    ++profile_frame.gpu_mesh_frustum_accepted;
+                    if(parallel)profile_frame.gpu_group_frustum_tests_avoided+=
+                        parallel->group_frustum_tests_avoided;
                 }
                 auto &context=contexts.emplace_back();
                 context.modelview=modelview;
@@ -5713,7 +5726,10 @@ namespace jkgm {
                     // whole cached draw ranges to avoid GL state work for
                     // entirely offscreen geometry. This is conservative:
                     // partially visible groups still reach OpenGL.
-                    if(!parallel && have_perspective_frustum &&
+                    bool const accepted_group=mesh_inside && group.count!=0U;
+                    if(!parallel && accepted_group && gpu_profiling)
+                        ++profile_frame.gpu_group_frustum_tests_avoided;
+                    if(!parallel && have_perspective_frustum && !accepted_group &&
                        gpu_3do_batch_outside_frustum(
                            native_frustum,context.modelview,
                            group.bounds_min,group.bounds_max)) {
