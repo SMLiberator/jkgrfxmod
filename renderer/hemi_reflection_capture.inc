@@ -26,8 +26,15 @@
                     global_env_retired.push_back(std::move(global_env_previous));
                 global_env_completed_sequence=0U;
             }
+            // An unsuccessful request must not turn a one-shot capture into
+            // an unbounded six-view render loop. New requests reset the budget.
+            if(global_env_attempt_sequence!=global_env_active_sequence) {
+                global_env_attempt_sequence=global_env_active_sequence;
+                global_env_attempt_count=0U;
+            }
             bool const capture_global=global_request &&
-                global_request->sequence!=global_env_completed_sequence;
+                global_request->sequence!=global_env_completed_sequence &&
+                global_env_attempt_count<global_env_max_attempts;
             if(!the_config->enable_reflections || !the_config->use_gpu_cache ||
                mode!=renderer_mode::ingame || !ogs ||
                !world_cache_target || !world_cache_target->ready ||
@@ -342,6 +349,13 @@
             };
             auto const now=std::chrono::steady_clock::now();
             for(auto const &candidate:candidates) {
+                if(candidate.is_global) {
+                    ++global_env_attempt_count;
+                    if(global_env_attempt_count==global_env_max_attempts)
+                        LOG_INFO("CaptureEnvMap final retry: sequence=",
+                                 global_env_active_sequence,
+                                 " (new request resets retry budget)");
+                }
                 uint64_t const selected_owner=candidate.is_global
                     ?candidate.exclude_owner
                     :((candidate.is_shared || candidate.is_debug)
@@ -1285,8 +1299,8 @@
                         " model_groups_bounds_rejected=",total_model_groups_culled,
                         " NOTE=world_geometry_no_distance_limit");
             }
-            if(the_config->profile_renderer)
-                ++reflection_refreshes_window[candidate.is_global?3U:
+            if(the_config->profile_renderer && !candidate.is_global)
+                ++reflection_refreshes_window[
                     candidate.is_shared?0U:paraboloid_mode?1U:2U];
             if(candidate.is_global) {
                 // Publish only after all six scene views and the complete
@@ -1353,6 +1367,8 @@
                         global_env_fade_seconds=global_request->fade_time;
                         global_env_fade_start=published_at;
                         global_env_completed_sequence=global_request->sequence;
+                        if(the_config->profile_renderer)
+                            ++reflection_refreshes_window[3U];
                         LOG_INFO("CaptureEnvMap published: source=",selected_owner,
                                  " face=",side," equirect=",side*4,"x",side*2,
                                  " fade=",global_env_fade_seconds,
@@ -1360,6 +1376,11 @@
                                  origin==global_env_fade_origin::composited_capture
                                      ?1:0);
                     }
+                } else {
+                    LOG_WARNING("CaptureEnvMap conversion failed: sequence=",
+                                global_env_active_sequence,
+                                " attempt=",global_env_attempt_count,
+                                " previous map retained");
                 }
                 reflection_probes.erase(0U);
                 continue;

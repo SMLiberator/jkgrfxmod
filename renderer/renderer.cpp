@@ -1034,6 +1034,9 @@ namespace jkgm {
         std::vector<std::unique_ptr<offscreen_capture_target>> global_env_retired;
         uint64_t global_env_completed_sequence=0U;
         uint64_t global_env_active_sequence=0U;
+        uint64_t global_env_attempt_sequence=0U;
+        unsigned global_env_attempt_count=0U;
+        static constexpr unsigned global_env_max_attempts=3U;
         std::chrono::steady_clock::time_point global_env_fade_start{};
         float global_env_fade_seconds=0.0f;
         std::unique_ptr<planar_reflection_capture_shader> hemi_capture_program;
@@ -2384,6 +2387,8 @@ namespace jkgm {
                 global_env_retired.clear();
                 global_env_completed_sequence=0U;
                 global_env_active_sequence=0U;
+                global_env_attempt_sequence=0U;
+                global_env_attempt_count=0U;
                 get_global_env_capture_controls().clear();
                 ssr_ready=false;
                 ssr_opaque_ready=false;

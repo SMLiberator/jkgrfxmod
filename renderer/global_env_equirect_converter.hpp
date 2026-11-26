@@ -227,8 +227,10 @@ void main() {
                  offscreen_capture_target &destination,int side,
                  std::array<float,3> const &empty_color) {
         if(!source.ready() || source.layers()!=6 || side<1 ||
-           !destination.ensure(4*side,2*side) || !ensure())
+           !destination.ensure(4*side,2*side) || !ensure()) {
+            LOG_WARNING("CaptureEnvMap converter target/program unavailable");
             return false;
+        }
         offscreen_capture_gl_scope restore;
         GLint prior_array=0;
         glActiveTexture(GL_TEXTURE0);
@@ -258,7 +260,10 @@ void main() {
         glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
         glGenerateMipmap(GL_TEXTURE_2D);
         glBindTexture(GL_TEXTURE_2D,GLuint(prior_2d));
-        return glGetError()==GL_NO_ERROR;
+        GLenum const error=glGetError();
+        if(error!=GL_NO_ERROR)
+            LOG_WARNING("CaptureEnvMap converter/capture GL error=",unsigned(error));
+        return error==GL_NO_ERROR;
     }
 };
 } // namespace jkgm
