@@ -5525,8 +5525,8 @@ namespace jkgm {
                      material.has_environment2 ||
                      effective_capture_reflection_mode(
                         material.reflection_mode)>=5);
-                // Classify each material blocker independently without
-                // changing the original conservative eligibility test.
+                // Classify material blockers before applying the opt-in
+                // shared-material policy. Audit and both collectors agree.
                 using Reject=gpu_3do_instancing_rejection;
                 uint32_t material_rejections=0U;
                 auto reason=[&](bool active,Reject cause) {
@@ -5549,7 +5549,10 @@ namespace jkgm {
                        Reject::clearcoat);
                 reason(material.displacement_factor!=0.0f,
                        Reject::displacement);
-                return material_rejections;
+                return gpu_3do_instancing_material_policy(
+                    material_rejections,
+                    the_config->experimental_gpu_3do_material_instancing,
+                    effective_capture_reflection_mode(material.reflection_mode));
             };
             // Candidate pointers must be stable until the last draw. At
             // most one context is appended per source instance, and the

@@ -57,6 +57,13 @@ uniform vec4 procedural_sprite_uv; // native pixel left,right,top,bottom
 uniform vec2 procedural_sprite_light; // face extra light, effective light mode
 out vec2 pixel_uv;
 out vec3 view_normal;
+// Both the uniform and buffered instance paths select their own affine
+// basis above. Flat columns are constant within each primitive; position
+// is perspective-correct interpolated, including for mirrored/scaled nodes.
+flat out vec3 fragment_view_right;
+flat out vec3 fragment_view_forward;
+flat out vec3 fragment_view_up;
+out vec3 fragment_native_view_position;
 // Decals reuse the existing light-anchor (xyz) and extra-light (w)
 // attributes as normalized projector coordinates and smooth angular alpha.
 uniform int decal_receiver_lighting;
@@ -208,6 +215,10 @@ void main() {
     float z = (model_up.z*sprite_vertex_position.z+
                model_forward.z*sprite_vertex_position.y+
                model_right.z*sprite_vertex_position.x)+model_origin.z;
+    fragment_view_right=model_right.xyz;
+    fragment_view_forward=model_forward.xyz;
+    fragment_view_up=model_up.xyz;
+    fragment_native_view_position=vec3(x,y,z);
     float h=max(projection.x,0.0001);
     float v=h/max(projection.y,0.0001);
     gl_Position=vec4(x/h,z/v,-projection.z,y);

@@ -77,7 +77,12 @@ uniform sampler2DArray hemi_reflection_map;
 #endif
 uniform vec3 hemi_right_axis,hemi_forward_axis,hemi_up_axis;
 uniform vec4 hemi_capture_info; // legacy x/y, ready, reflection mode
-uniform vec4 view_right, view_forward, view_up, view_origin;
+// Do not reconstruct fragment position or normals from draw-wide view_*
+// uniforms: those belong to only the first member of an instanced draw.
+flat in vec3 fragment_view_right;
+flat in vec3 fragment_view_forward;
+flat in vec3 fragment_view_up;
+in vec3 fragment_native_view_position;
 uniform vec4 projection; // FOV scale for the deferred spotlight/sun normal
 uniform vec3 camera_right_axis,camera_forward_axis,camera_up_axis;
 uniform vec4 environment_info; // from enabled, reflection_mode, to enabled, progress
@@ -128,9 +133,7 @@ int select_sector_crossing_slot()
     // Local vertex coordinates -> native view -> world. The existing
     // camera axes already contain the inverse of JK's rigid view basis.
     // Only models actually crossing sectors run this per-fragment work.
-    vec3 vp=view_right.xyz*local_fragment_position.x+
-            view_forward.xyz*local_fragment_position.y+
-            view_up.xyz*local_fragment_position.z+view_origin.xyz;
+    vec3 vp=fragment_native_view_position;
     vec3 world=sector_crossing_camera_origin+
         camera_right_axis*vp.x+camera_forward_axis*vp.y+
         camera_up_axis*vp.z;
@@ -217,7 +220,7 @@ vec3 pixel_jk_diffuse_lighting(vec3 mapped_diffuse_normal)
     vec3 normal=normalize(mode>=2.5 ? mapped_diffuse_normal
                                     : pixel_light_face_normal);
     if(nonrigid_light_transform!=0) {
-        vec3 r=view_right.xyz,f=view_forward.xyz,u=view_up.xyz;
+        vec3 r=fragment_view_right,f=fragment_view_forward,u=fragment_view_up;
         vec3 cr=cross(f,u),cf=cross(u,r),cu=cross(r,f);
         float determinant=dot(r,cr);
         normal=normalize(sign(determinant)*
@@ -227,8 +230,8 @@ vec3 pixel_jk_diffuse_lighting(vec3 mapped_diffuse_normal)
     for(int i=0;i<num_lights;i++) {
         vec3 delta=light_position_radius[i].xyz-anchor;
         if(nonrigid_light_transform!=0)
-            delta=view_right.xyz*delta.x+
-                  view_forward.xyz*delta.y+view_up.xyz*delta.z;
+            delta=fragment_view_right*delta.x+
+                  fragment_view_forward*delta.y+fragment_view_up*delta.z;
         added+=light_color[i]*jk_point_sample(
             delta,normal,light_position_radius[i].w,
             light_intensity[i],attenuation_min,mode<2.5);
@@ -245,7 +248,7 @@ vec3 pixel_jk_diffuse_lighting(vec3 mapped_diffuse_normal)
 // nonuniformly scaled 3DO node. Mirrored nodes retain their signed parity.
 vec3 gpu_view_normal_from_local(vec3 local_n)
 {
-    vec3 r=view_right.xyz, f=view_forward.xyz, u=view_up.xyz;
+    vec3 r=fragment_view_right, f=fragment_view_forward, u=fragment_view_up;
     vec3 cr=cross(f,u), cf=cross(u,r), cu=cross(r,f);
     float det=dot(r,cr);
     vec3 n=abs(det)>1e-8
@@ -333,10 +336,7 @@ vec3 gpu_clearcoat_values(vec2 uv)
 }
 float gpu_clearcoat_fresnel(vec3 N)
 {
-    vec3 vp=view_origin.xyz+
-            view_right.xyz*local_fragment_position.x+
-            view_forward.xyz*local_fragment_position.y+
-            view_up.xyz*local_fragment_position.z;
+    vec3 vp=fragment_native_view_position;
     vec3 V=-normalize(vec3(vp.x,vp.z,vp.y));
     float nv=clamp(abs(dot(normalize(N),V)),0.0,1.0);
     return 0.04+0.96*pow(1.0-nv,5.0);
@@ -359,8 +359,8 @@ vec3 point_light_specular(vec3 base_color,vec2 uv,
         // distance is not a world distance. Normal and directions must
         // share a rigid camera-space basis for correct specular response.
         N=gpu_view_normal_from_local(N);
-        vec3 v=view_right.xyz*V.x+
-               view_forward.xyz*V.y+view_up.xyz*V.z;
+        vec3 v=fragment_view_right*V.x+
+               fragment_view_forward*V.y+fragment_view_up*V.z;
         V=vec3(v.x,v.z,v.y);
     }
     V=normalize(V);
@@ -384,8 +384,8 @@ vec3 point_light_specular(vec3 base_color,vec2 uv,
     for(int i=0;i<num_lights;i++) {
         vec3 delta=light_position_radius[i].xyz-local_fragment_position;
         if(nonrigid_light_transform!=0) {
-            vec3 d=view_right.xyz*delta.x+
-                   view_forward.xyz*delta.y+view_up.xyz*delta.z;
+            vec3 d=fragment_view_right*delta.x+
+                   fragment_view_forward*delta.y+fragment_view_up*delta.z;
             delta=vec3(d.x,d.z,d.y);
         }
         float dist=length(delta);
@@ -442,10 +442,7 @@ vec3 gpu_environment_reflection(vec3 base_color,vec2 uv,out float metalness,
                 environment_info.w),has_hemi?1.0:0.0);
     vec3 n_local=coating?coat_normal:mapped_local_normal(uv);
     vec3 n=gpu_view_normal_from_local(n_local);
-    vec3 vp=view_origin.xyz+
-            view_right.xyz*local_fragment_position.x+
-            view_forward.xyz*local_fragment_position.y+
-            view_up.xyz*local_fragment_position.z;
+    vec3 vp=fragment_native_view_position;
     vec3 v=normalize(vec3(vp.x,vp.z,vp.y)); // camera -> surface
     if(dot(n,v)>0.0) n=-n;
     vec3 reflection=reflect(v,n);
@@ -614,10 +611,7 @@ vec3 gpu_sun_specular(vec3 base_color,vec2 uv,
     float metalness=coating?0.0:clamp(specular_params.z*surface.b,0.0,1.0);
     vec3 n_local=coating?coat_normal:mapped_local_normal(uv);
     vec3 N=gpu_view_normal_from_local(n_local);
-    vec3 vp=view_origin.xyz+
-            view_right.xyz*local_fragment_position.x+
-            view_forward.xyz*local_fragment_position.y+
-            view_up.xyz*local_fragment_position.z;
+    vec3 vp=fragment_native_view_position;
     vec3 V=-normalize(vec3(vp.x,vp.z,vp.y));
     if(dot(N,V)<0.0) N=-N;
     vec3 L=normalize(sun_direction.xyz);
@@ -647,9 +641,7 @@ vec3 gpu_sun_specular(vec3 base_color,vec2 uv)
 // View position in JK units: X right, Y up, Z forward.
 vec3 gpu_view_position()
 {
-    vec3 p=view_origin.xyz+view_right.xyz*local_fragment_position.x+
-           view_forward.xyz*local_fragment_position.y+
-           view_up.xyz*local_fragment_position.z;
+    vec3 p=fragment_native_view_position;
     return vec3(p.x,p.z,p.y);
 }
 // The opaque scene depth remains full resolution at all times.

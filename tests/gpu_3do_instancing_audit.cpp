@@ -32,6 +32,23 @@ static gpu_3do_instancing_audit_record record(
 }
 int main() {
     {
+        using R=gpu_3do_instancing_rejection;
+        auto bit=gpu_3do_instancing_rejection_bit;
+        uint32_t const shared=bit(R::specular)|bit(R::normal_map)|
+            bit(R::surface_map)|bit(R::environment_map)|
+            bit(R::matcap)|bit(R::clearcoat);
+        assert(gpu_3do_instancing_material_policy(shared,false,0)==shared);
+        assert(gpu_3do_instancing_material_policy(shared,true,0)==0U);
+        assert(gpu_3do_instancing_material_policy(shared,true,7)==0U);
+        for(int mode:{4,5,6})
+            assert(gpu_3do_instancing_material_policy(shared,true,mode)==
+                   bit(R::local_probe));
+        assert(gpu_3do_instancing_material_policy(
+            shared|bit(R::displacement),true,7)==bit(R::displacement));
+        assert(gpu_3do_instancing_material_policy(
+            shared|bit(R::per_thing_lights),true,0)==bit(R::per_thing_lights));
+    }
+    {
         std::array<float,12> const matrix{{1,2,3,4,5,6,7,8,9,10,11,12}};
         auto const rows=gpu_3do_instance_transform_texels(matrix);
         for(size_t row=0;row<3U;++row)

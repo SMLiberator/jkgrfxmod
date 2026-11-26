@@ -28,7 +28,7 @@ enum class gpu_3do_instancing_rejection : uint32_t {
     surface_map, environment_map, matcap, clearcoat, displacement,
     shadow_only, projected_decal, sprite, transient, saber_trail,
     camera_hud, skybox_lighting, dither, opacity, per_thing_lights,
-    crossing_lighting, nonrigid_lighting, invalid_state, count
+    crossing_lighting, nonrigid_lighting, invalid_state, local_probe, count
 };
 // Masked fragments discard by cutoff and write depth in the opaque pass.
 // Mixed-alpha, blended and dithered materials retain conservative handling.
@@ -55,8 +55,31 @@ inline constexpr std::array<char const *,
     "normal_map","surface_map","environment_map","matcap","clearcoat",
     "displacement","shadow_only","projected_decal","sprite","transient",
     "saber_trail","camera_hud","skybox_lighting","dither","opacity",
-    "per_thing_lights","crossing_lighting","nonrigid_lighting","invalid_state"
+    "per_thing_lights","crossing_lighting","nonrigid_lighting","invalid_state",
+    "local_probe"
 }};
+// Fragment basis/position now follow the selected instance. Material
+// uniforms can be shared by exact MAT/cel buckets, except captures whose
+// binding may differ by Thing. Keep local-eye parallax and every existing
+// per-instance lighting/alpha restriction until their state is batched.
+inline constexpr uint32_t gpu_3do_instancing_material_policy(
+    uint32_t reasons,bool enabled,int effective_reflection_mode) {
+    if(!enabled)return reasons;
+    using R=gpu_3do_instancing_rejection;
+    constexpr uint32_t shared_features=
+        gpu_3do_instancing_rejection_bit(R::specular) |
+        gpu_3do_instancing_rejection_bit(R::normal_map) |
+        gpu_3do_instancing_rejection_bit(R::surface_map) |
+        gpu_3do_instancing_rejection_bit(R::environment_map) |
+        gpu_3do_instancing_rejection_bit(R::matcap) |
+        gpu_3do_instancing_rejection_bit(R::clearcoat);
+    reasons &= ~shared_features;
+    // Mode 7 uses a single shared capture. Modes 4/5/6 must not use
+    // a first-member capture binding, even if the capture isn't ready.
+    if(effective_reflection_mode>=4 && effective_reflection_mode<=6)
+        reasons |= gpu_3do_instancing_rejection_bit(R::local_probe);
+    return reasons;
+}
 struct gpu_3do_instancing_audit_record {
     uint64_t mesh_id=0;
     uintptr_t geometry=0,group=0,material=0,instance=0;

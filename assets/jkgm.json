@@ -37,6 +37,7 @@
     "enable_vsync": false,
     "profile_renderer": false,
     "profile_gpu_3do_instancing_audit": false,
+    "experimental_gpu_3do_material_instancing": false,
     "experimental_gpu_3do_indexed_instancing": true,
     "experimental_gpu_3do_buffered_instancing": false,
     "experimental_gpu_3do_shared_collection_layout": false,
