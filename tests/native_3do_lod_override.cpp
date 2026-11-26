@@ -20,6 +20,8 @@ int main() {
     {
         native_draw_scope<draw_state> outer(active,true);
         assert(sample()==4 && sample()==4 && reads==2);
+        auto const &borrowed=active->mode.get_ref(read_mode);
+        assert(&borrowed==&active->mode.value && borrowed==4 && reads==2);
         value=3;
         {
             native_draw_scope<draw_state> inner(active,true);

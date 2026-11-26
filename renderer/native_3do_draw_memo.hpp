@@ -7,9 +7,12 @@ namespace jkgm {
 template<class T> struct native_draw_memo {
     bool ready=false;
     T value{};
-    template<class Read> T get(Read const &read) {
+    template<class Read> T const &get_ref(Read const &read) {
         if(!ready) { value=read();ready=true; }
         return value;
+    }
+    template<class Read> T get(Read const &read) {
+        return get_ref(read);
     }
 };
 // A draw-local list is lazy, and returned by reference rather than copying

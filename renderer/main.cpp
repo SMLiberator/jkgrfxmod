@@ -685,8 +685,12 @@ namespace {
                                          bool validated_matrix=false)
     {
         if(!validated_matrix && !gpu_span_readable(matrix,12*sizeof(float))) return false;
-        auto const state=jkgm::native_draw_read(active_model_mesh_state,
-            &native_model_mesh_state::frustum,read_native_mesh_frustum);
+        // Bind directly to the draw-local snapshot when available.
+        // The separate fallback storage lives until this mesh test returns.
+        native_mesh_frustum_state fallback;
+        auto const &state=active_model_mesh_state
+            ?active_model_mesh_state->frustum.get_ref(read_native_mesh_frustum)
+            :(fallback=read_native_mesh_frustum());
         if(!state.valid)return false;
         float world[12];
         std::memcpy(world,matrix,sizeof(world));
@@ -1623,6 +1627,7 @@ namespace {
     // callbacks. GPU queueing still consumes some of them (e.g. static
     // decal receiver ownership). Only the native per-model light list is
     // omitted: our GPU lighting reads the camera directly.
+    native_static_receiver_state read_native_static_receiver();
     void set_direct_model_global(uintptr_t at,uint32_t value) {
         std::memcpy(reinterpret_cast<void *>(at),&value,4);
     }
@@ -1710,6 +1715,7 @@ namespace {
         // native warmup or cannot be represented. Cache warmup is retained.
         size_t const first=pending_gpu_instances.size();
         uint64_t meshes=0;
+        uint32_t last_mesh=0;
         auto const queue_start=profiling?std::chrono::steady_clock::now():
                                         std::chrono::steady_clock::time_point{};
         bool const queued=jkgm::visit_direct_model_meshes(plan,cuts.data(),
@@ -1720,6 +1726,7 @@ namespace {
                 bool const ok=jkgm::queue_gpu_3do_mesh(mesh,matrix);
                 direct_scope.state.prepared_slot=nullptr;
                 if(!ok)return false;
+                last_mesh=node.mesh;
                 ++meshes;
                 return true;
             });
@@ -1737,29 +1744,39 @@ namespace {
             if(profiling)++native_totals.direct_rollbacks;
             return false;
         }
-        // Static captures are committed only after the complete model
-        // succeeded; this avoids double side effects on native fallback.
-        // Same source-order mesh pointer and matrix as the native callbacks.
-        jkgm::visit_direct_model_meshes(plan,cuts.data(),
-            [&](jkgm::direct_model_node const &node) {
-                if(the_config->enable_decals) {
-                    bool const known_nonstatic=direct_scope.state.static_receiver.ready &&
-                        !direct_scope.state.static_receiver.value.owner;
-                    if(!known_nonstatic) {
-                        auto const begin=profiling?std::chrono::steady_clock::now():
-                                                   std::chrono::steady_clock::time_point{};
-                        capture_static_sprite_decal_mesh(
-                            reinterpret_cast<void *>(uintptr_t(node.mesh)),
-                            reinterpret_cast<void *>(uintptr_t(matrices)+node.node*48U));
-                        if(profiling) {
-                            ++native_totals.static_decal_capture_calls;
-                            native_totals.mesh_decal_ns+=elapsed_native_ns(begin);
-                        }
-                    } else if(profiling)++native_totals.static_decal_capture_skipped;
-                }
-                set_direct_model_global(0x73c1e8U,node.mesh);
-                return true;
-            });
+        // Commit static captures only after the whole model succeeded.
+        // Static receiver eligibility belongs to the Thing, not the node.
+        // For other Things (or disabled decals), avoid the second DFS and
+        // preserve only the final native current-mesh global.
+        bool static_capture=false;
+        if(meshes && the_config->enable_decals) {
+            auto const begin=profiling?std::chrono::steady_clock::now():
+                                       std::chrono::steady_clock::time_point{};
+            static_capture=direct_scope.state.static_receiver.get_ref(
+                read_native_static_receiver).owner!=0;
+            if(profiling) {
+                native_totals.mesh_decal_ns+=elapsed_native_ns(begin);
+                if(!static_capture)native_totals.static_decal_capture_skipped+=meshes;
+            }
+        }
+        if(static_capture) {
+            jkgm::visit_direct_model_meshes(plan,cuts.data(),
+                [&](jkgm::direct_model_node const &node) {
+                    auto const begin=profiling?std::chrono::steady_clock::now():
+                                               std::chrono::steady_clock::time_point{};
+                    capture_static_sprite_decal_mesh(
+                        reinterpret_cast<void *>(uintptr_t(node.mesh)),
+                        reinterpret_cast<void *>(uintptr_t(matrices)+node.node*48U));
+                    if(profiling) {
+                        ++native_totals.static_decal_capture_calls;
+                        native_totals.mesh_decal_ns+=elapsed_native_ns(begin);
+                    }
+                    set_direct_model_global(0x73c1e8U,node.mesh);
+                    return true;
+                });
+        } else if(meshes) {
+            set_direct_model_global(0x73c1e8U,last_mesh);
+        }
         uint32_t drawn=0;
         if(direct_audit_read_value(0x73c32cU,drawn))
             set_direct_model_global(0x73c32cU,drawn+1U);
@@ -2806,8 +2823,9 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
         }
         auto const &m=slot->header;
         if(the_config->profile_renderer)++gpu_native_stats.attempted;
-        auto const camera=jkgm::native_draw_read(active_model_mesh_state,
-            &native_model_mesh_state::camera,[] {
+        // A prepared slot guarantees a live direct-draw scope. Borrow
+        // the immutable camera snapshot instead of copying it per node.
+        auto const &camera=active_model_mesh_state->camera.get_ref([] {
                 if(the_config->profile_renderer)++native_totals.mesh_camera_reads;
                 return jkgm::read_active_render_camera();
             });

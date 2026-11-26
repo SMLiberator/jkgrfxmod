@@ -5636,6 +5636,8 @@ namespace jkgm {
             // results may be polled or camera state changed between passes.
             struct owner_visibility {std::array<float,3> center;bool hidden;};
             std::unordered_map<uint64_t,owner_visibility> owner_visibility_cache;
+            uint64_t previous_visibility_owner=0;
+            owner_visibility const *previous_visibility=nullptr;
             if(!reuse_alpha) for(auto const &inst:instances) {
                 if(!inst.geometry || inst.shadow_only ||
                    (!inst.is_sprite_quad && !inst.is_projected_decal &&
@@ -5660,12 +5662,18 @@ namespace jkgm {
                     !inst.transient_procedural && !inst.saber_trail_active;
                 if(occlusion_eligible) {
                     bool occluded=false;
-                    auto found=owner_visibility_cache.end();
-                    if(!sprite_occlusion_eligible)
-                        found=owner_visibility_cache.find(inst.shadow_owner);
-                    if(found!=owner_visibility_cache.end() &&
-                       found->second.center==inst.owning_thing_world_position) {
-                        occluded=found->second.hidden;
+                    owner_visibility const *known=nullptr;
+                    if(!sprite_occlusion_eligible) {
+                        if(previous_visibility_owner!=inst.shadow_owner) {
+                            previous_visibility_owner=inst.shadow_owner;
+                            auto const found=owner_visibility_cache.find(inst.shadow_owner);
+                            previous_visibility=found==owner_visibility_cache.end()
+                                ?nullptr:&found->second;
+                        }
+                        known=previous_visibility;
+                    }
+                    if(known && known->center==inst.owning_thing_world_position) {
+                        occluded=known->hidden;
                     } else {
                         auto const visibility_start=gpu_profiling
                             ?std::chrono::steady_clock::now()
@@ -5681,9 +5689,9 @@ namespace jkgm {
                                 inst.shadow_owner,inst.owning_thing_world_position,
                                 cam,gpu_3do_present_serial);
                         if(!sprite_occlusion_eligible)
-                            owner_visibility_cache.insert_or_assign(
+                            previous_visibility=&owner_visibility_cache.insert_or_assign(
                                 inst.shadow_owner,owner_visibility{
-                                    inst.owning_thing_world_position,occluded});
+                                    inst.owning_thing_world_position,occluded}).first->second;
                         if(gpu_profiling) {
                             thing_occlusion_visibility_ns_window+=uint64_t(
                                 std::chrono::duration_cast<std::chrono::nanoseconds>(
