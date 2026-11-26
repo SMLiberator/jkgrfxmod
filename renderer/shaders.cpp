@@ -206,7 +206,11 @@ void jkgm::shaders::translucent_sun_uniforms::set_map(
                     source.insert(newline+1U,"#define JKGM_CLEARCOAT_LAYER 1\n");
                 }
             }
-            if(variant!=material_shader_variant::full && type==gl::shader_type::fragment) {
+            bool const diffuse=variant==material_shader_variant::diffuse_opaque ||
+                               variant==material_shader_variant::diffuse_alpha;
+            if(variant!=material_shader_variant::full &&
+               (type==gl::shader_type::fragment ||
+                (diffuse && type==gl::shader_type::vertex))) {
                 auto const newline=source.find('\n');
                 char const *define="";
                 switch(variant) {
@@ -220,6 +224,10 @@ void jkgm::shaders::translucent_sun_uniforms::set_map(
                     define="#define JKGM_SIMPLE_DECAL 1\n"; break;
                 case material_shader_variant::simple_fluid:
                     define="#define JKGM_SIMPLE_FLUID 1\n"; break;
+                case material_shader_variant::diffuse_opaque:
+                    define="#define JKGM_SIMPLE_OPAQUE 1\n#define JKGM_DIFFUSE_ONLY 1\n"; break;
+                case material_shader_variant::diffuse_alpha:
+                    define="#define JKGM_SIMPLE_ALPHA 1\n#define JKGM_DIFFUSE_ONLY 1\n"; break;
                 default: break;
                 }
                 source.insert(newline+1U,define);
@@ -285,7 +293,7 @@ void jkgm::shaders::translucent_sun_uniforms::set_map(
                                      fs::path const &geom,
                                      material_shader_variant variant)
         {
-            auto vx_shader = compile_shader_from_file(vx,gl::shader_type::vertex);
+            auto vx_shader = compile_shader_from_file(vx,gl::shader_type::vertex,variant);
             auto fg_shader = compile_shader_from_file(
                 fg,gl::shader_type::fragment,variant);
 

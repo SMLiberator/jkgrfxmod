@@ -26,7 +26,11 @@ uniform vec3 thing_sector_tint_delta; // own SithSector - camera SithSector
 uniform vec4 jk_color_add_fade; // RGB additive/255, A fade
 uniform float attenuation_min;
 uniform int num_lights;
+#ifdef JKGM_DIFFUSE_ONLY
+const int pixel_dynamic_lighting=0;
+#else
 uniform int pixel_dynamic_lighting; // fragment handles JK diffuse when enabled
+#endif
 uniform int nonrigid_light_transform; // use transformed distances for scaled R/L/U
 uniform vec4 light_position_radius[16]; // local XYZ and JK light radius
 uniform float light_intensity[16];
@@ -72,7 +76,11 @@ out vec4 decal_coverage;
 // Four-way sector crossing is opt-in and only active on models actually
 // overlapping multiple native Adjoin-linked sectors. The ordinary
 // single-sector path stays bit-for-bit unchanged.
+#ifdef JKGM_DIFFUSE_ONLY
+const int sector_crossing_count=0;
+#else
 uniform int sector_crossing_count;
+#endif
 uniform int sector_crossing_per_vertex; // opt-in A/B: classify once per model vertex
 uniform samplerBuffer sector_crossing_planes;
 uniform vec3 sector_crossing_camera_origin;
@@ -323,6 +331,7 @@ void main() {
     // Re-run JK's vertex gamma/color effects ONLY for crossing Things,
     // once per candidate sector. This retains interpolation of gamma-
     // corrected vertex RGB, unlike recomputing baked brightness per pixel.
+#ifndef JKGM_DIFFUSE_ONLY
     if(sector_crossing_count>1) {
         int selected_slot=sector_crossing_per_vertex!=0
             ? select_sector_crossing_vertex(vec3(x,y,z)) : 0;
@@ -365,6 +374,7 @@ void main() {
             sector_vertex_tint=sector_crossing_tint[selected_slot].xyz;
         }
     }
+#endif
     }
     // Match the patched native 3DO normal sideband. Non-Gouraud faces can
     // still carry smooth vertex normals for SSAO; lighting-mode selection

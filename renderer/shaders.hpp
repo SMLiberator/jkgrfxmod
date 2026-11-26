@@ -10,7 +10,8 @@
 
 namespace jkgm {
     enum class material_shader_variant {
-        full, simple_opaque, simple_alpha, simple_flare, simple_decal, simple_fluid
+        full, simple_opaque, simple_alpha, simple_flare, simple_decal, simple_fluid,
+        diffuse_opaque, diffuse_alpha
     };
 
     class opengl_shader {

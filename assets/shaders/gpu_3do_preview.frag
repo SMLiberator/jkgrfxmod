@@ -157,7 +157,11 @@ uniform vec2 normal_specular_scroll;
 uniform vec2 normal_specular_scroll2;
 uniform vec3 local_eye;
 uniform int num_lights;
+#ifdef JKGM_DIFFUSE_ONLY
+const int pixel_dynamic_lighting=0;
+#else
 uniform int pixel_dynamic_lighting;
+#endif
 #ifdef JKGM_SIMPLE_MATERIAL
 const int normal_mapped_diffuse=0;
 #else
@@ -178,7 +182,11 @@ in vec3 local_fragment_position;
 in vec3 local_fragment_normal;
 // Available for cached 3DOs only. Sector plane tests use a GL 3.3
 // RGBA32F texture buffer rather than consuming huge GLSL uniform arrays.
+#ifdef JKGM_DIFFUSE_ONLY
+const int sector_crossing_count=0;
+#else
 uniform int sector_crossing_count;
+#endif
 uniform int sector_crossing_per_vertex; // selects and blends color in vertex stage
 uniform samplerBuffer sector_crossing_planes;
 uniform vec3 sector_crossing_camera_origin;
@@ -1098,6 +1106,11 @@ void main() {
     // The material's original baked JK RGB is untouched. The optional
     // perturbed normal is used only for ADDED sun, spotlight and pixel-point
     // light. Keep the geometric normal if this face has no normal texture.
+#ifdef JKGM_DIFFUSE_ONLY
+    // No normal maps or specular layers in this variant. Retain the
+    // interpolated geometry normal for G-buffer/forward light receivers.
+    vec3 diffuse_view_normal=view_normal;
+#else
     prepare_fragment_surface(uv);
     vec3 diffuse_local_normal=local_fragment_normal;
     vec3 diffuse_view_normal=view_normal;
@@ -1116,6 +1129,7 @@ void main() {
         float sv=sh/max(projection.y,0.0001);
         diffuse_view_normal=normalize(vec3(n.x*sh,n.y*sv,n.z));
     }
+#endif
     float env_metalness=0.0;
 #ifdef JKGM_SIMPLE_MATERIAL
     vec3 env_reflection=vec3(0.0);
@@ -1158,6 +1172,9 @@ void main() {
     // actually exists; follows the native replacement shader.
     // The vertex experiment has already selected and interpolated JK color.
     // Avoid all per-fragment sector bounds/plane traversal in that mode.
+#ifdef JKGM_DIFFUSE_ONLY
+    vec3 jk_fragment_lit=mix(jk_lit_rgb,vec3(1.0),fullbright);
+#else
     sector_crossing_slot=sector_crossing_count>1 &&
                          sector_crossing_per_vertex==0
         ? select_sector_crossing_slot() : 0;
@@ -1167,6 +1184,7 @@ void main() {
           (sector_crossing_count>1 && sector_crossing_per_vertex==0
              ? sector_crossing_lit[sector_crossing_slot] : jk_lit_rgb),
         vec3(1.0),fullbright);
+#endif
     vec3 matcap_lit=vec3(0.0),matcap_unlit=vec3(0.0);
 #ifdef JKGM_MATCAP_LAYER
     vec3 matcap_effect=gpu_matcap_effect(uv);
@@ -1208,8 +1226,12 @@ void main() {
     // Optional dynamic Thing point-light -> GGX highlights. JK currently
     // supplies scalar light intensity (not independent per-light RGB), so
     // these experimental highlights are neutral/white. Diffuse remains JK.
+#ifdef JKGM_DIFFUSE_ONLY
+    vec3 specular=vec3(0.0);
+#else
     vec3 specular=(gpu_sun_specular(albedo.rgb,uv)+env_reflection)*
                   base_specular_trans+coat_specular;
+#endif
     // Only forward-blended non-decal faces receive projected light.
     // Ordinary alpha-tested coverage already receives opaque-composite light.
     vec3 projected_light=vec3(0.0);
@@ -1222,10 +1244,12 @@ void main() {
             view_depth,diffuse_view_normal,albedo.rgb,clamp(albedo.a,0.0,1.0)) *
             (1.0-fog);
     }
+#ifndef JKGM_DIFFUSE_ONLY
     if(dynamic_light_specular_enabled!=0 && num_lights>0 &&
        specular_params.x>0.0)
         specular+=point_light_specular(albedo.rgb,uv)*
                   base_specular_trans;
+#endif
 #ifdef JKGM_CLEARCOAT_LAYER
     if(clearcoat_enabled!=0 && coat_values.x>0.0 &&
        dynamic_light_specular_enabled!=0 && num_lights>0)

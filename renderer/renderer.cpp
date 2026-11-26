@@ -5277,7 +5277,12 @@ namespace jkgm {
                 ?ogs->gpu_3do_simple_flare_program.get():nullptr;
             auto *simple_fluid_program=transparent && !post_exempt && !decals_only
                 ?ogs->gpu_3do_simple_fluid_program.get():nullptr;
+            auto *diffuse_program=!post_exempt && !decals_only
+                ? (transparent?ogs->gpu_3do_diffuse_alpha_program.get()
+                              :ogs->gpu_3do_diffuse_opaque_program.get())
+                :nullptr;
             bool flare_program_initialized=false,fluid_program_initialized=false;
+            bool diffuse_program_initialized=false;
             bool const crossing_buffer_ready=
                 the_config->enable_sector_crossing_lighting &&
                 !post_exempt && !decals_only &&
@@ -6521,7 +6526,7 @@ namespace jkgm {
             bool prev_parallax=false;
             auto *active_preview_program=&prog;
             uint64_t simple_draw_calls=0,full_draw_calls=0,shader_switches=0;
-            uint64_t simple_flare_draws=0,simple_fluid_draws=0;
+            uint64_t simple_flare_draws=0,simple_fluid_draws=0,diffuse_draws=0;
             // Filtering is texture-object state, not texture-unit state.
             // Repeated 3DO draw groups often use the exact same GL texture;
             // three glTexParameter calls for every bind become extremely
@@ -6585,7 +6590,7 @@ namespace jkgm {
                 bool const fluid=material.blend==material_blend_mode::fluid;
                 auto *candidate_program=inst.is_sprite_flare
                     ?simple_flare_program:(fluid?simple_fluid_program:simple_program);
-                bool const simple=candidate_program &&
+                bool const simple_eligible=
                     (!inst.is_sprite_quad || transparent) &&
                     (inst.is_sprite_flare || inst.sprite_depth_bias==0.0f) &&
                     !inst.camera_hud &&
@@ -6600,6 +6605,41 @@ namespace jkgm {
                     !material.has_surface && !material.has_matcap &&
                     get<0>(material.clearcoat_params)<=0.0f &&
                     material.displacement_factor==0.0f;
+                // Only unconfigured *ordinary* materials inherit this
+                // direct-light dielectric response. Keep VFX, sprites,
+                // Camera HUD, skybox flags, fully-bright CMP and decals out.
+                bool const default_eligible=
+                    !inst.camera_hud && !inst.is_projected_decal &&
+                    !inst.is_sprite_quad && !inst.world_lighting_exempt &&
+                    !material.solid_fullbright &&
+                    !material.emissive_only &&
+                    material.albedo_source!=0 &&
+                    material.blend!=material_blend_mode::additive &&
+                    material.blend!=material_blend_mode::multiply;
+                auto const specular=gpu_specular_parameters(
+                    material,default_eligible);
+                bool const point_specular_active=
+                    !inst.camera_hud && !inst.skybox_vertex_lighting &&
+                    the_config->enable_reflections &&
+                    the_config->enable_dynamic_light_specular &&
+                    !inst.is_projected_decal && inst.num_lights>0U;
+                bool const pixel_lighting=the_config->gpu_pixel_lighting &&
+                    !inst.skybox_vertex_lighting &&
+                    !inst.camera_hud && !inst.is_projected_decal &&
+                    inst.num_lights>0U;
+                // All members of an existing instance bucket share the
+                // material and draw-wide lighting state. Never split or
+                // reorder those buckets just to select a shader.
+                // Keep the full vertex-light loop, including affine lights;
+                // only remove pixel lighting and multi-sector interpolation
+                // when they are not used by this draw.
+                if(diffuse_program && simple_eligible && !fluid &&
+                   !inst.is_sprite_flare && !inst.crossing_lighting &&
+                   !pixel_lighting &&
+                   !(specular.first>0.0f &&
+                     (sun_active || point_specular_active)))
+                    candidate_program=diffuse_program;
+                bool const simple=candidate_program && simple_eligible;
                 auto *selected_program=simple?candidate_program:
                     ogs->gpu_3do_preview_program.get();
                 if(active_preview_program!=selected_program) {
@@ -6614,6 +6654,11 @@ namespace jkgm {
                        !fluid_program_initialized) {
                         initialize_preview_program(*selected_program);
                         fluid_program_initialized=true;
+                    }
+                    if(simple && selected_program==diffuse_program &&
+                       !diffuse_program_initialized) {
+                        initialize_preview_program(*selected_program);
+                        diffuse_program_initialized=true;
                     }
                     selected_program->use_program();
                     active_preview_program=selected_program;
@@ -6630,6 +6675,7 @@ namespace jkgm {
                         ++simple_draw_calls;
                         if(selected_program==simple_flare_program)++simple_flare_draws;
                         if(selected_program==simple_fluid_program)++simple_fluid_draws;
+                        if(selected_program==diffuse_program)++diffuse_draws;
                     } else ++full_draw_calls;
                 }
                 size_t draw_end=draw_start+1;
@@ -6791,11 +6837,7 @@ namespace jkgm {
                     // vertex dynamic-light loop; ordinary GPU 3DOs keep their
                     // per-fragment point lights. This is an instance choice,
                     // not a property of the shared mesh or material.
-                    prog.set_lighting(inst,
-                        the_config->gpu_pixel_lighting &&
-                        !inst.skybox_vertex_lighting &&
-                        !inst.camera_hud && !inst.is_projected_decal &&
-                        inst.num_lights>0U,
+                    prog.set_lighting(inst,pixel_lighting,
                         frame_saber_light_colors.colors,
                         frame_saber_light_colors.valid);
                     // An authored skybox receives no per-pixel Thing-light
@@ -6963,24 +7005,6 @@ namespace jkgm {
                 // opt-in dynamic Thing point-light GGX can use them.
                 // Decals have no native point lights; ordinary per-vertex JK
                 // diffuse lighting is entirely unaffected by this switch.
-                bool const point_specular_active=
-                    !inst.camera_hud && !inst.skybox_vertex_lighting &&
-                    the_config->enable_reflections &&
-                    the_config->enable_dynamic_light_specular &&
-                    !inst.is_projected_decal && inst.num_lights>0U;
-                // Only unconfigured *ordinary* materials inherit this
-                // direct-light dielectric response. Keep VFX, sprites,
-                // Camera HUD, skybox flags, fully-bright CMP and decals out.
-                bool const default_eligible=
-                    !inst.camera_hud && !inst.is_projected_decal &&
-                    !inst.is_sprite_quad && !inst.world_lighting_exempt &&
-                    !material.solid_fullbright &&
-                    !material.emissive_only &&
-                    material.albedo_source!=0 &&
-                    material.blend!=material_blend_mode::additive &&
-                    material.blend!=material_blend_mode::multiply;
-                auto const specular=gpu_specular_parameters(
-                    material,default_eligible);
                 int const reflection_mode=effective_capture_reflection_mode(
                     material.reflection_mode);
                 auto const probe_it=reflection_mode==7
@@ -7349,7 +7373,7 @@ namespace jkgm {
             }
             };
             submit_draws();
-            if(simple_program && gpu_profiling &&
+            if((simple_program || diffuse_program) && gpu_profiling &&
                gpu_3do_present_serial%120U==0U)
                 LOG_INFO(decals_only?"PERF simple_decal_shader sample simple_draws=":
                          transparent?"PERF simple_alpha_shader sample simple_draws=":
@@ -7357,7 +7381,8 @@ namespace jkgm {
                          simple_draw_calls," full_draws=",full_draw_calls,
                          " switches=",shader_switches,
                          " flare_draws=",simple_flare_draws,
-                         " fluid_draws=",simple_fluid_draws);
+                         " fluid_draws=",simple_fluid_draws,
+                         " diffuse_draws=",diffuse_draws);
             if(split_smoke && !smoke_draws.empty()) {
                 // No depth attachment in the half-res smoke target. Suspend
                 // polygon offset before switching FBOs and post composition.

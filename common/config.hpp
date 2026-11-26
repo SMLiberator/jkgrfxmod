@@ -102,6 +102,7 @@ namespace jkgm {
         bool experimental_gpu_3do_shared_collection_layout = false; // frame-local exact mesh/state layout
         bool experimental_gpu_3do_simple_opaque_shader = false;
         bool experimental_gpu_3do_simple_alpha_shader = false;
+        bool experimental_gpu_3do_diffuse_only_shader = false;
         bool experimental_gpu_3do_buffered_instancing = false; // shared affine transform and membership buffer
         bool experimental_gpu_3do_material_instancing = false; // shared reflective material effects
         bool experimental_gpu_3do_indexed_instancing = true; // collect exact mesh range batches directly
