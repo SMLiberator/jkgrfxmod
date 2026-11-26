@@ -11,6 +11,7 @@
 #include "camera_to_mat.hpp"
 #include "native_3do_profile.hpp"
 #include "native_3do_draw_memo.hpp"
+#include "native_3do_direct_model_audit.hpp"
 #include <optional>
 #include "native_3do_lod_override.hpp"
 #include "native_mesh_revision.hpp"
@@ -1428,6 +1429,137 @@ namespace {
             std::chrono::duration_cast<std::chrono::nanoseconds>(
                 std::chrono::steady_clock::now()-start).count());
     }
+    // Diagnostic scope: never calls the joint builder or changes draw state.
+    // Native pose generation remains authoritative. We compare the independently
+    // predicted node index with the actual callback's joint-array address and
+    // validate its matrix values; this is NOT independent animation math.
+    struct direct_model_audit_scope {
+        uint32_t rd=0;
+        jkgm::direct_model_plan plan;
+        jkgm::direct_model_modes modes;
+        bool valid=false,rejected=false,nested=false;
+        bool order_bad=false,matrix_bad=false,modes_bad=false,geo_bad=false;
+        size_t callbacks=0;
+    };
+    thread_local direct_model_audit_scope *active_direct_audit=nullptr;
+    bool direct_audit_read(uintptr_t at,void *dst,size_t bytes) {
+        if(!jkgm::direct_model_span(at,bytes) ||
+           !gpu_span_readable(reinterpret_cast<void const *>(at),bytes))return false;
+        std::memcpy(dst,reinterpret_cast<void const *>(at),bytes);
+        return true;
+    }
+    template<class T> bool direct_audit_read_value(uintptr_t at,T &v) {
+        return direct_audit_read(at,&v,sizeof(v));
+    }
+    bool prepare_direct_audit(direct_model_audit_scope &a,void *thing,void *placement) {
+        a.rd=static_cast<uint32_t>(reinterpret_cast<uintptr_t>(thing));
+        uint32_t flags=0,cam=0,model=0,options=0,frustum=0;
+        int32_t cull=0;
+        float radius=0,ambient=0;
+        jkgm::direct_model_modes local{},global{};
+        if(!direct_audit_read_value(a.rd+4,model) ||
+           !direct_audit_read_value(0x889e44U,flags) ||
+           !direct_audit_read_value(0x73a418U,cam) ||
+           !direct_audit_read_value(a.rd+0x40,cull) ||
+           !direct_audit_read_value(model+0x5c,radius) ||
+           !std::isfinite(radius) || radius<0)return false;
+        // Use the same verified native math helpers as rdModel3_Draw.
+        // Calling these read-only helpers avoids float-rounding differences
+        // at frustum boundaries without invoking any rendering or pose update.
+        if(flags&2U) {
+            constexpr uintptr_t transform=0x4423a0U,clip=0x4758d0U;
+            constexpr uint8_t transform_sig[]={0x8b,0x44,0x24,0x0c,0x8b,0x4c,0x24,0x08};
+            constexpr uint8_t clip_sig[]={0x83,0xec,0x0c,0x8b,0x54,0x24,0x14};
+            uint8_t tb[sizeof(transform_sig)]{},cb[sizeof(clip_sig)]{};
+            if(!direct_audit_read(transform,tb,sizeof(tb)) ||
+               !direct_audit_read(clip,cb,sizeof(cb)) ||
+               std::memcmp(tb,transform_sig,sizeof(tb)) ||
+               std::memcmp(cb,clip_sig,sizeof(cb)) ||
+               !direct_audit_read_value(cam+0x48,frustum) ||
+               !gpu_span_readable(reinterpret_cast<void const *>(uintptr_t(frustum)),0x30) ||
+               !gpu_span_readable(reinterpret_cast<void const *>(uintptr_t(cam)+8),48) ||
+               !gpu_span_readable(placement,48))return false;
+            using transform_fn=void(__cdecl *)(float *,float const *,void const *);
+            using clip_fn=int(__cdecl *)(void const *,float const *,float);
+            float pos[3]{};
+            reinterpret_cast<transform_fn>(transform)(pos,
+                static_cast<float const *>(placement)+9,
+                reinterpret_cast<void const *>(uintptr_t(cam)+8));
+            for(float v:pos)if(!std::isfinite(v))return false;
+            cull=reinterpret_cast<clip_fn>(clip)(
+                reinterpret_cast<void const *>(uintptr_t(frustum)),pos,radius);
+        }
+        if(cull<0 || cull>2)return false;
+        a.rejected=cull==2;
+        if(a.rejected)return true;
+        if(!direct_audit_read_value(a.rd+0x34,local.geo) ||
+           !direct_audit_read_value(a.rd+0x38,local.light) ||
+           !direct_audit_read_value(a.rd+0x3c,local.tex) ||
+           !direct_audit_read_value(0x889de8U,global.geo) ||
+           !direct_audit_read_value(0x889de0U,global.light) ||
+           !direct_audit_read_value(0x889e3cU,global.tex) ||
+           !direct_audit_read_value(0x889e40U,options) ||
+           !direct_audit_read_value(cam+0x54,ambient) || !std::isfinite(ambient))
+            return false;
+        a.modes=jkgm::predict_direct_model_modes(local,global,options,ambient);
+        return jkgm::predict_direct_model_nodes(direct_audit_read,a.rd,a.plan);
+    }
+    void check_direct_audit_globals(direct_model_audit_scope &a) {
+        jkgm::direct_model_modes observed{};
+        uint32_t geo=0;
+        if(!direct_audit_read_value(0x73a5d8U,observed.geo) ||
+           !direct_audit_read_value(0x73c218U,observed.light) ||
+           !direct_audit_read_value(0x73a9e4U,observed.tex) ||
+           observed.geo!=a.modes.geo || observed.light!=a.modes.light ||
+           observed.tex!=a.modes.tex)a.modes_bad=true;
+        if(!direct_audit_read_value(0x73a420U,geo) ||
+           geo!=a.plan.geoset_address)a.geo_bad=true;
+    }
+    void observe_direct_audit(void *mesh,void *placement) {
+        auto &a=*active_direct_audit;
+        size_t const i=a.callbacks++;
+        if(!a.valid || a.nested)return;
+        if(a.rejected || i>=a.plan.nodes.size()) {a.order_bad=true;return;}
+        if(i==0)check_direct_audit_globals(a);
+        auto const &node=a.plan.nodes[i];
+        if(reinterpret_cast<uintptr_t>(mesh)!=node.mesh)a.order_bad=true;
+        uint32_t matrices=0;
+        float matrix[12]{};
+        if(!direct_audit_read_value(a.rd+0x20,matrices) ||
+           !jkgm::direct_model_span(uint64_t(matrices)+node.node*48U,48) ||
+           reinterpret_cast<uintptr_t>(placement)!=uint64_t(matrices)+node.node*48U ||
+           !direct_audit_read(reinterpret_cast<uintptr_t>(placement),matrix,sizeof(matrix)))
+            a.matrix_bad=true;
+        else for(float v:matrix)if(!std::isfinite(v))a.matrix_bad=true;
+    }
+    void finish_direct_audit(direct_model_audit_scope &a,int result) {
+        ++native_totals.audit_models;
+        native_totals.audit_callbacks+=a.callbacks;
+        if(a.nested) {++native_totals.audit_nested;return;}
+        if(!a.valid) {++native_totals.audit_unavailable;return;}
+        if(a.rejected)++native_totals.audit_rejected;
+        if(!a.rejected && a.callbacks==0 && result==1)check_direct_audit_globals(a);
+        a.order_bad=a.order_bad || a.callbacks!=(a.rejected?0:a.plan.nodes.size());
+        bool const result_bad=result!=(a.rejected?0:1);
+        native_totals.audit_order+=a.order_bad;
+        native_totals.audit_matrix+=a.matrix_bad;
+        native_totals.audit_modes+=a.modes_bad;
+        native_totals.audit_geoset+=a.geo_bad;
+        native_totals.audit_result+=result_bad;
+        if(!(a.order_bad || a.matrix_bad || a.modes_bad || a.geo_bad || result_bad))
+            ++native_totals.audit_matched;
+        else {
+            static unsigned reports=0;
+            if(reports<16U) {
+                ++reports;
+                LOG_WARNING("DIRECT MODEL AUDIT mismatch rdthing=",a.rd,
+                    " expected_callbacks=",a.rejected?0:a.plan.nodes.size(),
+                    " observed_callbacks=",a.callbacks," expected_result=",a.rejected?0:1,
+                    " result=",result," order=",a.order_bad," matrix=",a.matrix_bad,
+                    " modes=",a.modes_bad," geoset=",a.geo_bad);
+            }
+        }
+    }
     int __cdecl HookedNativeModel(void *thing, void *placement)
     {
         auto const profiling=the_config && the_config->profile_renderer;
@@ -1830,7 +1962,16 @@ namespace {
             jkgm::native_draw_scope<native_model_mesh_state> scope(
                 active_model_mesh_state,the_config &&
                     the_config->experimental_gpu_3do_model_draw_memo);
-            result=RealNativeModel(thing,placement);
+            if(profiling && the_config->experimental_gpu_3do_direct_model_audit) {
+                direct_model_audit_scope audit{};
+                auto *const previous=active_direct_audit;
+                if(previous)previous->nested=true;
+                audit.valid=prepare_direct_audit(audit,thing,placement);
+                active_direct_audit=&audit;
+                result=RealNativeModel(thing,placement);
+                active_direct_audit=previous;
+                finish_direct_audit(audit,result);
+            } else result=RealNativeModel(thing,placement);
         }
         if(lod0.valid)
             std::memcpy(reinterpret_cast<void *>(lod0.selection_address),
@@ -1947,6 +2088,7 @@ namespace {
     }
     void __cdecl HookedNativeMesh(void *mesh, void *placement)
     {
+        if(active_direct_audit)observe_direct_audit(mesh,placement);
         auto const profiling=the_config && the_config->profile_renderer;
         auto const start=profiling ? std::chrono::steady_clock::now()
                                    : std::chrono::steady_clock::time_point{};

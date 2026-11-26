@@ -45,6 +45,7 @@
     "experimental_gpu_3do_specialized_collection": false,
     "experimental_gpu_3do_simd_backfaces": false,
     "experimental_gpu_3do_model_draw_memo": false,
+    "experimental_gpu_3do_direct_model_audit": false,
     "profile_audio": false,
     "use_gpu_cache": true,
     "gpu_3do_vertex_format": 1,

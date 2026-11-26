@@ -3,6 +3,7 @@
 // the exact previous per-Thing selection without touching rdModel3 state.
 #include "renderer/native_3do_lod_override.hpp"
 #include "renderer/native_3do_draw_memo.hpp"
+#include "renderer/native_3do_direct_model_audit.hpp"
 #include <cassert>
 #include <cstdint>
 #include <cstring>
@@ -85,4 +86,40 @@ int main() {
     write(rdthing+0x30U,4U);
     assert(!prepare_native_3do_lod0_override(read,rdthing,model).valid);
     assert(!prepare_native_3do_lod0_override(read,0x123U,model).valid);
+
+    // Direct-model audit must follow child/sibling links rather than node
+    // array order, retain repeated meshes and ignore the root cut flag.
+    constexpr uint32_t hierarchy=0x40000U,meshes=0x50000U,cuts=0x60000U;
+    write(model+0x44,1);write(model+0x50,0);
+    write(model+0x54,4);write(model+0x58,hierarchy);
+    write(model+0x24,2);write(model+0x28,meshes);
+    write(rdthing+0x30,0xffffffffU);write(rdthing+0x28,cuts);
+    auto node=[&](uint32_t index,uint32_t mesh,uint32_t n,uint32_t child,uint32_t sibling) {
+        auto const addr=hierarchy+index*0xb4;
+        write(addr+0x44,index);write(addr+0x4c,mesh);write(addr+0x54,n);
+        write(addr+0x58,child);write(addr+0x5c,sibling);
+    };
+    node(0,0,2,hierarchy+2*0xb4,0);
+    node(2,1,1,hierarchy+3*0xb4,hierarchy+0xb4);
+    node(3,0,0,0,0);node(1,1,0,0,0);
+    for(uint32_t i=0;i<4;++i)write(cuts+i*4,0);
+    write(cuts,1);
+    direct_model_plan draw_plan{};
+    assert(predict_direct_model_nodes(read,uint32_t(rdthing),draw_plan));
+    assert(draw_plan.nodes.size()==4 && draw_plan.nodes[0].node==0 &&
+           draw_plan.nodes[1].node==2 && draw_plan.nodes[2].node==3 &&
+           draw_plan.nodes[3].node==1);
+    assert(draw_plan.nodes[1].mesh==meshes+0x70 &&
+           draw_plan.nodes[2].mesh==meshes);
+    write(cuts+8,1);
+    assert(predict_direct_model_nodes(read,uint32_t(rdthing),draw_plan));
+    assert(draw_plan.nodes.size()==2 && draw_plan.nodes[1].node==1);
+    write(cuts+8,0);
+    node(2,1,1,hierarchy,hierarchy+0xb4);
+    assert(!predict_direct_model_nodes(read,uint32_t(rdthing),draw_plan));
+    assert(draw_plan.nodes.empty());
+    auto dm=predict_direct_model_modes({4,3,2},{3,2,1},2,1.0f);
+    assert(dm.geo==3 && dm.light==0 && dm.tex==1);
+    dm=predict_direct_model_modes({4,3,2},{3,2,1},2,0.9f);
+    assert(dm.light==2);
 }

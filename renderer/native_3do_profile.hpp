@@ -16,6 +16,17 @@ namespace jkgm {
         uint64_t mesh_gpu_calls=0,mesh_native_calls=0;
         uint64_t static_decal_capture_calls=0,static_decal_capture_skipped=0;
         uint64_t mesh_camera_reads=0;
+        uint64_t audit_models=0;
+        uint64_t audit_matched=0;
+        uint64_t audit_unavailable=0;
+        uint64_t audit_rejected=0;
+        uint64_t audit_callbacks=0;
+        uint64_t audit_order=0;
+        uint64_t audit_matrix=0;
+        uint64_t audit_modes=0;
+        uint64_t audit_geoset=0;
+        uint64_t audit_result=0;
+        uint64_t audit_nested=0;
         void add(native_3do_sample const &o) {
             model_calls+=o.model_calls;
             model_lod0_forced+=o.model_lod0_forced;
@@ -42,6 +53,17 @@ namespace jkgm {
             static_decal_capture_calls+=o.static_decal_capture_calls;
             static_decal_capture_skipped+=o.static_decal_capture_skipped;
             mesh_camera_reads+=o.mesh_camera_reads;
+            audit_models+=o.audit_models;
+            audit_matched+=o.audit_matched;
+            audit_unavailable+=o.audit_unavailable;
+            audit_rejected+=o.audit_rejected;
+            audit_callbacks+=o.audit_callbacks;
+            audit_order+=o.audit_order;
+            audit_matrix+=o.audit_matrix;
+            audit_modes+=o.audit_modes;
+            audit_geoset+=o.audit_geoset;
+            audit_result+=o.audit_result;
+            audit_nested+=o.audit_nested;
         }
     };
     native_3do_sample consume_native_3do_sample();

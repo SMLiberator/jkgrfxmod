@@ -1538,6 +1538,20 @@ namespace jkgm {
                          profile_window.native_static_decal_capture_calls/frames,
                          " static_decal_skipped_avg=",
                          profile_window.native_static_decal_capture_skipped/frames);
+                if(profile_window.native_audit_models)
+                    LOG_INFO("PERF native_3do direct_model_audit models=",
+                             profile_window.native_audit_models,
+                             " matched=",profile_window.native_audit_matched,
+                             " unavailable=",profile_window.native_audit_unavailable,
+                             " rejected=",profile_window.native_audit_rejected,
+                             " callbacks=",profile_window.native_audit_callbacks,
+                             " order=",profile_window.native_audit_order,
+                             " matrix=",profile_window.native_audit_matrix,
+                             " modes=",profile_window.native_audit_modes,
+                             " geoset=",profile_window.native_audit_geoset,
+                             " result=",profile_window.native_audit_result,
+                             " nested=",profile_window.native_audit_nested,
+                             " NOTE=window_totals;order_matrix_modes_geoset_result_are_mismatching_models");
             }
             if(native_sprite_available()) {
                 LOG_INFO("PERF native_sprite calls_avg type0/1/2/3/4=",
@@ -15579,6 +15593,17 @@ namespace jkgm {
                 profile_frame.native_static_decal_capture_calls += native.static_decal_capture_calls;
                 profile_frame.native_static_decal_capture_skipped += native.static_decal_capture_skipped;
                 profile_frame.native_mesh_camera_reads += native.mesh_camera_reads;
+                profile_frame.native_audit_models += native.audit_models;
+                profile_frame.native_audit_matched += native.audit_matched;
+                profile_frame.native_audit_unavailable += native.audit_unavailable;
+                profile_frame.native_audit_rejected += native.audit_rejected;
+                profile_frame.native_audit_callbacks += native.audit_callbacks;
+                profile_frame.native_audit_order += native.audit_order;
+                profile_frame.native_audit_matrix += native.audit_matrix;
+                profile_frame.native_audit_modes += native.audit_modes;
+                profile_frame.native_audit_geoset += native.audit_geoset;
+                profile_frame.native_audit_result += native.audit_result;
+                profile_frame.native_audit_nested += native.audit_nested;
                 profile_frame.native_mesh_gpu_calls += native.mesh_gpu_calls;
                 profile_frame.native_mesh_native_calls += native.mesh_native_calls;
                 auto const sprites=consume_native_sprite_sample();
