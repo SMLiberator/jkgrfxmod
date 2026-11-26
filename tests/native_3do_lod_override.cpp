@@ -114,7 +114,7 @@ int main() {
     write(cuts+8,1);
     assert(predict_direct_model_nodes(read,uint32_t(rdthing),draw_plan));
     assert(draw_plan.nodes.size()==2 && draw_plan.nodes[1].node==1);
-    write(cuts+8,0);
+    write(cuts+8,0);write(cuts,0);
     node(2,1,1,hierarchy,hierarchy+0xb4);
     assert(!predict_direct_model_nodes(read,uint32_t(rdthing),draw_plan));
     assert(draw_plan.nodes.empty());
