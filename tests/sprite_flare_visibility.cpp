@@ -73,6 +73,14 @@ int main() {
         cached_center,identity_camera,1.0f,4.0f/3.0f,
         {{800.0f,600.0f}},
         std::numeric_limits<float>::quiet_NaN(),cached));
+    // GPU preview uses the full framebuffer viewport even with a
+    // different projection aspect. The depth sample must match clip XY.
+    assert(project_gpu_sprite_flare_center(
+        cached_center,identity_camera,1.0f,4.0f/3.0f,
+        {{1600.0f,600.0f}},-2.0f,cached));
+    assert(near(cached.pixel[0],960.0f));
+    assert(near(cached.pixel[1],380.0f));
+    assert(near(cached.view_depth,256.0f));
     // Camera rotation must not rotate an authored camera-space offset.
     std::array<float,12> const yawed_camera{{
         0,1,0,-1,0,0,0,0,1,0,0,0

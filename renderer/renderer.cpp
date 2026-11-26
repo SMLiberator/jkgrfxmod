@@ -6744,14 +6744,20 @@ namespace jkgm {
                             inst.transform[11]}};
                         bool const valid=project_gpu_sprite_flare_center(
                             origin,native_view,tan_half_fov,aspect,
-                            {{get<x>(internal_scr_res_f),
-                              get<y>(internal_scr_res_f)}},
+                            // GPU preview vertices project into the full
+                            // framebuffer viewport, unlike native D3D XY.
+                            {{float(get<x>(conf_scr_res)),
+                              float(get<y>(conf_scr_res))}},
                             inst.sprite_depth_bias,center);
-                        if(valid) {
-                            center.pixel[0]+=
-                                float(get<x>(actual_display_area.start));
-                            center.pixel[1]+=
-                                float(get<y>(actual_display_area.start));
+                        if(gpu_profiling) {
+                            static unsigned flare_center_samples=0;
+                            if(flare_center_samples++<16U)
+                                LOG_INFO("SPR flare stage=gpu_center valid=",valid?1:0,
+                                    " pixel=",center.pixel[0],",",center.pixel[1],
+                                    " depth=",center.view_depth,
+                                    " bias=",inst.sprite_depth_bias,
+                                    " opacity=",inst.sprite_opacity,
+                                    " procedural=",quad.procedural_sprite?1:0);
                         }
                         prog.set_sprite_flare(valid
                             ?make_point(center.pixel[0],center.pixel[1],
@@ -7076,7 +7082,15 @@ namespace jkgm {
                                   material.emissive_scroll);
                 // A flare's edges must never use per-fragment world Z.
                 // Its shader accepts/rejects the entire quad at its center.
-                if(inst.is_sprite_flare)gl::disable(gl::capability::depth_test);
+                if(inst.is_sprite_flare) {
+                    // Reassert the completed opaque depth sampler at the
+                    // flare submission boundary.
+                    gl::set_active_texture_unit(8);
+                    gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                     frame_screen->get_resolved_depth_texture());
+                    gl::set_active_texture_unit(0);
+                    gl::disable(gl::capability::depth_test);
+                }
                 // Groups here already share Thing transform, MAT, alpha
                 // policy and face state. Only join adjacent EBO spans:
                 // a single glDrawElements can replace a multi-draw when
@@ -7158,7 +7172,17 @@ namespace jkgm {
                                             static_cast<GLsizei>(multidraw_counts.size()));
                     }
                 }
-                if(inst.is_sprite_flare)gl::enable(gl::capability::depth_test);
+                if(inst.is_sprite_flare) {
+                    gl::enable(gl::capability::depth_test);
+                    if(gpu_profiling) {
+                        static unsigned flare_draw_samples=0;
+                        if(flare_draw_samples++<16U)
+                            LOG_INFO("SPR flare stage=gpu_draw indices=",group.count,
+                                " opacity=",face_opacity,
+                                " material=",group.material,
+                                " format=",gpu_mesh.vertex_format);
+                    }
+                }
                 // Creation of a procedural trail doesn't prove the extra
                 // triangles survived to an actual OpenGL material draw.
                 if(the_config->profile_renderer && inst.saber_trail_active &&
@@ -13627,6 +13651,7 @@ namespace jkgm {
                              " shader_flare_mode=1");
                 gl::disable(gl::capability::depth_test);
                 gl::set_depth_mask(false);
+                restore_native_fluid_depth();
                 ogs->game_transparency_pass_program.set_flare_mode(true);
                 draw_batch(&ogs->game_transparency_pass_program,
                            world_flare_batch,&trimdl->flare_trimdl,

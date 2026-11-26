@@ -52,6 +52,7 @@ uniform int buffered_instance_offset; // negative disables indexed buffer path
 uniform vec4 sprite_instance_matrix[128]; // 32 instances * (right, forward, up, origin)
 uniform vec4 projection; // tan(half horizontal FOV), aspect, inverse far
 uniform float sprite_depth_bias; // authored Y, affects clip-space Z only
+uniform vec4 sprite_flare_center; // W selects center-only depth visibility
 uniform int procedural_sprite;
 uniform vec4 procedural_sprite_uv; // native pixel left,right,top,bottom
 uniform vec2 procedural_sprite_light; // face extra light, effective light mode
@@ -233,7 +234,9 @@ void main() {
     gl_Position=vec4(x/h,z/v,-projection.z,y);
     // Keep X/Y/W unchanged: the billboard's pixel center and apparent
     // dimensions do not move when authored SPR Y changes. Only Z changes.
-    if(sprite_depth_bias!=0.0) {
+    // Flare depth bias is applied exactly once in the center-depth test.
+    // Never use the biased depth to clip the billboard's vertices.
+    if(sprite_depth_bias!=0.0 && sprite_flare_center.w<=0.5) {
         float effective_y=y+sprite_depth_bias;
         gl_Position.z=effective_y>0.0001
             ?-projection.z*y/effective_y : -2.0*y;
