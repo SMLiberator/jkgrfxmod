@@ -58,15 +58,15 @@ int main() {
     assert(plan.valid && plan.selection_address==rdthing+0x30U);
     assert(plan.previous==-1);
     write(plan.selection_address,0U); // hook's temporary GeoSet 0
-    uint32_t active=~0U,shared=~0U;
-    assert(read(rdthing+0x30U,&active,4) && active==0U);
+    uint32_t active_geoset=~0U,shared=~0U;
+    assert(read(rdthing+0x30U,&active_geoset,4) && active_geoset==0U);
     assert(read(model+0x50U,&shared,4) && shared==2U);
     auto nested=prepare_native_3do_lod0_override(read,rdthing,model);
     assert(nested.valid && nested.previous==0);
     write(nested.selection_address,0U);
     write(nested.selection_address,uint32_t(nested.previous));
     write(plan.selection_address,uint32_t(plan.previous));
-    assert(read(rdthing+0x30U,&active,4) && active==0xffffffffU);
+    assert(read(rdthing+0x30U,&active_geoset,4) && active_geoset==0xffffffffU);
 
     // Explicit per-Thing authored overrides are also bypassed while the
     // experiment runs, then preserved on return.
@@ -75,7 +75,7 @@ int main() {
     assert(plan.valid && plan.previous==3);
     write(plan.selection_address,0U);
     write(plan.selection_address,uint32_t(plan.previous));
-    assert(read(rdthing+0x30U,&active,4) && active==3U);
+    assert(read(rdthing+0x30U,&active_geoset,4) && active_geoset==3U);
     // Source pointer mismatch and bad GeoSet bounds fail open.
     assert(!prepare_native_3do_lod0_override(
         read,rdthing,model+0x1000U).valid);
