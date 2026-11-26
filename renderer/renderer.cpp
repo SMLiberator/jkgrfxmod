@@ -1538,6 +1538,19 @@ namespace jkgm {
                          profile_window.native_static_decal_capture_calls/frames,
                          " static_decal_skipped_avg=",
                          profile_window.native_static_decal_capture_skipped/frames);
+                if(profile_window.native_direct_attempts)
+                    LOG_INFO("PERF native_3do direct_model_draw attempts=",
+                             profile_window.native_direct_attempts,
+                             " drawn=",profile_window.native_direct_drawn,
+                             " rejected=",profile_window.native_direct_rejected,
+                             " fallbacks=",profile_window.native_direct_fallbacks,
+                             " meshes=",profile_window.native_direct_meshes,
+                             " topology_hits=",profile_window.native_direct_topology_hits,
+                             " topology_misses=",profile_window.native_direct_topology_misses,
+                             " pose_refreshes=",profile_window.native_direct_pose_refreshes,
+                             " rollbacks=",profile_window.native_direct_rollbacks,
+                             " queue_us_avg=",(profile_window.native_direct_queue_ns/1000)/frames,
+                             " NOTE=window_totals_except_queue_us;native_mesh_calls_exclude_direct");
                 if(profile_window.native_audit_models)
                     LOG_INFO("PERF native_3do direct_model_audit models=",
                              profile_window.native_audit_models,
@@ -15604,6 +15617,16 @@ namespace jkgm {
                 profile_frame.native_audit_geoset += native.audit_geoset;
                 profile_frame.native_audit_result += native.audit_result;
                 profile_frame.native_audit_nested += native.audit_nested;
+                profile_frame.native_direct_attempts += native.direct_attempts;
+                profile_frame.native_direct_drawn += native.direct_drawn;
+                profile_frame.native_direct_rejected += native.direct_rejected;
+                profile_frame.native_direct_fallbacks += native.direct_fallbacks;
+                profile_frame.native_direct_meshes += native.direct_meshes;
+                profile_frame.native_direct_topology_hits += native.direct_topology_hits;
+                profile_frame.native_direct_topology_misses += native.direct_topology_misses;
+                profile_frame.native_direct_pose_refreshes += native.direct_pose_refreshes;
+                profile_frame.native_direct_rollbacks += native.direct_rollbacks;
+                profile_frame.native_direct_queue_ns += native.direct_queue_ns;
                 profile_frame.native_mesh_gpu_calls += native.mesh_gpu_calls;
                 profile_frame.native_mesh_native_calls += native.mesh_native_calls;
                 auto const sprites=consume_native_sprite_sample();

@@ -27,6 +27,16 @@ namespace jkgm {
         uint64_t audit_geoset=0;
         uint64_t audit_result=0;
         uint64_t audit_nested=0;
+        uint64_t direct_attempts=0;
+        uint64_t direct_drawn=0;
+        uint64_t direct_rejected=0;
+        uint64_t direct_fallbacks=0;
+        uint64_t direct_meshes=0;
+        uint64_t direct_topology_hits=0;
+        uint64_t direct_topology_misses=0;
+        uint64_t direct_pose_refreshes=0;
+        uint64_t direct_rollbacks=0;
+        uint64_t direct_queue_ns=0;
         void add(native_3do_sample const &o) {
             model_calls+=o.model_calls;
             model_lod0_forced+=o.model_lod0_forced;
@@ -64,6 +74,16 @@ namespace jkgm {
             audit_geoset+=o.audit_geoset;
             audit_result+=o.audit_result;
             audit_nested+=o.audit_nested;
+            direct_attempts+=o.direct_attempts;
+            direct_drawn+=o.direct_drawn;
+            direct_rejected+=o.direct_rejected;
+            direct_fallbacks+=o.direct_fallbacks;
+            direct_meshes+=o.direct_meshes;
+            direct_topology_hits+=o.direct_topology_hits;
+            direct_topology_misses+=o.direct_topology_misses;
+            direct_pose_refreshes+=o.direct_pose_refreshes;
+            direct_rollbacks+=o.direct_rollbacks;
+            direct_queue_ns+=o.direct_queue_ns;
         }
     };
     native_3do_sample consume_native_3do_sample();

@@ -47,6 +47,16 @@ struct profile_sample {
   uint64_t native_audit_geoset=0;
   uint64_t native_audit_result=0;
   uint64_t native_audit_nested=0;
+  uint64_t native_direct_attempts=0;
+  uint64_t native_direct_drawn=0;
+  uint64_t native_direct_rejected=0;
+  uint64_t native_direct_fallbacks=0;
+  uint64_t native_direct_meshes=0;
+  uint64_t native_direct_topology_hits=0;
+  uint64_t native_direct_topology_misses=0;
+  uint64_t native_direct_pose_refreshes=0;
+  uint64_t native_direct_rollbacks=0;
+  uint64_t native_direct_queue_ns=0;
   uint64_t native_mesh_gpu_calls=0,native_mesh_native_calls=0;
   std::array<uint64_t,5> sprite_type_calls{};
   uint64_t sprite_other_type_calls=0,sprite_hidden_calls=0;
@@ -184,6 +194,16 @@ struct profile_sample {
     native_audit_geoset+=o.native_audit_geoset;
     native_audit_result+=o.native_audit_result;
     native_audit_nested+=o.native_audit_nested;
+    native_direct_attempts+=o.native_direct_attempts;
+    native_direct_drawn+=o.native_direct_drawn;
+    native_direct_rejected+=o.native_direct_rejected;
+    native_direct_fallbacks+=o.native_direct_fallbacks;
+    native_direct_meshes+=o.native_direct_meshes;
+    native_direct_topology_hits+=o.native_direct_topology_hits;
+    native_direct_topology_misses+=o.native_direct_topology_misses;
+    native_direct_pose_refreshes+=o.native_direct_pose_refreshes;
+    native_direct_rollbacks+=o.native_direct_rollbacks;
+    native_direct_queue_ns+=o.native_direct_queue_ns;
     native_mesh_gpu_calls+=o.native_mesh_gpu_calls;
     native_mesh_native_calls+=o.native_mesh_native_calls;
     for(size_t i=0;i<sprite_type_calls.size();++i)

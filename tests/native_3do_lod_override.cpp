@@ -114,8 +114,35 @@ int main() {
     write(cuts+8,1);
     assert(predict_direct_model_nodes(read,uint32_t(rdthing),draw_plan));
     assert(draw_plan.nodes.size()==2 && draw_plan.nodes[1].node==1);
+    // Full topology can be reused by a second Thing with different cuts.
+    direct_model_topology_cache topology;
+    topology.prepare(1,1,true);
+    bool hit=false;
+    auto const *full=topology.get(read,uint32_t(rdthing),hit);
+    assert(full && !hit && full->nodes.size()==4);
+    uint32_t live_cuts[4]={1,0,1,0};
+    std::vector<uint32_t> order;
+    auto visit=[&](direct_model_node const &n) {order.push_back(n.node);return true;};
+    assert(visit_direct_model_meshes(*full,live_cuts,visit));
+    assert((order==std::vector<uint32_t>{0,1}));
+    live_cuts[2]=0;order.clear();
+    auto const *again=topology.get(read,uint32_t(rdthing),hit);
+    assert(again==full && hit);
+    assert(visit_direct_model_meshes(*again,live_cuts,visit));
+    assert((order==std::vector<uint32_t>{0,2,3,1}));
+    assert(!visit_direct_model_meshes(*again,live_cuts,
+        [](direct_model_node const &n) {return n.node!=2;}));
+    node(2,0xffffffffU,1,hierarchy+3*0xb4,hierarchy+0xb4);
+    topology.prepare(2,1,true);
+    full=topology.get(read,uint32_t(rdthing),hit);
+    assert(full && !hit);
+    live_cuts[2]=1;order.clear();
+    assert(visit_direct_model_meshes(*full,live_cuts,visit));
+    assert((order==std::vector<uint32_t>{0,1}));
     write(cuts+8,0);write(cuts,0);
     node(2,1,1,hierarchy,hierarchy+0xb4);
+    topology.prepare(3,1,true);
+    assert(!topology.get(read,uint32_t(rdthing),hit));
     assert(!predict_direct_model_nodes(read,uint32_t(rdthing),draw_plan));
     assert(draw_plan.nodes.empty());
     auto dm=predict_direct_model_modes({4,3,2},{3,2,1},2,1.0f);

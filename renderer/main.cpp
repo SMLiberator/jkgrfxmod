@@ -1451,7 +1451,8 @@ namespace {
     template<class T> bool direct_audit_read_value(uintptr_t at,T &v) {
         return direct_audit_read(at,&v,sizeof(v));
     }
-    bool prepare_direct_audit(direct_model_audit_scope &a,void *thing,void *placement) {
+    bool prepare_direct_audit(direct_model_audit_scope &a,void *thing,void *placement,
+                              bool enumerate=true) {
         a.rd=static_cast<uint32_t>(reinterpret_cast<uintptr_t>(thing));
         uint32_t flags=0,cam=0,model=0,options=0,frustum=0;
         int32_t cull=0;
@@ -1502,7 +1503,7 @@ namespace {
            !direct_audit_read_value(cam+0x54,ambient) || !std::isfinite(ambient))
             return false;
         a.modes=jkgm::predict_direct_model_modes(local,global,options,ambient);
-        return jkgm::predict_direct_model_nodes(direct_audit_read,a.rd,a.plan);
+        return !enumerate || jkgm::predict_direct_model_nodes(direct_audit_read,a.rd,a.plan);
     }
     void check_direct_audit_globals(direct_model_audit_scope &a) {
         jkgm::direct_model_modes observed{};
@@ -1559,6 +1560,147 @@ namespace {
                     " modes=",a.modes_bad," geoset=",a.geo_bad);
             }
         }
+    }
+    jkgm::direct_model_topology_cache direct_model_topologies;
+    void capture_static_sprite_decal_mesh(void *mesh,void *placement);
+    // RealNativeModel initializes these globals before the pose builder and
+    // callbacks. GPU queueing still consumes some of them (e.g. static
+    // decal receiver ownership). Only the native per-model light list is
+    // omitted: our GPU lighting reads the camera directly.
+    void set_direct_model_global(uintptr_t at,uint32_t value) {
+        std::memcpy(reinterpret_cast<void *>(at),&value,4);
+    }
+    bool try_direct_model_draw(void *thing,void *placement,int &result) {
+        bool const profiling=the_config->profile_renderer;
+        if(profiling)++native_totals.direct_attempts;
+        jkgm::native_draw_scope<native_model_mesh_state> direct_scope(
+            active_model_mesh_state,true);
+        direct_model_audit_scope state{};
+        if(!prepare_direct_audit(state,thing,placement,false))return false;
+        uint32_t model=0;
+        if(!direct_audit_read_value(state.rd+4,model))return false;
+        if(state.rejected) {
+            set_direct_model_global(0x73c320U,state.rd);
+            set_direct_model_global(0x73c210U,model);
+            set_direct_model_global(0x73c1ecU,2U);
+            result=0;
+            if(profiling)++native_totals.direct_rejected;
+            return true;
+        }
+        direct_model_topologies.prepare(mesh_revision::current(),gpu_frame_serial,
+                                         mesh_revision::active());
+        bool hit=false;
+        auto const *cached=direct_model_topologies.get(direct_audit_read,state.rd,hit);
+        if(!cached)return false;
+        if(profiling) {
+            if(hit)++native_totals.direct_topology_hits;
+            else ++native_totals.direct_topology_misses;
+        }
+        auto const &plan=*cached;
+        uint32_t matrices=0,cuts_ptr=0;
+        std::array<uint32_t,1024> cuts;
+        if(!direct_audit_read_value(state.rd+0x20,matrices) ||
+           !direct_audit_read_value(state.rd+0x28,cuts_ptr) ||
+           !direct_audit_read(cuts_ptr,cuts.data(),size_t(plan.node_count)*4) ||
+           !jkgm::direct_model_span(matrices,uint64_t(plan.node_count)*48) ||
+           !gpu_span_readable(reinterpret_cast<void const *>(uintptr_t(matrices)),
+                              size_t(plan.node_count)*48) ||
+           !gpu_span_readable(placement,48))return false;
+        // Native accessor refreshes the full joint array on a stale frame.
+        // Its entry is already used by the independent capture and collision
+        // paths; validate the same executable signature before invoking it.
+        static bool const accessor_verified=[] {
+            auto const *p=reinterpret_cast<void const *>(jkgm::jkgm_node_matrix_address);
+            auto const &sig=jkgm::jkgm_node_matrix_prologue;
+            return gpu_span_readable(p,sig.size()) &&
+                   std::memcmp(p,sig.data(),sig.size())==0;
+        }();
+        if(!accessor_verified)return false;
+        set_direct_model_global(0x73c320U,state.rd);
+        set_direct_model_global(0x73c210U,model);
+        set_direct_model_global(0x73c1ecU,1U);
+        set_direct_model_global(0x73a420U,plan.geoset_address);
+        uint32_t pose_frame=0,frame=0;
+        if(!direct_audit_read_value(state.rd+0x1c,pose_frame) ||
+           !direct_audit_read_value(0x5703d8U,frame))return false;
+        if(pose_frame!=frame) {
+            using accessor_fn=int(__cdecl *)(void *,float const *,unsigned,float *);
+            float root[12]{};
+            if(!reinterpret_cast<accessor_fn>(jkgm::jkgm_node_matrix_address)(
+                thing,static_cast<float const *>(placement),0U,root))return false;
+            if(profiling)++native_totals.direct_pose_refreshes;
+            if(!direct_audit_read_value(state.rd+0x20,matrices) ||
+               !jkgm::direct_model_span(matrices,uint64_t(plan.node_count)*48) ||
+               !gpu_span_readable(reinterpret_cast<void const *>(uintptr_t(matrices)),
+                                  size_t(plan.node_count)*48))return false;
+        }
+        set_direct_model_global(0x73a5d8U,uint32_t(state.modes.geo));
+        set_direct_model_global(0x73c218U,uint32_t(state.modes.light));
+        set_direct_model_global(0x73a9e4U,uint32_t(state.modes.tex));
+        direct_scope.state.geo_mode={true,std::optional<int32_t>(state.modes.geo)};
+        direct_scope.state.light_mode={true,std::optional<int32_t>(state.modes.light)};
+        direct_scope.state.decal_geoset={true,plan.geoset};
+        // Submit with the existing cache/material/lighting logic. Roll back
+        // both pending draws AND their occurrence counters if any mesh needs
+        // native warmup or cannot be represented. Cache warmup is retained.
+        size_t const first=pending_gpu_instances.size();
+        uint64_t meshes=0;
+        auto const queue_start=profiling?std::chrono::steady_clock::now():
+                                        std::chrono::steady_clock::time_point{};
+        bool const queued=jkgm::visit_direct_model_meshes(plan,cuts.data(),
+            [&](jkgm::direct_model_node const &node) {
+                auto *mesh=reinterpret_cast<void *>(uintptr_t(node.mesh));
+                auto *matrix=reinterpret_cast<void *>(uintptr_t(matrices)+node.node*48U);
+                if(!jkgm::queue_gpu_3do_mesh(mesh,matrix))return false;
+                ++meshes;
+                return true;
+            });
+        if(profiling)native_totals.direct_queue_ns+=elapsed_native_ns(queue_start);
+        if(!queued) {
+            for(size_t i=pending_gpu_instances.size();i>first;--i) {
+                auto const &inst=pending_gpu_instances[i-1];
+                if(!inst.decal_receiver_occurrence)continue;
+                auto it=moving_mesh_occurrences.find(
+                    {inst.decal_receiver_thing,inst.decal_receiver_mesh});
+                if(it!=moving_mesh_occurrences.end() && --it->second==0)
+                    moving_mesh_occurrences.erase(it);
+            }
+            pending_gpu_instances.resize(first);
+            if(profiling)++native_totals.direct_rollbacks;
+            return false;
+        }
+        // Static captures are committed only after the complete model
+        // succeeded; this avoids double side effects on native fallback.
+        // Same source-order mesh pointer and matrix as the native callbacks.
+        jkgm::visit_direct_model_meshes(plan,cuts.data(),
+            [&](jkgm::direct_model_node const &node) {
+                if(the_config->enable_decals) {
+                    bool const known_nonstatic=direct_scope.state.static_receiver.ready &&
+                        !direct_scope.state.static_receiver.value.owner;
+                    if(!known_nonstatic) {
+                        auto const begin=profiling?std::chrono::steady_clock::now():
+                                                   std::chrono::steady_clock::time_point{};
+                        capture_static_sprite_decal_mesh(
+                            reinterpret_cast<void *>(uintptr_t(node.mesh)),
+                            reinterpret_cast<void *>(uintptr_t(matrices)+node.node*48U));
+                        if(profiling) {
+                            ++native_totals.static_decal_capture_calls;
+                            native_totals.mesh_decal_ns+=elapsed_native_ns(begin);
+                        }
+                    } else if(profiling)++native_totals.static_decal_capture_skipped;
+                }
+                set_direct_model_global(0x73c1e8U,node.mesh);
+                return true;
+            });
+        uint32_t drawn=0;
+        if(direct_audit_read_value(0x73c32cU,drawn))
+            set_direct_model_global(0x73c32cU,drawn+1U);
+        result=1;
+        if(profiling) {
+            ++native_totals.direct_drawn;
+            native_totals.direct_meshes+=meshes;
+        }
+        return true;
     }
     int __cdecl HookedNativeModel(void *thing, void *placement)
     {
@@ -1971,6 +2113,12 @@ namespace {
                 result=RealNativeModel(thing,placement);
                 active_direct_audit=previous;
                 finish_direct_audit(audit,result);
+            } else if(the_config && the_config->use_gpu_cache &&
+                      the_config->experimental_gpu_3do_direct_model_draw) {
+                if(!try_direct_model_draw(thing,placement,result)) {
+                    if(profiling)++native_totals.direct_fallbacks;
+                    result=RealNativeModel(thing,placement);
+                }
             } else result=RealNativeModel(thing,placement);
         }
         if(lod0.valid)
@@ -3284,6 +3432,7 @@ void jkgm::reset_gpu_3do_instances()
     clear_moving_sprite_decals();
     gpu_mesh_cache.clear(); // level/renderer reset, never memory-pressure eviction
     gpu_offscreen_model_topology.clear(); // levels can recycle model pointers
+    direct_model_topologies.clear();
     clear_thing_opacity(); // levels may recycle Thing pointers/signatures
     gpu_mesh_cache_peak=0;
     gpu_mesh_cache_last_trim_frame=0;
