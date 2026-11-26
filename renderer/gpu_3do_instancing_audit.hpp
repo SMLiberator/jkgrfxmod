@@ -94,16 +94,6 @@ inline bool gpu_3do_instancing_conservative_candidate(
         inst.num_lights==0U && !inst.crossing_lighting &&
         !inst.nonrigid_light_transform;
 }
-// Only planar single-sided opaque instancing candidates may delegate
-// the native face-normal test to GL. Warped polygons deliberately disable
-// GL culling in the main submission path.
-inline bool gpu_3do_instancing_hardware_backface_candidate(
-    gpu_3do_instance const &inst,gpu_3do_group const &group)
-{
-    return !group.nonplanar && (group.face_type&0x1U)==0U &&
-        gpu_3do_instancing_conservative_candidate(
-            inst,group,gpu_3do_alpha_mode::solid,false);
-}
 // The rejection mask mirrors eligibility and distinguishes material features.
 // material_rejections must be computed from the resolved material.
 inline uint32_t gpu_3do_instancing_rejection_mask(

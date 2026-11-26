@@ -45,17 +45,6 @@ int main() {
     auto rows=std::vector<gpu_3do_instancing_audit_record>{
         record(a,shared->groups[0],0x1000U,0x11U),
         record(b,shared->groups[0],0x1000U,0x22U)};
-    // Hardware culling experiment only where GL face culling is enabled.
-    assert(gpu_3do_instancing_hardware_backface_candidate(a,shared->groups[0]));
-    auto warped=shared->groups[0];
-    warped.nonplanar=true;
-    assert(!gpu_3do_instancing_hardware_backface_candidate(a,warped));
-    auto double_sided=shared->groups[0];
-    double_sided.face_type|=0x1U;
-    assert(!gpu_3do_instancing_hardware_backface_candidate(a,double_sided));
-    auto translucent=shared->groups[0];
-    translucent.face_type|=0x2U;
-    assert(!gpu_3do_instancing_hardware_backface_candidate(a,translucent));
     auto metrics=audit_gpu_3do_instancing(rows);
     assert(metrics.source_draws==2U);
     assert(metrics.geometry_repeated_draws==1U);
