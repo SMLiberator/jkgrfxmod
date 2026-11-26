@@ -11953,15 +11953,47 @@ namespace jkgm {
         {
             gl::disable(gl::capability::depth_test);
 
-            ogs->game_post_opaque_composite_program.use_program();
-            ogs->game_post_opaque_composite_program.set_color_sampler(0);
-            ogs->game_post_opaque_composite_program.set_emissive_sampler(1);
-            ogs->game_post_opaque_composite_program.set_occlusion_sampler(2);
-            ogs->game_post_opaque_composite_program.set_depth_sampler(3);
-            ogs->game_post_opaque_composite_program.set_pigment_sampler(4);
+            // Direct sunlight must survive a failed/unavailable shadow map.
+            auto const sun=get_sun_settings();
+            float const sun_power=sun.intensity.value()[0];
+            bool const sun_lit=the_config->enable_sun &&
+                sun_level_has_sky &&
+                std::isfinite(sun_power) && sun_power>0.0f;
+            auto const cam=read_active_render_camera();
+            bool const radial_fog_active=the_config->experimental_radial_fog &&
+                                         the_config->enable_fog && cam.valid;
+            // Use the very same spotlight snapshot for variant selection and
+            // submission. An empty snapshot proves no projector can contribute;
+            // a nonempty one keeps the general spotlight path even if every
+            // cookie is later culled or unavailable.
+            auto spots=(cam.valid && the_config->enable_spotlights)
+                ? collect_spotlights_for_frame()
+                : std::vector<spotlight_instance>{};
+            auto *selected=&ogs->game_post_opaque_composite_program;
+            char const *composite_variant="full";
+            if(the_config->experimental_opaque_composite_specialization) {
+                bool const no_sun=!sun_lit || !cam.valid;
+                bool const no_spotlight=spots.empty();
+                if(no_sun && no_spotlight && ogs->game_post_opaque_no_direct_light_program) {
+                    selected=ogs->game_post_opaque_no_direct_light_program.get();
+                    composite_variant="no_direct_light";
+                } else if(no_sun && ogs->game_post_opaque_no_sun_program) {
+                    selected=ogs->game_post_opaque_no_sun_program.get();
+                    composite_variant="no_sun";
+                } else if(no_spotlight && ogs->game_post_opaque_no_spotlight_program) {
+                    selected=ogs->game_post_opaque_no_spotlight_program.get();
+                    composite_variant="no_spotlight";
+                }
+            }
+            auto &prog=*selected;
+            prog.use_program();
+            prog.set_color_sampler(0);
+            prog.set_emissive_sampler(1);
+            prog.set_occlusion_sampler(2);
+            prog.set_depth_sampler(3);
+            prog.set_pigment_sampler(4);
             // Required even when no sun/spotlight camera is configured.
-            ogs->game_post_opaque_composite_program.set_coverage_normal_sampler(5);
-            auto &prog=ogs->game_post_opaque_composite_program;
+            prog.set_coverage_normal_sampler(5);
             prog.set_spotlight_count(0);
             prog.set_sun_caustics(false,0.0f);
             prog.set_sun_dynamic_count(0);
@@ -11984,15 +12016,7 @@ namespace jkgm {
                 make_point(0.0f,0.0f,0.0f),make_point(1.0f,0.0f,0.0f),
                 make_point(0.0f,1.0f,0.0f),make_point(0.0f,0.0f,1.0f),
                 make_point(1.0f,1.0f,1.0f));
-            // Direct sunlight must survive a failed/unavailable shadow map.
-            auto const sun=get_sun_settings();
-            float const sun_power=sun.intensity.value()[0];
-            bool const sun_lit=the_config->enable_sun &&
-                sun_level_has_sky &&
-                std::isfinite(sun_power) && sun_power>0.0f;
-            auto const cam=read_active_render_camera();
-            bool const radial_fog_active=the_config->experimental_radial_fog &&
-                                         the_config->enable_fog && cam.valid;
+
             if((the_config->enable_sun || the_config->enable_sun_shadows) &&
                the_config->profile_renderer_verbose && gpu_3do_present_serial%120U==0U)
                 LOG_INFO("SUN composite diffuse=",sun_lit && cam.valid?1:0,
@@ -12031,9 +12055,6 @@ namespace jkgm {
                     point_axis(cam.forward,0.0f),
                     point_axis(cam.up,v));
                 int active=0;
-                auto spots=(the_config->enable_spotlights)
-                    ? collect_spotlights_for_frame()
-                    : std::vector<spotlight_instance>{};
                 if(the_config->enable_spotlights)maintain_spotlight_images(spots);
                 if(the_config->enable_spotlights) {
                     spotlight_projection_camera projection{};
@@ -12189,7 +12210,7 @@ namespace jkgm {
             {
                 auto const &fog=get_fog_settings();
                 auto const info=fog.info.value(), rgb=fog.color.value();
-                ogs->game_post_opaque_composite_program.set_fog(
+                prog.set_fog(
                     make_point(info[0],info[1],
                                the_config->enable_fog?info[2]:0.0f,radial_fog_active?(the_config->experimental_exponential_fog?2.0f:1.0f):0.0f),
                     color_rgb(rgb[0],rgb[1],rgb[2]));
@@ -12233,7 +12254,9 @@ namespace jkgm {
                              sun_caustic_target && sun_caustic_target->complete &&
                              sun_caustic_target->valid[0] &&
                              sun_caustic_target->valid[1]?1:0,
-                         " radial_fog=",radial_fog_active?1:0);
+                         " radial_fog=",radial_fog_active?1:0,
+                         " composite_variant=",composite_variant,
+                         " spotlight_candidates=",spots.size());
             prog.set_sun_half_visibility(half_sun_active,11);
             // HOM coverage reads normal.A on EVERY frame, including rooms
             // without sunlight or active spotlights. Always bind this

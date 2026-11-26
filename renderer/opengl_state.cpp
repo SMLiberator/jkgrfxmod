@@ -425,6 +425,17 @@ jkgm::opengl_state::opengl_state::opengl_state(size<2, int> screen_res,
     , bloom_layers(screen_res)
 {
     LOG_DEBUG("Loading OpenGL assets");
+    if(the_config->experimental_opaque_composite_specialization) {
+        game_post_opaque_no_sun_program=std::make_unique<
+            shaders::game_post_opaque_composite_shader>(data_root,false,
+                material_shader_variant::composite_no_sun);
+        game_post_opaque_no_spotlight_program=std::make_unique<
+            shaders::game_post_opaque_composite_shader>(data_root,false,
+                material_shader_variant::composite_no_spotlight);
+        game_post_opaque_no_direct_light_program=std::make_unique<
+            shaders::game_post_opaque_composite_shader>(data_root,false,
+                material_shader_variant::composite_no_direct_light);
+    }
     if(the_config->enable_sun && the_config->enable_sun_shadows) {
         game_post_opaque_half_sun_program=std::make_unique<
             shaders::game_post_opaque_composite_shader>(data_root,true);

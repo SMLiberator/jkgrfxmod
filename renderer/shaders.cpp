@@ -237,6 +237,12 @@ void jkgm::shaders::translucent_sun_uniforms::set_map(
                     define="#define JKGM_SIMPLE_OPAQUE 1\n#define JKGM_SINGLE_SECTOR_GGX 1\n"; break;
                 case material_shader_variant::single_sector_ggx_alpha:
                     define="#define JKGM_SIMPLE_ALPHA 1\n#define JKGM_SINGLE_SECTOR_GGX 1\n"; break;
+                case material_shader_variant::composite_no_sun:
+                    define="#define JKGM_COMPOSITE_NO_SUN 1\n"; break;
+                case material_shader_variant::composite_no_spotlight:
+                    define="#define JKGM_COMPOSITE_NO_SPOTLIGHT 1\n"; break;
+                case material_shader_variant::composite_no_direct_light:
+                    define="#define JKGM_COMPOSITE_NO_SUN 1\n#define JKGM_COMPOSITE_NO_SPOTLIGHT 1\n"; break;
                 case material_shader_variant::world_simple_opaque:
                     define="#define JKGM_WORLD_SIMPLE 1\n#define JKGM_WORLD_OPAQUE 1\n"; break;
                 case material_shader_variant::world_simple_alpha:
@@ -1837,11 +1843,12 @@ void jkgm::shaders::spotlight_shadow_depth_shader::set_shadow_alpha(
 }
 
 jkgm::shaders::game_post_opaque_composite_shader::game_post_opaque_composite_shader(
-    fs::path const &data_root,bool half_sun)
+    fs::path const &data_root,bool half_sun,material_shader_variant variant)
     : opengl_shader(half_sun?"game_post_opaque_half_sun":"game_post_opaque_composite",
                     data_root / "shaders/postprocess.vert",
                     data_root / (half_sun?"shaders/post_sun_visibility_half.frag":
-                                          "shaders/post_opaque_composite.frag"))
+                                          "shaders/post_opaque_composite.frag"),
+                    fs::path(),variant)
     , color_image(gl::get_uniform_location(the_program, "color_image"))
     , emissive_image(gl::get_uniform_location(the_program, "emissive_image"))
     , occlusion_image(gl::get_uniform_location(the_program, "occlusion_image"))

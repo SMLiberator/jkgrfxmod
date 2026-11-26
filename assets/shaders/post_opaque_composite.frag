@@ -18,7 +18,11 @@ uniform vec4 camera_up;          // XYZ world axis, W tan(vertical_fov/2)
 
 // Four independent COG MAT spotlights. Textures occupy units 6-9.
 // Avoid dynamic sampler-array indexing, which GLSL 330 cannot guarantee.
+#ifdef JKGM_COMPOSITE_NO_SPOTLIGHT
+const int spotlight_count=0;
+#else
 uniform int spotlight_count;
+#endif
 uniform sampler2D spotlight_image_0;
 uniform sampler2D spotlight_image_1;
 uniform sampler2D spotlight_image_2;
@@ -39,7 +43,11 @@ uniform sampler2DShadow spotlight_shadow_image;
 uniform vec2 spotlight_shadow_near_range; // near, far in JK world units
 uniform float spotlight_shadow_angle_bias_scale; // 0=legacy, 1=+0.035 JKU at grazing
 
+#ifdef JKGM_COMPOSITE_NO_SUN
+const int sun_lighting_active=0;
+#else
 uniform int sun_lighting_active; // independent of depth-map readiness
+#endif
 uniform int sun_shadow_active;
 uniform sampler2DShadow sun_shadow_image;
 uniform vec3 sun_shadow_direction; // world-space direction toward the sun
@@ -536,7 +544,12 @@ void main()
     // Depth.GBA stores base pigment when spotlights are enabled; depth.R
     // remains unchanged for SSAO and reconstruction.
     vec3 light_rgb,add_rgb;
+#ifdef JKGM_COMPOSITE_NO_SPOTLIGHT
+    light_rgb=vec3(0.0);
+    add_rgb=vec3(0.0);
+#else
     project_spotlights(depth,tc,light_rgb,add_rgb);
+#endif
     vec3 pigment=(spotlight_count>0 || sun_lighting_active!=0)
         ? max(gbuffer_packing!=0
             ?texelFetch(pigment_image,tc,0).rgb
@@ -544,6 +557,7 @@ void main()
         : vec3(0.0);
     // Depth is JK's linear forward distance * 32. Far pixels skip the normal
     // fetch, world reconstruction and every shadow lookup.
+#ifndef JKGM_COMPOSITE_NO_SUN
     float sun_fade=(sun_lighting_active!=0 && depth>0.0 && depth<65500.0)
         ? sun_range_fade(depth/32.0) : 0.0;
     if(sun_fade>0.0) {
@@ -609,6 +623,7 @@ void main()
             }
         }
     }
+#endif // JKGM_COMPOSITE_NO_SUN
     vec3 diffuse_light=pigment*light_rgb;
     vec3 screened=surface_rgb+diffuse_light*
                   (vec3(1.0)-clamp(surface_rgb,0.0,1.0));
