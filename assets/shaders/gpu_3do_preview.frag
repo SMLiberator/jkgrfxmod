@@ -79,9 +79,9 @@ uniform vec3 hemi_right_axis,hemi_forward_axis,hemi_up_axis;
 uniform vec4 hemi_capture_info; // legacy x/y, ready, reflection mode
 // Do not reconstruct fragment position or normals from draw-wide view_*
 // uniforms: those belong to only the first member of an instanced draw.
-flat in vec3 fragment_view_right;
-flat in vec3 fragment_view_forward;
-flat in vec3 fragment_view_up;
+flat in vec3 fragment_basis_right;
+flat in vec3 fragment_basis_forward;
+flat in vec3 fragment_basis_up;
 in vec3 fragment_native_view_position;
 uniform vec4 projection; // FOV scale for the deferred spotlight/sun normal
 uniform vec3 camera_right_axis,camera_forward_axis,camera_up_axis;
@@ -220,7 +220,7 @@ vec3 pixel_jk_diffuse_lighting(vec3 mapped_diffuse_normal)
     vec3 normal=normalize(mode>=2.5 ? mapped_diffuse_normal
                                     : pixel_light_face_normal);
     if(nonrigid_light_transform!=0) {
-        vec3 r=fragment_view_right,f=fragment_view_forward,u=fragment_view_up;
+        vec3 r=fragment_basis_right,f=fragment_basis_forward,u=fragment_basis_up;
         vec3 cr=cross(f,u),cf=cross(u,r),cu=cross(r,f);
         float determinant=dot(r,cr);
         normal=normalize(sign(determinant)*
@@ -230,8 +230,8 @@ vec3 pixel_jk_diffuse_lighting(vec3 mapped_diffuse_normal)
     for(int i=0;i<num_lights;i++) {
         vec3 delta=light_position_radius[i].xyz-anchor;
         if(nonrigid_light_transform!=0)
-            delta=fragment_view_right*delta.x+
-                  fragment_view_forward*delta.y+fragment_view_up*delta.z;
+            delta=fragment_basis_right*delta.x+
+                  fragment_basis_forward*delta.y+fragment_basis_up*delta.z;
         added+=light_color[i]*jk_point_sample(
             delta,normal,light_position_radius[i].w,
             light_intensity[i],attenuation_min,mode<2.5);
@@ -346,8 +346,8 @@ vec3 point_light_specular(vec3 base_color,vec2 uv,
         // distance is not a world distance. Normal and directions must
         // share a rigid camera-space basis for correct specular response.
         N=coating?surface_coat_view:surface_base_view;
-        vec3 v=fragment_view_right*V.x+
-               fragment_view_forward*V.y+fragment_view_up*V.z;
+        vec3 v=fragment_basis_right*V.x+
+               fragment_basis_forward*V.y+fragment_basis_up*V.z;
         V=vec3(v.x,v.z,v.y);
     }
     V=normalize(V);
@@ -371,8 +371,8 @@ vec3 point_light_specular(vec3 base_color,vec2 uv,
     for(int i=0;i<num_lights;i++) {
         vec3 delta=light_position_radius[i].xyz-local_fragment_position;
         if(nonrigid_light_transform!=0) {
-            vec3 d=fragment_view_right*delta.x+
-                   fragment_view_forward*delta.y+fragment_view_up*delta.z;
+            vec3 d=fragment_basis_right*delta.x+
+                   fragment_basis_forward*delta.y+fragment_basis_up*delta.z;
             delta=vec3(d.x,d.z,d.y);
         }
         float dist=length(delta);
@@ -860,11 +860,17 @@ void prepare_fragment_surface(vec2 uv)
     coat_mapped=coat_needed && clearcoat_has_normal!=0;
 #endif
     if(!base_needed && !coat_needed)return;
-    vec3 r=fragment_view_right,f=fragment_view_forward,u=fragment_view_up;
-    vec3 cr=cross(f,u),cf=cross(u,r),cu=cross(r,f);
-    float det=dot(r,cr);
-    surface_normal_transform=abs(det)>1e-8
-        ?mat3(sign(det)*cr,sign(det)*cf,sign(det)*cu):mat3(r,f,u);
+    vec3 r=fragment_basis_right,f=fragment_basis_forward,u=fragment_basis_up;
+    surface_normal_transform=mat3(r,f,u);
+    // Ordinary materials receive the signed cofactor matrix from the
+    // vertex shader. Only affine point-light distance evaluation needs
+    // the original basis; retain the exact singular fallback in that case.
+    if(nonrigid_light_transform!=0) {
+        vec3 cr=cross(f,u),cf=cross(u,r),cu=cross(r,f);
+        float det=dot(r,cr);
+        if(abs(det)>1e-8)
+            surface_normal_transform=mat3(sign(det)*cr,sign(det)*cf,sign(det)*cu);
+    }
     surface_geometric_normal=normalize(local_fragment_normal);
     surface_tangent_valid=false;
     // Use draw-uniform conditions for derivatives, not per-pixel coat masks.

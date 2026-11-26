@@ -60,9 +60,9 @@ out vec3 view_normal;
 // Both the uniform and buffered instance paths select their own affine
 // basis above. Flat columns are constant within each primitive; position
 // is perspective-correct interpolated, including for mirrored/scaled nodes.
-flat out vec3 fragment_view_right;
-flat out vec3 fragment_view_forward;
-flat out vec3 fragment_view_up;
+flat out vec3 fragment_basis_right;
+flat out vec3 fragment_basis_forward;
+flat out vec3 fragment_basis_up;
 out vec3 fragment_native_view_position;
 // Decals reuse the existing light-anchor (xyz) and extra-light (w)
 // attributes as normalized projector coordinates and smooth angular alpha.
@@ -215,9 +215,18 @@ void main() {
     float z = (model_up.z*sprite_vertex_position.z+
                model_forward.z*sprite_vertex_position.y+
                model_right.z*sprite_vertex_position.x)+model_origin.z;
-    fragment_view_right=model_right.xyz;
-    fragment_view_forward=model_forward.xyz;
-    fragment_view_up=model_up.xyz;
+    // Constant across each instance: reuse the cofactors already needed
+    // by the G-buffer and vertex lighting. No extra varying bandwidth.
+    vec3 r=model_right.xyz,f=model_forward.xyz,u=model_up.xyz;
+    vec3 cr=cross(f,u),cf=cross(u,r),cu=cross(r,f);
+    float det=dot(r,cr);
+    mat3 normal_transform=abs(det)>1e-8
+        ?mat3(sign(det)*cr,sign(det)*cf,sign(det)*cu):mat3(r,f,u);
+    // Nonrigid point-light distances still require raw affine columns.
+    // That uncommon path reconstructs its normal transform in fragments.
+    fragment_basis_right=nonrigid_light_transform!=0?r:normal_transform[0];
+    fragment_basis_forward=nonrigid_light_transform!=0?f:normal_transform[1];
+    fragment_basis_up=nonrigid_light_transform!=0?u:normal_transform[2];
     fragment_native_view_position=vec3(x,y,z);
     float h=max(projection.x,0.0001);
     float v=h/max(projection.y,0.0001);
@@ -266,10 +275,7 @@ void main() {
         // rigid basis (a rotation of world space). Compute the inverse-
         // transpose normal once per vertex, not once per affecting light.
         if(nonrigid_light_transform!=0) {
-            vec3 r=model_right.xyz,f=model_forward.xyz,u=model_up.xyz;
-            vec3 cr=cross(f,u),cf=cross(u,r),cu=cross(r,f);
-            float determinant=dot(r,cr);
-            normal=normalize(sign(determinant)*
+            normal=normalize(sign(det)*
                 (cr*normal.x+cf*normal.y+cu*normal.z));
         }
         for(int i=0;i<num_lights;i++) {
@@ -365,16 +371,9 @@ void main() {
     // but normals must use its inverse transpose, never the raw columns.
     // The sign of the determinant preserves the orientation of reflected
     // node normals. Fall back for collapsed/singular nodes.
-    vec3 r=model_right.xyz, f=model_forward.xyz, u=model_up.xyz;
-    vec3 cr=cross(f,u), cf=cross(u,r), cu=cross(r,f);
-    float det=dot(r,cr);
-    vec3 vn=abs(det)>1e-8
-        ? sign(det)*(cr*local_light_normal.x+
-                     cf*local_light_normal.y+
-                     cu*local_light_normal.z)
-        : (r*local_light_normal.x+
-           f*local_light_normal.y+
-           u*local_light_normal.z);
+    vec3 vn=normal_transform[0]*local_light_normal.x+
+            normal_transform[1]*local_light_normal.y+
+            normal_transform[2]*local_light_normal.z;
     vec3 projected=vec3(vn.x*h,vn.z*v,vn.y);
     view_normal=dot(projected,projected)>1e-16
         ? normalize(projected) : vec3(0.0,0.0,1.0);
