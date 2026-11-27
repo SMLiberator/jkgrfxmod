@@ -76,8 +76,13 @@ void jkgm::renderer_compositor_bloom::end_frame(opengl_state *ogs,
     scale.set_fbuf_sampler(0);
     unsigned level=0U;
     for(auto &hdr_stack_em : ogs->bloom_layers.elements) {
-        scale.set_fused_bloom(full_viewport && level==0U,1,
-            adaptive,hdr_enabled(ogs)?ogs->hdr_exposure_compensation:0.0f);
+        if(bilinear && level==1U) {
+            ogs->post_bloom_downsample->use_program();
+            ogs->post_bloom_downsample->set_fbuf_sampler(0);
+        }
+        if(!bilinear || level==0U)
+            scale.set_fused_bloom(full_viewport && level==0U,1,
+                adaptive,hdr_enabled(ogs)?ogs->hdr_exposure_compensation:0.0f);
         gl::bind_framebuffer(gl::framebuffer_bind_target::any,
                              hdr_stack_em.a.fbo);
         gl::set_viewport(hdr_stack_em.a.viewport);

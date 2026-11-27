@@ -436,9 +436,12 @@ jkgm::opengl_state::opengl_state::opengl_state(size<2, int> screen_res,
         the_config->experimental_bloom_hierarchical_accumulation;
     LOG_INFO("BLOOM bilinear=",bloom_bilinear?1:0,
              " hierarchical=",bloom_hierarchical_accumulation?1:0);
-    if(bloom_bilinear)
+    if(bloom_bilinear) {
         post_bloom_fast_scale=std::make_unique<shaders::post_scale_shader>(
             data_root,true);
+        post_bloom_downsample=std::make_unique<shaders::post_scale_shader>(
+            data_root,false,true);
+    }
     if(bloom_bilinear || bloom_hierarchical_accumulation) {
         constexpr int taps[]={3,7,9,15};
         for(size_t i=0;i<post_bloom_gauss.size();++i)

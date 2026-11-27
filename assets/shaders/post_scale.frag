@@ -1,6 +1,11 @@
 #version 330 core
 
 uniform sampler2D fbuf_image;
+#ifdef JKGM_BLOOM_DOWNSAMPLE
+in vec2 vp_downsample_uv;
+layout(location = 0) out vec4 out_color;
+void main() { out_color=texture(fbuf_image,vp_downsample_uv); }
+#else
 // Only the first downsample needs source-image bloom extraction. Default off.
 uniform int fused_bloom_first_pass;
 uniform sampler2D exposure_image;
@@ -29,24 +34,16 @@ vec4 bloom_threshold(vec4 samp,float ev_factor)
 
 void main()
 {
-#ifdef JKGM_BLOOM_FAST_SCALE
-    if(fused_bloom_first_pass==0) {
-        // Center of the exact 2x2 source footprint, not interpolated
-        // destination UV: preserves the old crop on odd dimensions.
-        vec2 uv=(gl_FragCoord.xy*2.0)/vec2(textureSize(fbuf_image,0));
-        out_color=texture(fbuf_image,uv);
-        return;
-    }
-#endif
     ivec2 base_tc=ivec2(gl_FragCoord.xy)*2;
     vec4 a=texelFetchOffset(fbuf_image,base_tc,0,ivec2(0,0));
     vec4 b=texelFetchOffset(fbuf_image,base_tc,0,ivec2(1,0));
     vec4 c=texelFetchOffset(fbuf_image,base_tc,0,ivec2(0,1));
     vec4 d=texelFetchOffset(fbuf_image,base_tc,0,ivec2(1,1));
-    if(fused_bloom_first_pass!=0) {
-        #ifdef JKGM_BLOOM_FAST_SCALE
+#ifdef JKGM_BLOOM_FAST_SCALE
+    {
         float exposure_factor=vp_bloom_exposure;
-        #else
+#else
+    if(fused_bloom_first_pass!=0) {
         float ev=hdr_exposure_compensation;
         if(exposure_enabled!=0)
             ev+=texelFetch(exposure_image,ivec2(0),0).r;
@@ -59,3 +56,5 @@ void main()
     }
     out_color=(a+b+c+d)*0.25;
 }
+
+#endif

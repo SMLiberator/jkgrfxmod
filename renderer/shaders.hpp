@@ -16,7 +16,7 @@ namespace jkgm {
         composite_no_sun, composite_no_spotlight, composite_no_direct_light,
         composite_shared_sun, composite_no_spotlight_shared_sun,
         postfx_vertex_constants, bloom_bilinear, bloom_hierarchy,
-        bloom_bilinear_hierarchy, bloom_scale
+        bloom_bilinear_hierarchy, bloom_scale, bloom_downsample
     };
 
     class opengl_shader {
@@ -765,6 +765,8 @@ namespace jkgm {
         private:
             gl::uniform_location_id fbuf_image,blur_direction;
             gl::uniform_location_id coarse_image,coarse_enabled,layer_weight;
+            gl::uniform_location_id bloom_offsets;
+            int kernel_taps;
         public:
             post_bloom_gauss_shader(fs::path const &data_root,int taps,
                                     bool bilinear,bool hierarchy);
@@ -794,7 +796,8 @@ namespace jkgm {
             gl::uniform_location_id hdr_exposure_compensation;
 
         public:
-            explicit post_scale_shader(fs::path const &data_root,bool bloom_fast=false);
+            explicit post_scale_shader(fs::path const &data_root,bool bloom_fast=false,
+                                       bool bloom_downsample=false);
 
             void set_fbuf_sampler(int sampler);
             void set_fused_bloom(bool first_pass,int exposure_sampler,

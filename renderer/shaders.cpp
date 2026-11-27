@@ -223,7 +223,10 @@ void jkgm::shaders::translucent_sun_uniforms::set_map(
                 variant==material_shader_variant::hud_only ||
                 variant==material_shader_variant::emission_only ||
                 variant==material_shader_variant::postfx_vertex_constants ||
-                variant==material_shader_variant::bloom_scale;
+                variant==material_shader_variant::bloom_scale ||
+                variant==material_shader_variant::bloom_downsample ||
+                variant==material_shader_variant::bloom_bilinear ||
+                variant==material_shader_variant::bloom_bilinear_hierarchy;
             if(variant!=material_shader_variant::full &&
                (type==gl::shader_type::fragment ||
                 (specialize_vertex && type==gl::shader_type::vertex))) {
@@ -276,6 +279,8 @@ void jkgm::shaders::translucent_sun_uniforms::set_map(
                     define="#define JKGM_BLOOM_BILINEAR 1\n#define JKGM_BLOOM_HIERARCHY 1\n"; break;
                 case material_shader_variant::bloom_scale:
                     define="#define JKGM_BLOOM_FAST_SCALE 1\n"; break;
+                case material_shader_variant::bloom_downsample:
+                    define="#define JKGM_BLOOM_DOWNSAMPLE 1\n"; break;
                 default: break;
                 }
                 source.insert(newline+1U,define);
@@ -2321,12 +2326,34 @@ jkgm::shaders::post_bloom_gauss_shader::post_bloom_gauss_shader(
     , coarse_image(gl::get_uniform_location(the_program,"coarse_image"))
     , coarse_enabled(gl::get_uniform_location(the_program,"coarse_enabled"))
     , layer_weight(gl::get_uniform_location(the_program,"layer_weight"))
+    , bloom_offsets(gl::get_uniform_location(the_program,"bloom_offsets"))
+    , kernel_taps(taps)
 {
 }
 
 void jkgm::shaders::post_bloom_gauss_shader::set_fbuf_sampler(int sampler)
 {
     gl::set_uniform_integer(fbuf_image,sampler);
+    // Pair offsets derived from the original Gaussian weights. The
+    // vertex shader interpolates the two sample positions for each pair.
+    switch(kernel_taps) {
+    case 15:
+        gl::set_uniform_vector(bloom_offsets,make_point(
+            0.648612939448f,2.40106840880f,4.32697696586f,6.26059894220f));
+        break;
+    case 9:
+        gl::set_uniform_vector(bloom_offsets,make_point(
+            1.31291339212f,3.13716660760f,0.0f,0.0f));
+        break;
+    case 7:
+        gl::set_uniform_vector(bloom_offsets,make_point(
+            0.585141462035f,2.14784599676f,0.0f,0.0f));
+        break;
+    default:
+        gl::set_uniform_vector(bloom_offsets,make_point(
+            0.315462f,0.0f,0.0f,0.0f));
+        break;
+    }
 }
 
 void jkgm::shaders::post_bloom_gauss_shader::set_blur_direction(direction<2,int> dir)
@@ -2384,12 +2411,13 @@ void jkgm::shaders::post_smoke_composite_shader::set_samplers(
 }
 
 jkgm::shaders::post_scale_shader::post_scale_shader(
-    fs::path const &data_root,bool bloom_fast)
+    fs::path const &data_root,bool bloom_fast,bool bloom_downsample)
     : opengl_shader("post_scale",
                     data_root / "shaders/postprocess.vert",
                     data_root / "shaders/post_scale.frag",fs::path(),
-                    bloom_fast?material_shader_variant::bloom_scale
-                              :material_shader_variant::full)
+                    bloom_downsample?material_shader_variant::bloom_downsample
+                        :(bloom_fast?material_shader_variant::bloom_scale
+                                    :material_shader_variant::full))
     , fbuf_image(gl::get_uniform_location(the_program, "fbuf_image"))
     , fused_bloom_first_pass(gl::get_uniform_location(
         the_program,"fused_bloom_first_pass"))

@@ -8,7 +8,12 @@ layout(location = 0) out vec4 out_color;
 uniform sampler2D coarse_image;
 uniform int coarse_enabled;
 uniform float layer_weight;
+#endif
+#if defined(JKGM_BLOOM_HIERARCHY) || defined(JKGM_BLOOM_BILINEAR)
 in vec2 vp_texcoords;
+#endif
+#ifdef JKGM_BLOOM_BILINEAR
+in vec4 vp_bloom_pairs[4];
 #endif
 
 vec4 fetch_sym(ivec2 tc, int radius, float fac)
@@ -23,17 +28,14 @@ void main()
 #ifdef JKGM_BLOOM_BILINEAR
     // Adjacent weighted taps combined by linear texture filtering.
     // Texture state clamps edge samples rather than fetching out of bounds.
-    vec2 inv_dims=1.0/vec2(textureSize(fbuf_image,0));
-    vec2 uv=gl_FragCoord.xy*inv_dims;
-    vec2 step_uv=vec2(blur_direction)*inv_dims;
-    out_color=(texture(fbuf_image,uv+step_uv*0.648612939448)+
-               texture(fbuf_image,uv-step_uv*0.648612939448))*0.227925206528;
-    out_color+=(texture(fbuf_image,uv+step_uv*2.40106840880)+
-                texture(fbuf_image,uv-step_uv*2.40106840880))*0.194047250518;
-    out_color+=(texture(fbuf_image,uv+step_uv*4.32697696586)+
-                texture(fbuf_image,uv-step_uv*4.32697696586))*0.0659578338974;
-    out_color+=(texture(fbuf_image,uv+step_uv*6.26059894220)+
-                texture(fbuf_image,uv-step_uv*6.26059894220))*0.0120697090564;
+    out_color=(texture(fbuf_image,vp_bloom_pairs[0].xy)+
+               texture(fbuf_image,vp_bloom_pairs[0].zw))*0.227925206528;
+    out_color+=(texture(fbuf_image,vp_bloom_pairs[1].xy)+
+               texture(fbuf_image,vp_bloom_pairs[1].zw))*0.194047250518;
+    out_color+=(texture(fbuf_image,vp_bloom_pairs[2].xy)+
+               texture(fbuf_image,vp_bloom_pairs[2].zw))*0.0659578338974;
+    out_color+=(texture(fbuf_image,vp_bloom_pairs[3].xy)+
+               texture(fbuf_image,vp_bloom_pairs[3].zw))*0.0120697090564;
 #else
     ivec2 tc = ivec2(gl_FragCoord.xy);
 
