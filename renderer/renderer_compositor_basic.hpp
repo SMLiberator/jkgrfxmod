@@ -7,6 +7,7 @@ namespace jkgm {
     public:
         void end_frame(opengl_state *ogs,
                        size<2, int> screen_size,
-                       gl::texture_view composed_screen) override;
+                       gl::texture_view composed_screen,
+                       postfx_gpu_profile *timing=nullptr) override;
     };
 }

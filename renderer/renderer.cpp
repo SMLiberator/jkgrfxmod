@@ -1381,8 +1381,8 @@ namespace jkgm {
         // Timestamp queries are only issued with profile_renderer enabled.
         // Results are delayed by up to eight frames and never force a GPU
         // flush/wait. The CPU present_swap stage still includes SwapBuffers.
-        presentation_gpu_profile present_gpu_queries;
-        std::array<uint64_t,presentation_gpu_profile::num_stages> present_gpu_ns{};
+        postfx_gpu_profile present_gpu_queries;
+        std::array<uint64_t,postfx_gpu_profile::num_stages> present_gpu_ns{};
         uint64_t present_gpu_samples=0, present_gpu_skipped=0;
 
         // Asynchronous GPU timings for the scene, separate from postFX and
@@ -1737,12 +1737,22 @@ namespace jkgm {
                      " NOTE=substages_of_post_swap");
             uint64_t const gpu_samples=present_gpu_samples;
             LOG_INFO("PERF present_gpu_us resolve=",
-                     gpu_samples?(present_gpu_ns[0]/1000U)/gpu_samples:0U,
-                     " blur=",gpu_samples?(present_gpu_ns[1]/1000U)/gpu_samples:0U,
-                     " compositor=",gpu_samples?(present_gpu_ns[2]/1000U)/gpu_samples:0U,
+                     gpu_samples?(present_gpu_ns[postfx_resolve]/1000U)/gpu_samples:0U,
+                     " blur=",gpu_samples?(present_gpu_ns[postfx_blur]/1000U)/gpu_samples:0U,
+                     " compositor=",gpu_samples?(present_gpu_ns[postfx_aggregate]/1000U)/gpu_samples:0U,
                      " samples=",gpu_samples," ring_busy_skips=",present_gpu_skipped,
                      " supported=",present_gpu_queries.is_supported(),
                      " NOTE=delayed_nonblocking_GPU_timestamps_zero_if_no_samples");
+            auto const postfx_us=[&](postfx_gpu_stage stage) {
+                return gpu_samples?(present_gpu_ns[stage]/1000U)/gpu_samples:0U;
+            };
+            LOG_INFO("PERF postfx_gpu_us exposure=",postfx_us(postfx_exposure),
+                     " bloom=",postfx_us(postfx_bloom),
+                     " final=",postfx_us(postfx_final),
+                     " trails=",postfx_us(postfx_trails),
+                     " overlays=",postfx_us(postfx_overlays),
+                     " samples=",gpu_samples," ring_busy_skips=",present_gpu_skipped,
+                     " NOTE=GPU_timestamp_intervals;overlays_include_HUD_retro_debug");
             present_gpu_ns.fill(0U);
             present_gpu_samples=present_gpu_skipped=0U;
             uint64_t const scene_samples=scene_gpu_samples;
@@ -3280,7 +3290,7 @@ namespace jkgm {
             menu_frame_pending = false;
             bool const measure=the_config->profile_renderer &&
                                !presenting_menu;
-            presentation_gpu_profile::completed_sample completed{};
+            postfx_gpu_profile::completed_sample completed{};
             bool const gpu_timing=measure && present_gpu_queries.begin(completed);
             if(completed.ready) {
                 for(size_t i=0;i<present_gpu_ns.size();++i)
@@ -3295,9 +3305,9 @@ namespace jkgm {
             {
                 profile_scope cpu(measure,profile_frame.timings[
                     profile_idx(profile_stage::present_resolve)]);
-                if(gpu_timing)present_gpu_queries.timestamp(0U,true);
+                if(gpu_timing)present_gpu_queries.timestamp(postfx_resolve,true);
                 frame_screen->end_frame();
-                if(gpu_timing)present_gpu_queries.timestamp(0U,false);
+                if(gpu_timing)present_gpu_queries.timestamp(postfx_resolve,false);
             }
             // Optional depth/peripheral blur occurs before bloom, color processing
             // and frame blending. Keep the source texture untouched for no-blur mode.
@@ -3340,13 +3350,13 @@ namespace jkgm {
             {
                 profile_scope cpu(measure,profile_frame.timings[
                     profile_idx(profile_stage::present_blur)]);
-                if(gpu_timing)present_gpu_queries.timestamp(1U,true);
+                if(gpu_timing)present_gpu_queries.timestamp(postfx_blur,true);
                 if(mode == renderer_mode::ingame) {
                     scene = apply_spatial_blur(
                         ogs.get(), conf_scr_res, scene,
                         frame_screen->get_resolved_depth_texture());
                 }
-                if(gpu_timing)present_gpu_queries.timestamp(1U,false);
+                if(gpu_timing)present_gpu_queries.timestamp(postfx_blur,false);
             }
             // Retro Mode consumes the exact in-memory RGB888 entries from JK's
             // identity CMP (+0x30, NOT the file's +0x40 palette offset).
@@ -3465,8 +3475,10 @@ namespace jkgm {
             {
                 profile_scope cpu(measure,profile_frame.timings[
                     profile_idx(profile_stage::present_composite)]);
-                if(gpu_timing)present_gpu_queries.timestamp(2U,true);
-                frame_compositor->end_frame(ogs.get(),conf_scr_res,scene);
+                if(gpu_timing)present_gpu_queries.timestamp(postfx_aggregate,true);
+                frame_compositor->end_frame(ogs.get(),conf_scr_res,scene,
+                    gpu_timing?&present_gpu_queries:nullptr);
+                if(gpu_timing)present_gpu_queries.timestamp(postfx_overlays,true);
                 draw_post_exempt();
                 // Keep DirectDraw HUD out of HDR, bloom, grading, blur and
                 // trails. It overlays Camera Thing HUDs, but Retro is the
@@ -3490,7 +3502,10 @@ namespace jkgm {
                 // Debug view replaces the final gameplay image, including HUD.
                 // Screenshot hotkeys therefore capture the projected probe.
                 draw_reflection_debug_view();
-                if(gpu_timing)present_gpu_queries.timestamp(2U,false);
+                if(gpu_timing) {
+                    present_gpu_queries.timestamp(postfx_overlays,false);
+                    present_gpu_queries.timestamp(postfx_aggregate,false);
+                }
             }
             if(gpu_timing)present_gpu_queries.end();
             {

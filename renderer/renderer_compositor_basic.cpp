@@ -7,13 +7,21 @@
 
 void jkgm::renderer_compositor_basic::end_frame(opengl_state *ogs,
                                                 size<2, int> screen_size,
-                                                gl::texture_view composed_screen)
+                                                gl::texture_view composed_screen,
+                                                postfx_gpu_profile *timing)
 {
+    if(timing)timing->timestamp(postfx_exposure,true);
     update_auto_exposure(ogs,composed_screen);
+    if(timing)timing->timestamp(postfx_exposure,false);
+    if(timing)timing->timestamp(postfx_bloom,true);
 
     // Compose renderbuffer onto window:
     gl::bind_vertex_array(ogs->postmdl.vao);
 
+    if(timing) {
+        timing->timestamp(postfx_bloom,false);
+        timing->timestamp(postfx_final,true);
+    }
     // The inactive-trail fast path writes directly to the window, skipping
     // both full-resolution history passes. A future trail fade enters the
     // history path on its first frame; Retro always retains its HUD staging.
@@ -70,6 +78,10 @@ void jkgm::renderer_compositor_basic::end_frame(opengl_state *ogs,
     gl::draw_elements(
         gl::element_type::triangles, ogs->postmdl.num_indices, gl::index_type::uint32);
 
+    if(timing) {
+        timing->timestamp(postfx_final,false);
+        timing->timestamp(postfx_trails,true);
+    }
     if(direct_present) {
         // Match present_frame_blend's GL depth state for the next frame.
         gl::set_depth_mask(true);
@@ -77,4 +89,5 @@ void jkgm::renderer_compositor_basic::end_frame(opengl_state *ogs,
     else {
         present_frame_blend(ogs, screen_size);
     }
+    if(timing)timing->timestamp(postfx_trails,false);
 }

@@ -94,5 +94,13 @@ namespace jkgm {
         }
     };
     using presentation_gpu_profile=basic_presentation_gpu_profile<3>;
+    // Keep aggregate last: its closing timestamp is the final command
+    // checked by the asynchronous ring before consuming any stage results.
+    enum postfx_gpu_stage : size_t {
+        postfx_resolve, postfx_blur, postfx_exposure, postfx_bloom,
+        postfx_final, postfx_trails, postfx_overlays, postfx_aggregate,
+        postfx_stage_count
+    };
+    using postfx_gpu_profile=basic_presentation_gpu_profile<postfx_stage_count>;
     using opaque_geometry_gpu_profile=basic_presentation_gpu_profile<6>;
 }
