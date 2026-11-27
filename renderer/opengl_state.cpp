@@ -409,7 +409,7 @@ jkgm::opengl_state::opengl_state::opengl_state(size<2, int> screen_res,
     , post_gauss15(data_root)
     , post_low_pass(data_root)
     , post_scale(data_root)
-    , post_to_srgb(data_root)
+    , post_to_srgb(data_root,the_config->experimental_postfx_vertex_constants)
     , post_auto_exposure(data_root)
     , post_frame_blend(data_root)
     , post_spatial_blur(data_root)
@@ -427,6 +427,8 @@ jkgm::opengl_state::opengl_state::opengl_state(size<2, int> screen_res,
     , bloom_layers(screen_res)
 {
     LOG_DEBUG("Loading OpenGL assets");
+    LOG_INFO("POSTFX vertex_constants=",
+             the_config->experimental_postfx_vertex_constants?1:0);
     if(the_config->experimental_opaque_composite_specialization) {
         game_post_opaque_no_sun_program=std::make_unique<
             shaders::game_post_opaque_composite_shader>(data_root,false,

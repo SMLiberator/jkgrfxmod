@@ -14,7 +14,8 @@ namespace jkgm {
         diffuse_opaque, diffuse_alpha, world_simple_opaque, world_simple_alpha,
         hud_only, emission_only, single_sector_ggx_opaque, single_sector_ggx_alpha,
         composite_no_sun, composite_no_spotlight, composite_no_direct_light,
-        composite_shared_sun, composite_no_spotlight_shared_sun
+        composite_shared_sun, composite_no_spotlight_shared_sun,
+        postfx_vertex_constants
     };
 
     class opengl_shader {
@@ -876,7 +877,8 @@ namespace jkgm {
             std::vector<gl::uniform_location_id> bloom_weight;
 
         public:
-            explicit post_to_srgb_shader(fs::path const &data_root);
+            explicit post_to_srgb_shader(fs::path const &data_root,
+                                         bool vertex_constants=false);
 
             void set_fbuf_sampler(int sampler);
             void set_hdr(int sampler,bool hdr,bool adaptive,float compensation_ev,

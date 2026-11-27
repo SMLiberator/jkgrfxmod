@@ -215,7 +215,8 @@ void jkgm::shaders::translucent_sun_uniforms::set_map(
                 variant==material_shader_variant::single_sector_ggx_opaque ||
                 variant==material_shader_variant::single_sector_ggx_alpha ||
                 variant==material_shader_variant::hud_only ||
-                variant==material_shader_variant::emission_only;
+                variant==material_shader_variant::emission_only ||
+                variant==material_shader_variant::postfx_vertex_constants;
             if(variant!=material_shader_variant::full &&
                (type==gl::shader_type::fragment ||
                 (specialize_vertex && type==gl::shader_type::vertex))) {
@@ -258,6 +259,8 @@ void jkgm::shaders::translucent_sun_uniforms::set_map(
                     define="#define JKGM_HUD_ONLY 1\n"; break;
                 case material_shader_variant::emission_only:
                     define="#define JKGM_SIMPLE_ALPHA 1\n#define JKGM_EMISSION_ONLY 1\n"; break;
+                case material_shader_variant::postfx_vertex_constants:
+                    define="#define JKGM_POSTFX_VERTEX_CONSTANTS 1\n"; break;
                 default: break;
                 }
                 source.insert(newline+1U,define);
@@ -2508,10 +2511,13 @@ void jkgm::shaders::post_auto_exposure_shader::set_params(point<4,float> params)
     gl::set_uniform_vector(exposure_params,params);
 }
 
-jkgm::shaders::post_to_srgb_shader::post_to_srgb_shader(fs::path const &data_root)
+jkgm::shaders::post_to_srgb_shader::post_to_srgb_shader(
+    fs::path const &data_root,bool vertex_constants)
     : opengl_shader("post_to_srgb",
                     data_root / "shaders/postprocess.vert",
-                    data_root / "shaders/post_to_srgb.frag")
+                    data_root / "shaders/post_to_srgb.frag",fs::path(),
+                    vertex_constants?material_shader_variant::postfx_vertex_constants
+                                    :material_shader_variant::full)
     , fbuf_image(gl::get_uniform_location(the_program, "fbuf_image"))
     , grain_params(gl::get_uniform_location(the_program, "grain_params"))
     , vignette_params(gl::get_uniform_location(the_program, "vignette_params"))

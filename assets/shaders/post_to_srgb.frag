@@ -13,6 +13,12 @@ uniform sampler2D bloom_fbuf[num_bloom_layers];
 uniform float bloom_weight[num_bloom_layers];
 
 in vec2 vp_texcoords;
+#ifdef JKGM_POSTFX_VERTEX_CONSTANTS
+flat in float vp_exposure_gain;
+flat in vec3 vp_vignette_color;
+flat in float vp_grain_amount;
+flat in uint vp_grain_seed_hash;
+#endif
 
 layout(location = 0) out vec4 out_color;
 
@@ -49,7 +55,11 @@ uint pcg_hash(uint v)
 // Uniform noise in [0, 1], one value per grain cell and seed
 float grain_noise(ivec2 cell, int seed)
 {
+#ifdef JKGM_POSTFX_VERTEX_CONSTANTS
+    uint h = pcg_hash(uint(cell.x) + pcg_hash(uint(cell.y) + vp_grain_seed_hash));
+#else
     uint h = pcg_hash(uint(cell.x) + pcg_hash(uint(cell.y) + pcg_hash(uint(seed))));
+#endif
     return float(h) * (1.0 / 4294967295.0);
 }
 
@@ -108,10 +118,14 @@ void main()
     if(hdr_enabled != 0) {
         // Fixed EV compensation works even when eye adaptation is disabled.
         // All exposure happens in linear HDR before tone mapping.
+#ifdef JKGM_POSTFX_VERTEX_CONSTANTS
+        vec3 hdr = max(color*vp_exposure_gain,vec3(0.0));
+#else
         float ev = hdr_exposure_compensation;
         if(exposure_enabled != 0)
             ev += texelFetch(exposure_image,ivec2(0),0).r;
         vec3 hdr = max(color*exp2(clamp(ev,-5.0,5.0)),vec3(0.0));
+#endif
 
         // Map luminance rather than R/G/B independently to retain hue.
         // Compress any out-of-gamut chroma toward mapped luminance instead
@@ -142,10 +156,18 @@ void main()
     }
 
     // Apply color balancing
-    color += brightness;
-    color = (color - 0.5) * contrast + 0.5;
-    float luma = dot(color, vec3(0.2126, 0.7152, 0.0722));
-    color = mix(vec3(luma), color, saturation);
+#ifdef JKGM_POSTFX_VERTEX_CONSTANTS
+    // Uniform conditions: no per-pixel divergence. Preserve the original
+    // arithmetic whenever a grade is actually requested.
+    if(brightness!=0.0 || contrast!=1.0 || saturation!=1.0) {
+#endif
+        color += brightness;
+        color = (color - 0.5) * contrast + 0.5;
+        float luma = dot(color, vec3(0.2126, 0.7152, 0.0722));
+        color = mix(vec3(luma), color, saturation);
+#ifdef JKGM_POSTFX_VERTEX_CONSTANTS
+    }
+#endif
 
     // Apply tint
     //color.r = dot(color, vec3(0.494, 0.769, 0.686));
@@ -159,7 +181,11 @@ void main()
         vec2 uv = vp_texcoords - 0.5;
         float iris = 1.0 - clamp(vignette_strength - 1.0, 0.0, 1.0);
         float edge = smoothstep(0.4 * iris, max(0.8 * iris, 0.0001), length(uv));
+#ifdef JKGM_POSTFX_VERTEX_CONSTANTS
+        vec3 vignette_color = vp_vignette_color;
+#else
         vec3 vignette_color = pow(clamp(vignette_params.rgb, 0.0, 1.0), vec3(2.2));
+#endif
         float cover = clamp(edge * min(vignette_strength, 1.0), 0.0, 1.0);
         cover = mix(cover, 1.0, step(1.0, vignette_strength - 1.0));
         color = mix(color, vignette_color, cover);
@@ -167,7 +193,11 @@ void main()
 
     // Apply film grain, fading it out as the vignette takes over the whole screen so a
     // fade to black ends in real black
+#ifdef JKGM_POSTFX_VERTEX_CONSTANTS
+    float grain_amount = vp_grain_amount;
+#else
     float grain_amount = grain_params.x * (1.0 - clamp(vignette_strength - 1.0, 0.0, 1.0));
+#endif
     if(grain_amount > 0.0) {
         ivec2 cell = ivec2(floor(gl_FragCoord.xy / max(grain_params.y, 1.0)));
         float n = grain_noise(cell, int(grain_params.z)) - 0.5;
