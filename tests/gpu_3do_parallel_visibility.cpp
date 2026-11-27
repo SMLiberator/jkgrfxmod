@@ -79,6 +79,40 @@ int main() {
         }
     }
 
+    // Production scratch vectors are thread_local, so the worker lambda
+    // must bind the submitter's storage explicitly, not name TLS directly.
+    static thread_local std::vector<size_t> prepared_indices;
+    static thread_local std::vector<gpu_3do_parallel_visibility> prepared_visibility;
+    prepared_visibility.resize(instances.size());
+    for(size_t i=0;i<instances.size();++i)
+        if(i%5U!=0U)prepared_indices.push_back(i);
+    for(int pass=0;pass<3;++pass) {
+        for(auto &result:prepared_visibility)result.ready=false;
+        std::array<size_t,cpu_render_workers::lanes> completed{};
+        assert(workers.execute(
+            [&,indices=&prepared_indices,visibility=&prepared_visibility]
+            (unsigned lane) {
+                size_t count=0U;
+                for(size_t k=lane;k<indices->size();k+=cpu_render_workers::lanes) {
+                    auto const i=(*indices)[k];
+                    prepare_gpu_3do_parallel_visibility(
+                        instances[i],identity(),f,true,(*visibility)[i]);
+                    ++count;
+                }
+                completed[lane]=count;
+            }));
+        for(unsigned lane=0;lane<cpu_render_workers::lanes;++lane) {
+            assert(completed[lane]>0U);
+            assert(completed[lane]==(prepared_indices.size()+
+                cpu_render_workers::lanes-1U-lane)/cpu_render_workers::lanes);
+        }
+        for(size_t i=0;i<instances.size();++i) {
+            assert(prepared_visibility[i].ready==(i%5U!=0U));
+            if(prepared_visibility[i].ready)
+                assert(prepared_visibility[i].groups==expected.groups);
+        }
+    }
+
     // Acceptance must preserve every cull reason for contained and
     // intersecting meshes, including double-sided and back-facing groups.
     gpu_3do_parallel_visibility accepted{};

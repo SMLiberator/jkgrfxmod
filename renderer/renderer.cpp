@@ -5736,18 +5736,40 @@ namespace jkgm {
                         for(auto &entry:prepared_visibility)entry.ready=false;
                         auto const work_begin=gpu_profiling
                             ?profile_clock::now():profile_clock::time_point{};
-                        prepared_parallel=workers.execute([&](unsigned lane) {
-                            for(size_t k=lane;k<prepared_indices.size();
+                        // A direct reference to a thread_local name inside
+                        // the job resolves to the EXECUTING thread's storage.
+                        // Capture pointers to the submitting thread's vectors
+                        // before dispatch, and retain the synchronous barrier.
+                        std::array<size_t,cpu_render_workers::lanes> completed{};
+                        prepared_parallel=workers.execute(
+                            [&,indices=&prepared_indices,visibility=&prepared_visibility,
+                             accept_mesh=the_config->experimental_gpu_3do_whole_mesh_acceptance,
+                             compact=the_config->experimental_gpu_3do_compact_backfaces]
+                            (unsigned lane) {
+                            size_t count=0U;
+                            for(size_t k=lane;k<indices->size();
                                 k+=cpu_render_workers::lanes) {
-                                size_t const index=prepared_indices[k];
+                                size_t const index=(*indices)[k];
                                 prepare_gpu_3do_parallel_visibility(
                                     instances[index],native_view,native_frustum,
                                     have_perspective_frustum,
-                                    prepared_visibility[index],
-                                    the_config->experimental_gpu_3do_whole_mesh_acceptance,
-                                    the_config->experimental_gpu_3do_compact_backfaces);
+                                    (*visibility)[index],accept_mesh,compact);
+                                ++count;
                             }
+                            completed[lane]=count;
                         });
+                        // A successful barrier alone does not prove that
+                        // the job visited all assigned indices. Fail open
+                        // instead of silently accepting an incomplete job.
+                        if(prepared_parallel) {
+                            size_t total=0U;
+                            for(auto count:completed)total+=count;
+                            if(total!=prepared_indices.size()) {
+                                prepared_parallel=false;
+                                LOG_WARNING("GPU parallel visibility incomplete: processed=",
+                                    total," expected=",prepared_indices.size());
+                            }
+                        }
                         if(gpu_profiling) {
                             ++profile_frame.gpu_parallel_visibility_calls;
                             profile_frame.gpu_parallel_visibility_instances+=
