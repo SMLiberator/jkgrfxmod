@@ -188,6 +188,7 @@ namespace jkgm {
         shaders::post_scale_shader post_scale;
         std::unique_ptr<shaders::post_smoke_composite_shader> post_smoke_composite;
         shaders::post_to_srgb_shader post_to_srgb;
+        std::unique_ptr<gl::texture> grain_noise_atlas;
         shaders::post_auto_exposure_shader post_auto_exposure;
         shaders::post_frame_blend_shader post_frame_blend;
         shaders::post_spatial_blur_shader post_spatial_blur;

@@ -30,6 +30,7 @@ namespace jkgm {
         bool experimental_exponential_fog = false; // smooth radial attenuation with no hard clear radius
         bool enable_post = true;
         bool experimental_postfx_vertex_constants = false;
+        int experimental_film_grain_style = 0; // bit 0: noise atlas; bit 1: gamma 2.0 approximation
         bool enable_hdr = false; // strict master switch for tone mapping, auto exposure and HDR tuning
         float auto_exposure_sensitivity = 0.4f; // 0=fixed exposure, 0..2=adaptive
         float hdr_exposure_compensation = 0.0f; // constant EV offset, used only with HDR

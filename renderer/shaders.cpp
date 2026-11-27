@@ -168,13 +168,19 @@ void jkgm::shaders::translucent_sun_uniforms::set_map(
         gl::shader compile_shader_from_file(fs::path const &filename,
                                             gl::shader_type type,
                                             material_shader_variant variant=material_shader_variant::full,
-                                            bool fused_ssao=false)
+                                            bool fused_ssao=false,int grain_style=0)
         {
             diagnostic_context dc(filename.generic_string());
             gl::shader rv(type);
             auto source=load_shader_source(filename);
             if(fused_ssao && type==gl::shader_type::fragment)
                 source.insert(source.find('\n')+1U,"#define JKGM_COMPOSITE_FUSED_SSAO 1\n");
+            if(type==gl::shader_type::fragment) {
+                if(grain_style&1)
+                    source.insert(source.find('\n')+1U,"#define JKGM_GRAIN_ATLAS 1\n");
+                if(grain_style&2)
+                    source.insert(source.find('\n')+1U,"#define JKGM_GRAIN_GAMMA_APPROX 1\n");
+            }
             // Optional array samplers require a unique forward unit (20).
             // When the GPU exposes fewer than 21 fragment units, remove the
             // sampler at compile-time, not merely via a runtime uniform.
@@ -324,11 +330,12 @@ void jkgm::shaders::translucent_sun_uniforms::set_map(
                                      fs::path const &vx,
                                      fs::path const &fg,
                                      fs::path const &geom,
-                                     material_shader_variant variant,bool fused_ssao)
+                                     material_shader_variant variant,bool fused_ssao,
+                                     int grain_style)
         {
             auto vx_shader = compile_shader_from_file(vx,gl::shader_type::vertex,variant);
             auto fg_shader = compile_shader_from_file(
-                fg,gl::shader_type::fragment,variant,fused_ssao);
+                fg,gl::shader_type::fragment,variant,fused_ssao,grain_style);
 
             gl::attach_shader(prog, vx_shader);
             gl::attach_shader(prog, fg_shader);
@@ -361,11 +368,12 @@ jkgm::opengl_shader::opengl_shader(std::string const &name,
                                    fs::path const &vertex_part,
                                    fs::path const &fragment_part,
                                    fs::path const &geometry_part,
-                                   material_shader_variant variant,bool fused_ssao)
+                                   material_shader_variant variant,bool fused_ssao,
+                                   int grain_style)
     : gbuffer_packing_uniform(gl::uniform_location_id(-1))
 {
     link_program_from_files(
-        name,the_program,vertex_part,fragment_part,geometry_part,variant,fused_ssao);
+        name,the_program,vertex_part,fragment_part,geometry_part,variant,fused_ssao,grain_style);
     gbuffer_packing_uniform=gl::get_uniform_location(the_program,"gbuffer_packing");
 }
 
@@ -2512,14 +2520,15 @@ void jkgm::shaders::post_auto_exposure_shader::set_params(point<4,float> params)
 }
 
 jkgm::shaders::post_to_srgb_shader::post_to_srgb_shader(
-    fs::path const &data_root,bool vertex_constants)
+    fs::path const &data_root,bool vertex_constants,int grain_style)
     : opengl_shader("post_to_srgb",
                     data_root / "shaders/postprocess.vert",
                     data_root / "shaders/post_to_srgb.frag",fs::path(),
                     vertex_constants?material_shader_variant::postfx_vertex_constants
-                                    :material_shader_variant::full)
+                                    :material_shader_variant::full,false,grain_style)
     , fbuf_image(gl::get_uniform_location(the_program, "fbuf_image"))
     , grain_params(gl::get_uniform_location(the_program, "grain_params"))
+    , grain_noise_image(gl::get_uniform_location(the_program, "grain_noise_image"))
     , vignette_params(gl::get_uniform_location(the_program, "vignette_params"))
     , rgb_split_pixels(gl::get_uniform_location(the_program, "rgb_split_pixels"))
     , brightness(gl::get_uniform_location(the_program, "brightness"))
@@ -2581,6 +2590,11 @@ void jkgm::shaders::post_to_srgb_shader::set_bloom_weights(span<float const> wei
 void jkgm::shaders::post_to_srgb_shader::set_film_grain(point<4, float> params)
 {
     gl::set_uniform_vector(grain_params, params);
+}
+
+void jkgm::shaders::post_to_srgb_shader::set_grain_noise_sampler(int sampler)
+{
+    gl::set_uniform_integer(grain_noise_image,sampler);
 }
 
 void jkgm::shaders::post_to_srgb_shader::set_vignette(point<4, float> params)

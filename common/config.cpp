@@ -90,6 +90,13 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             j.at("experimental_postfx_vertex_constants").get_to(
                 rv->experimental_postfx_vertex_constants);
         }
+        if(j.contains("experimental_film_grain_style")) {
+            j.at("experimental_film_grain_style").get_to(
+                rv->experimental_film_grain_style);
+            if(rv->experimental_film_grain_style<0 ||
+               rv->experimental_film_grain_style>3)
+                rv->experimental_film_grain_style=0;
+        }
 
         if(j.contains("enable_hdr")) {
             j.at("enable_hdr").get_to(rv->enable_hdr);

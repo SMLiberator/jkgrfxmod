@@ -409,7 +409,8 @@ jkgm::opengl_state::opengl_state::opengl_state(size<2, int> screen_res,
     , post_gauss15(data_root)
     , post_low_pass(data_root)
     , post_scale(data_root)
-    , post_to_srgb(data_root,the_config->experimental_postfx_vertex_constants)
+    , post_to_srgb(data_root,the_config->experimental_postfx_vertex_constants,
+                   the_config->experimental_film_grain_style)
     , post_auto_exposure(data_root)
     , post_frame_blend(data_root)
     , post_spatial_blur(data_root)
@@ -428,7 +429,27 @@ jkgm::opengl_state::opengl_state::opengl_state(size<2, int> screen_res,
 {
     LOG_DEBUG("Loading OpenGL assets");
     LOG_INFO("POSTFX vertex_constants=",
-             the_config->experimental_postfx_vertex_constants?1:0);
+             the_config->experimental_postfx_vertex_constants?1:0,
+             " grain_style=",the_config->experimental_film_grain_style);
+    if(the_config->experimental_film_grain_style&1) {
+        // Sixteen independent 256x256 white-noise tiles in a 1024x1024
+        // single-channel linear atlas. No frame uploads or mip generation.
+        grain_noise_atlas=std::make_unique<gl::texture>();
+        std::vector<uint8_t> noise(1024U*1024U);
+        std::mt19937 rng(0x4A4B474DU);
+        for(auto &value:noise)value=static_cast<uint8_t>(rng()>>24U);
+        gl::set_active_texture_unit(0);
+        gl::bind_texture(gl::texture_bind_target::texture_2d,*grain_noise_atlas);
+        gl::tex_image_2d(gl::texture_bind_target::texture_2d,0,
+            gl::texture_internal_format::r8,make_size(1024,1024),
+            gl::texture_pixel_format::red,gl::texture_pixel_type::uint8,
+            make_span(noise).as_const_bytes());
+        gl::set_texture_max_level(gl::texture_bind_target::texture_2d,0);
+        gl::set_texture_min_filter(gl::texture_bind_target::texture_2d,
+                                   gl::min_filter::nearest);
+        gl::set_texture_mag_filter(gl::texture_bind_target::texture_2d,
+                                   gl::mag_filter::nearest);
+    }
     if(the_config->experimental_opaque_composite_specialization) {
         game_post_opaque_no_sun_program=std::make_unique<
             shaders::game_post_opaque_composite_shader>(data_root,false,

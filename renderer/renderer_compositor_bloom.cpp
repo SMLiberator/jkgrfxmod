@@ -187,6 +187,12 @@ void jkgm::renderer_compositor_bloom::end_frame(opengl_state *ogs,
     ogs->post_to_srgb.set_bloom_samplers(make_span(bloom_samplers));
     ogs->post_to_srgb.set_bloom_weights(make_span(bloom_weights));
     apply_post_fx(ogs->post_to_srgb, ogs->enable_post);
+    if(ogs->grain_noise_atlas) {
+        ogs->post_to_srgb.set_grain_noise_sampler(7);
+        gl::set_active_texture_unit(7);
+        gl::bind_texture(gl::texture_bind_target::texture_2d,*ogs->grain_noise_atlas);
+        gl::set_active_texture_unit(0);
+    }
 
     gl::draw_elements(
         gl::element_type::triangles, ogs->postmdl.num_indices, gl::index_type::uint32);

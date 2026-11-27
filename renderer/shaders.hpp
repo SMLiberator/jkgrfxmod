@@ -28,7 +28,7 @@ namespace jkgm {
                       fs::path const &fragment_part,
                       fs::path const &geometry_part = fs::path(),
                       material_shader_variant variant = material_shader_variant::full,
-                      bool fused_ssao=false);
+                      bool fused_ssao=false,int grain_style=0);
 
     public:
         opengl_shader(opengl_shader const &) = delete;
@@ -864,7 +864,7 @@ namespace jkgm {
 
         private:
             gl::uniform_location_id fbuf_image;
-            gl::uniform_location_id grain_params;
+            gl::uniform_location_id grain_params,grain_noise_image;
             gl::uniform_location_id vignette_params;
             gl::uniform_location_id rgb_split_pixels;
             gl::uniform_location_id brightness;
@@ -878,7 +878,8 @@ namespace jkgm {
 
         public:
             explicit post_to_srgb_shader(fs::path const &data_root,
-                                         bool vertex_constants=false);
+                                         bool vertex_constants=false,
+                                         int grain_style=0);
 
             void set_fbuf_sampler(int sampler);
             void set_hdr(int sampler,bool hdr,bool adaptive,float compensation_ev,
@@ -888,6 +889,7 @@ namespace jkgm {
 
             // params = (amount, size in pixels, frame seed, unused)
             void set_film_grain(point<4, float> params);
+            void set_grain_noise_sampler(int sampler);
 
             // params = (red, green, blue, strength)
             void set_vignette(point<4, float> params);

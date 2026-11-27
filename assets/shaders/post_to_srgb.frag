@@ -43,6 +43,9 @@ uniform vec4 vignette_params = vec4(0.0, 0.0, 0.0, 0.0);
 // Film grain, set by the renderer from the SetFilmGrain COG verb.
 // x = amount (0 turns grain off), y = grain size in pixels, z = frame seed (new noise per value)
 uniform vec4 grain_params;
+#ifdef JKGM_GRAIN_ATLAS
+uniform sampler2D grain_noise_image;
+#endif
 
 // PCG integer hash (O'Neill; see Jarzynski & Olano, "Hash Functions for GPU Rendering")
 uint pcg_hash(uint v)
@@ -55,12 +58,23 @@ uint pcg_hash(uint v)
 // Uniform noise in [0, 1], one value per grain cell and seed
 float grain_noise(ivec2 cell, int seed)
 {
+#ifdef JKGM_GRAIN_ATLAS
+    // The existing 10-bit seed selects one of 16 tiles and 64 offsets.
+    // Wrap WITHIN the selected tile to avoid sampling adjacent patterns.
+    int tile=seed&15;
+    int phase=seed>>4;
+    ivec2 offset=ivec2(phase*37,phase*101);
+    ivec2 local_cell=(cell+offset)&ivec2(255);
+    ivec2 origin=ivec2(tile&3,tile>>2)*256;
+    return texelFetch(grain_noise_image,origin+local_cell,0).r;
+#else
 #ifdef JKGM_POSTFX_VERTEX_CONSTANTS
     uint h = pcg_hash(uint(cell.x) + pcg_hash(uint(cell.y) + vp_grain_seed_hash));
 #else
     uint h = pcg_hash(uint(cell.x) + pcg_hash(uint(cell.y) + pcg_hash(uint(seed))));
 #endif
     return float(h) * (1.0 / 4294967295.0);
+#endif
 }
 
 
@@ -204,12 +218,23 @@ void main()
 
         // Work in gamma space so the grain looks equally strong in dark and bright areas, and
         // ease it off towards pure black and white where it would just clip.
+#ifdef JKGM_GRAIN_GAMMA_APPROX
+        // Gamma 2.0 approximates the existing 2.2 perceptual curve.
+        // An exact square-root/square round trip avoids generic powers.
+        vec3 g = sqrt(max(color,vec3(0.0)));
+#else
         vec3 g = pow(max(color, vec3(0.0)), vec3(1.0 / 2.2));
+#endif
         float g_luma = clamp(dot(g, vec3(0.299, 0.587, 0.114)), 0.0, 1.0);
         float response = mix(0.6, 1.0, 4.0 * g_luma * (1.0 - g_luma));
 
         g += n * grain_amount * 0.5 * response;
+#ifdef JKGM_GRAIN_GAMMA_APPROX
+        g=max(g,vec3(0.0));
+        color=g*g;
+#else
         color = pow(max(g, vec3(0.0)), vec3(2.2));
+#endif
     }
 
     out_color = vec4(color, samp.a);
