@@ -60,6 +60,7 @@ namespace jkgm {
         bool retain_hom_pixels = true; // vanilla JK HOM default; false = Clear Display
         bool enable_parallax = true;
         bool enable_texture_filtering = true;
+        bool experimental_texture_compression_bc1 = false; // opaque static replacement albedo only
         bool retro_mode = false; // CMP #0 RGB8 post-quantization, no dithering
         bool enable_posterized_lighting = false;
         bool enable_vsync = false;

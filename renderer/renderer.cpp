@@ -1497,6 +1497,7 @@ namespace jkgm {
                      "/", peak_period, " submit_us avg/peak=",
                      profile_window.present_us / frames, "/", peak_present,
                      " execute_us=", avg(profile_stage::execute));
+            if(texture_cache)texture_cache->log_texture_profile();
             LOG_INFO("PERF JK-side gaps_us before_first=", profile_window.before_first_execute_us / frames,
                      " between=", profile_window.between_executes_us / frames,
                      " after_last=", profile_window.after_last_execute_us / frames,

@@ -14,6 +14,7 @@ namespace jkgm {
     class texture_cache {
     public:
         virtual ~texture_cache() = default;
+        virtual void log_texture_profile() const {}
 
         virtual std::optional<material const *> get_replacement_material(md5 const &sig) = 0;
         virtual std::optional<fs::path> get_pack_image(fs::path const &pack, int id) const = 0;
