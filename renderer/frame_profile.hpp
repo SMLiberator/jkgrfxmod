@@ -143,6 +143,8 @@ struct profile_sample {
   uint64_t gpu_parallel_visibility_wall_us=0;
   uint64_t gpu_parallel_visibility_failures=0;
   uint64_t gpu_parallel_compact_meshes=0,gpu_parallel_compact_skipped=0;
+  uint64_t gpu_parallel_schedule_us=0;
+  std::array<uint64_t,3> gpu_parallel_lane_groups{},gpu_parallel_lane_busy_us{};
   uint64_t gpu_preview_cpu_us=0;
   // Separate opaque/transparent visible 3DO CPU work. These are subsets
   // of gpu_preview_cpu_us (which also includes shader/pipeline setup).
@@ -329,6 +331,11 @@ struct profile_sample {
     gpu_parallel_visibility_failures+=o.gpu_parallel_visibility_failures;
     gpu_parallel_compact_meshes+=o.gpu_parallel_compact_meshes;
     gpu_parallel_compact_skipped+=o.gpu_parallel_compact_skipped;
+    gpu_parallel_schedule_us+=o.gpu_parallel_schedule_us;
+    for(size_t i=0;i<gpu_parallel_lane_groups.size();++i) {
+      gpu_parallel_lane_groups[i]+=o.gpu_parallel_lane_groups[i];
+      gpu_parallel_lane_busy_us[i]+=o.gpu_parallel_lane_busy_us[i];
+    }
     gpu_preview_cpu_us+=o.gpu_preview_cpu_us;
     for(size_t i=0;i<2;++i) {
       gpu_preview_collect_us[i]+=o.gpu_preview_collect_us[i];

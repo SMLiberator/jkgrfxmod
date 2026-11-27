@@ -1,5 +1,6 @@
 #include "renderer/gpu_3do_parallel_visibility.hpp"
 #include "renderer/cpu_render_workers.hpp"
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <memory>
@@ -112,6 +113,30 @@ int main() {
                 assert(prepared_visibility[i].groups==expected.groups);
         }
     }
+
+    // Repeated model layouts can correlate strongly with the original
+    // modulo lane assignment. Weighting must distribute every item once,
+    // and produce the same original-index results regardless of lane.
+    std::array<size_t,cpu_render_workers::lanes> weights{},stride_weights{};
+    std::array<std::vector<size_t>,cpu_render_workers::lanes> lists;
+    for(size_t i=0;i<instances.size();++i) {
+        size_t const cost=(i%3U==0U?100U:1U)+8U;
+        lists[cpu_render_workers::weighted_lane(weights,cost)].push_back(i);
+        stride_weights[i%cpu_render_workers::lanes]+=cost;
+    }
+    assert(*std::max_element(weights.begin(),weights.end())<
+           *std::max_element(stride_weights.begin(),stride_weights.end()));
+    std::vector<unsigned> visits(instances.size(),0U);
+    for(auto const &list:lists)
+        for(auto i:list)++visits[i];
+    for(auto count:visits)assert(count==1U);
+    for(auto &result:results)result.ready=false;
+    assert(workers.execute([&](unsigned lane) {
+        for(auto i:lists[lane])
+            prepare_gpu_3do_parallel_visibility(instances[i],identity(),f,true,results[i]);
+    }));
+    for(auto const &result:results)
+        assert(result.ready && result.groups==expected.groups);
 
     // Sparse intersecting geometry must preserve exact original-index
     // flags AND the collector's opaque ordering in the compact list.

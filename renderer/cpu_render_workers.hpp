@@ -2,6 +2,8 @@
 // Small persistent CPU worker pool for renderer-only, immutable work.
 // No OpenGL context, engine pointers, COG or physics calls are permitted
 // inside a dispatched job. The submitting render thread is the third lane.
+#include <array>
+#include <cstddef>
 #include <condition_variable>
 #include <cstdint>
 #include <exception>
@@ -15,6 +17,17 @@ class cpu_render_workers {
 public:
     static constexpr unsigned background_workers=2U;
     static constexpr unsigned lanes=background_workers+1U;
+
+    // Cheap greedy assignment, without sorting or shared atomic work queues.
+    // The caller estimates work; this helper does not access engine state.
+    static unsigned weighted_lane(std::array<std::size_t,lanes> &weights,
+                                  std::size_t cost) {
+        unsigned lane=0U;
+        for(unsigned i=1U;i<lanes;++i)
+            if(weights[i]<weights[lane])lane=i;
+        weights[lane]+=cost;
+        return lane;
+    }
 
     cpu_render_workers() {
         try {

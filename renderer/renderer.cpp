@@ -1638,6 +1638,16 @@ namespace jkgm {
                      " compact_meshes_avg=",profile_window.gpu_parallel_compact_meshes/frames,
                      " compact_skipped_groups_avg=",profile_window.gpu_parallel_compact_skipped/frames,
                      " NOTE=main_camera_CPU_group_cull_prepass;included_in_collect_cpu;serial_below_threshold");
+            LOG_INFO("PERF gpu_3do parallel_schedule weighted=",
+                     the_config->experimental_gpu_3do_parallel_weighted_schedule?1:0,
+                     " schedule_us_avg=",profile_window.gpu_parallel_schedule_us/frames,
+                     " lane_groups_avg=",profile_window.gpu_parallel_lane_groups[0]/frames,
+                     "/",profile_window.gpu_parallel_lane_groups[1]/frames,
+                     "/",profile_window.gpu_parallel_lane_groups[2]/frames,
+                     " lane_busy_us_avg=",profile_window.gpu_parallel_lane_busy_us[0]/frames,
+                     "/",profile_window.gpu_parallel_lane_busy_us[1]/frames,
+                     "/",profile_window.gpu_parallel_lane_busy_us[2]/frames,
+                     " NOTE=worker0/worker1/render_lane;assigned_groups;busy_CPU_wall_time_per_frame");
             LOG_INFO("PERF gpu_3do instancing_CPU_us_avg prep=",
                      profile_window.gpu_instancing_prepare_us/frames,
                      " audit=",profile_window.gpu_instancing_audit_us/frames,
@@ -5714,6 +5724,8 @@ namespace jkgm {
             static thread_local std::vector<gpu_3do_parallel_visibility>
                 prepared_visibility;
             static thread_local std::vector<size_t> prepared_indices;
+            static thread_local std::array<std::vector<size_t>,cpu_render_workers::lanes>
+                prepared_lane_indices;
             bool prepared_parallel=false;
             if(prepare_both && the_config->experimental_multithreading) {
                 prepared_indices.clear();
@@ -5744,23 +5756,51 @@ namespace jkgm {
                         // Capture pointers to the submitting thread's vectors
                         // before dispatch, and retain the synchronous barrier.
                         std::array<size_t,cpu_render_workers::lanes> completed{};
+                        std::array<size_t,cpu_render_workers::lanes> lane_groups{};
+                        std::array<uint64_t,cpu_render_workers::lanes> lane_busy_us{};
+                        bool const weighted=the_config->experimental_gpu_3do_parallel_weighted_schedule;
+                        uint64_t schedule_us=0U;
+                        if(weighted) {
+                            auto const schedule_begin=gpu_profiling
+                                ?profile_clock::now():profile_clock::time_point{};
+                            for(auto &list:prepared_lane_indices)list.clear();
+                            std::array<size_t,cpu_render_workers::lanes> weights{};
+                            for(auto index:prepared_indices) {
+                                // Include a small fixed cost for each mesh's
+                                // modelview, bounds and local-eye preparation.
+                                auto const lane=cpu_render_workers::weighted_lane(
+                                    weights,instances[index].geometry->groups.size()+8U);
+                                prepared_lane_indices[lane].push_back(index);
+                            }
+                            if(gpu_profiling)
+                                schedule_us=elapsed_profile_us(schedule_begin,profile_clock::now());
+                        }
                         prepared_parallel=workers.execute(
                             [&,indices=&prepared_indices,visibility=&prepared_visibility,
+                             lane_indices=&prepared_lane_indices,weighted,profile_workers=gpu_profiling,
                              accept_mesh=the_config->experimental_gpu_3do_whole_mesh_acceptance,
                              compact=the_config->experimental_gpu_3do_compact_backfaces,
                              compact_visibility=the_config->experimental_gpu_3do_parallel_compact_visibility]
                             (unsigned lane) {
-                            size_t count=0U;
-                            for(size_t k=lane;k<indices->size();
-                                k+=cpu_render_workers::lanes) {
-                                size_t const index=(*indices)[k];
+                            auto const begin=profile_workers
+                                ?profile_clock::now():profile_clock::time_point{};
+                            auto const &list=weighted?(*lane_indices)[lane]:*indices;
+                            size_t const step=weighted?1U:cpu_render_workers::lanes;
+                            size_t count=0U,groups=0U;
+                            for(size_t k=weighted?0U:lane;k<list.size();k+=step) {
+                                size_t const index=list[k];
                                 prepare_gpu_3do_parallel_visibility(
                                     instances[index],native_view,native_frustum,
                                     have_perspective_frustum,
                                     (*visibility)[index],accept_mesh,compact,compact_visibility);
+                                if(profile_workers)groups+=instances[index].geometry->groups.size();
                                 ++count;
                             }
                             completed[lane]=count;
+                            if(profile_workers) {
+                                lane_groups[lane]=groups;
+                                lane_busy_us[lane]=elapsed_profile_us(begin,profile_clock::now());
+                            }
                         });
                         // A successful barrier alone does not prove that
                         // the job visited all assigned indices. Fail open
@@ -5779,6 +5819,11 @@ namespace jkgm {
                             profile_frame.gpu_parallel_visibility_instances+=
                                 prepared_indices.size();
                             profile_frame.gpu_parallel_visibility_groups+=group_work;
+                            profile_frame.gpu_parallel_schedule_us+=schedule_us;
+                            for(unsigned lane=0U;lane<cpu_render_workers::lanes;++lane) {
+                                profile_frame.gpu_parallel_lane_groups[lane]+=lane_groups[lane];
+                                profile_frame.gpu_parallel_lane_busy_us[lane]+=lane_busy_us[lane];
+                            }
                             profile_frame.gpu_parallel_visibility_wall_us+=
                                 elapsed_profile_us(work_begin,profile_clock::now());
                             if(!prepared_parallel)
