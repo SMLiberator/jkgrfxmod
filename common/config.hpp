@@ -107,6 +107,7 @@ namespace jkgm {
         bool experimental_gpu_world_simple_shaders = false;
         bool experimental_opaque_composite_specialization = false;
         bool experimental_opaque_shared_sun_projections = false;
+        bool experimental_half_sun_fast_normal_match = false;
         bool experimental_gpu_3do_rigid_normals = false;
         bool experimental_gpu_3do_unlit_shaders = false;
         bool experimental_gpu_3do_alpha_instancing = false;

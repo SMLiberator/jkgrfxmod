@@ -353,14 +353,14 @@ vec4 sample_sun_fluid_light(vec3 world_position,float camera_depth)
 
 // Only the costly shadow-map lookups are low-resolution. In particular,
 // the actual SKY opening gate is always evaluated per full-resolution pixel.
-uniform int sun_half_visibility_active;
+uniform int sun_half_visibility_active; // 0=off, 1=normalized, 2=squared cosine test
 uniform sampler2D sun_half_visibility_image;
 vec3 sun_half_decode_oct(vec2 encoded)
 {
     vec2 f=encoded*2.0-1.0;
     vec3 n=vec3(f,1.0-abs(f.x)-abs(f.y));
     if(n.z<0.0)n.xy=(vec2(1.0)-abs(n.yx))*sign(n.xy);
-    return normalize(n);
+    return n;
 }
 float sun_half_reconstruct_shadow(ivec2 pixel,float depth,vec3 view_normal)
 {
@@ -375,14 +375,22 @@ float sun_half_reconstruct_shadow(ivec2 pixel,float depth,vec3 view_normal)
     for(int y=0;y<2;++y)for(int x=0;x<2;++x) {
         ivec2 p=clamp(base+ivec2(x,y),ivec2(0),half_dims-1);
         vec4 half_sample=texelFetch(sun_half_visibility_image,p,0);
+        float depth_error=abs(half_sample.g-depth);
         if(half_sample.g<=0.0 || half_sample.g>=65500.0 ||
-           abs(half_sample.g-depth)>=depth_tolerance ||
-           dot(N,sun_half_decode_oct(half_sample.ba))<0.96)continue;
+           depth_error>=depth_tolerance)continue;
+        vec3 candidate=sun_half_decode_oct(half_sample.ba);
+        if(sun_half_visibility_active==2) {
+            // cos(theta)>=0.96 with N unit length. Keep the sign test:
+            // squaring alone would also accept back-facing receivers.
+            float alignment=dot(N,candidate);
+            if(alignment<=0.0 ||
+               alignment*alignment<0.9216*dot(candidate,candidate))continue;
+        } else if(dot(N,normalize(candidate))<0.96)continue;
         float bilinear=(x==0?1.0-fraction.x:fraction.x)*
                        (y==0?1.0-fraction.y:fraction.y);
         // Favor same-depth geometry while filtering soft shadow transitions.
         float weight=bilinear*(1.0-smoothstep(
-            0.0,depth_tolerance,abs(half_sample.g-depth)));
+            0.0,depth_tolerance,depth_error));
         sum+=half_sample.r*weight;
         weights+=weight;
     }

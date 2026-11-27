@@ -648,7 +648,7 @@ namespace jkgm {
                                      point<4,float> near_far_depth_transform);
             void set_sun_caustics(bool enabled,float time_seconds);
             void set_sun_max_distance(float distance);
-            void set_sun_half_visibility(bool active,int sampler);
+            void set_sun_half_visibility(bool active,int sampler,bool fast_normal_match=false);
             void set_sun_dynamic_count(int count);
             void set_sun_dynamic_pcf_radius(float radius);
             void set_sun_dynamic_atlas_rect(int slot,point<4,float> rect);

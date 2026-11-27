@@ -12258,8 +12258,11 @@ namespace jkgm {
                          " composite_variant=",composite_variant,
                          " spotlight_candidates=",spots.size(),
                          " shared_sun_projections=",the_config->experimental_opaque_shared_sun_projections &&
-                             sun_lit && cam.valid?1:0);
-            prog.set_sun_half_visibility(half_sun_active,11);
+                             sun_lit && cam.valid?1:0,
+                         " half_sun_fast_normal_match=",half_sun_active &&
+                             the_config->experimental_half_sun_fast_normal_match?1:0);
+            prog.set_sun_half_visibility(half_sun_active,11,
+                the_config->experimental_half_sun_fast_normal_match);
             // HOM coverage reads normal.A on EVERY frame, including rooms
             // without sunlight or active spotlights. Always bind this
             // G-buffer attachment, not only when light shaders need RGB.

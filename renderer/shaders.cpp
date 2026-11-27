@@ -2092,10 +2092,11 @@ void jkgm::shaders::game_post_opaque_composite_shader::set_sun_max_distance(
 }
 
 void jkgm::shaders::game_post_opaque_composite_shader::set_sun_half_visibility(
-    bool active,int sampler)
+    bool active,int sampler,bool fast_normal_match)
 {
     gl::set_uniform_integer(sun_half_visibility_image,sampler);
-    gl::set_uniform_integer(sun_half_visibility_active,active?1:0);
+    gl::set_uniform_integer(sun_half_visibility_active,
+        active?(fast_normal_match?2:1):0);
 }
 
 void jkgm::shaders::game_post_opaque_composite_shader::set_sun_dynamic_count(
