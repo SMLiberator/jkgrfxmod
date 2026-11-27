@@ -5975,16 +5975,19 @@ namespace jkgm {
                 std::vector<size_t> const *remaining=nullptr;
                 static thread_local std::vector<size_t> fast_failed;
                 static thread_local std::vector<size_t> fast_fallback;
-                if(specialize_model_layout && mesh_inside && !parallel &&
+                if(specialize_model_layout && mesh_inside &&
                    layout_ranges && opaque_order) {
-                    bool const use_simd=the_config->experimental_gpu_3do_simd_backfaces &&
+                    // With a prepared visibility result, reuse its group
+                    // decisions instead of running a second backface pass.
+                    bool const use_simd=!parallel &&
+                        the_config->experimental_gpu_3do_simd_backfaces &&
                         can_cpu_cull && plane_test.planes &&
                         decltype(model_collector)::simd_backfaces_supported;
                     auto const &fast=model_collector.fast_layout(
                         model_class,*inst.geometry,*opaque_order,use_simd);
                     if(!fast.anchored.empty()) {
                         fast_failed.clear();
-                        size_t rejected=0U,inserted=0U;
+                        size_t rejected=0U,frustum_rejected=0U,inserted=0U;
                         auto const &planes=inst.geometry->face_planes;
                         auto insert_range=[&](auto const &range) {
                             if(model_collector.append(range.slot,
@@ -6004,7 +6007,21 @@ namespace jkgm {
                         // All ranges already have anchors. Slots belong to
                         // distinct source groups, so collecting in blocks
                         // cannot change per-slot instance or alpha ordering.
-                        if(use_simd && !fast.plane_blocks.empty()) {
+                        if(parallel) {
+                            // The workers index decisions by original group
+                            // number, independent of the collector's layout.
+                            // Keep the serial slot append and fallback order.
+                            for(auto const &range:fast.anchored) {
+                                auto const reason=parallel->groups[range.group_index];
+                                if(reason==gpu_3do_cull_reason::frustum) {
+                                    ++frustum_rejected;continue;
+                                }
+                                if(reason==gpu_3do_cull_reason::backface) {
+                                    ++rejected;continue;
+                                }
+                                insert_range(range);
+                            }
+                        } else if(use_simd && !fast.plane_blocks.empty()) {
                             size_t uncertain_count=0U;
                             for(auto const &block:fast.plane_blocks) {
                                 auto const result=block.classify(local_eye,plane_test.margin);
@@ -6061,13 +6078,18 @@ namespace jkgm {
                             }
                         }
                         if(gpu_profiling) {
-                            profile_frame.gpu_groups_considered+=rejected+inserted;
-                            profile_frame.gpu_group_frustum_tests_avoided+=rejected+inserted;
+                            auto const processed=rejected+frustum_rejected+inserted;
+                            profile_frame.gpu_groups_considered+=processed;
+                            // The prepared mesh already accounted for its
+                            // avoided per-group frustum tests above.
+                            if(!parallel)
+                                profile_frame.gpu_group_frustum_tests_avoided+=processed;
+                            profile_frame.gpu_groups_frustum_culled+=frustum_rejected;
                             profile_frame.gpu_groups_backface_culled+=rejected;
                             profile_frame.gpu_collection_layout_hits+=inserted;
                             profile_frame.gpu_collection_direct_members+=inserted;
                             ++profile_frame.gpu_specialized_collection_meshes;
-                            profile_frame.gpu_specialized_collection_groups+=rejected+inserted;
+                            profile_frame.gpu_specialized_collection_groups+=processed;
                         }
                         remaining=&fast.remaining;
                         // Defensive duplicate/out-of-order guard: preserve
