@@ -5,12 +5,12 @@ uniform sampler2D source_image;
 in vec2 vp_texcoords;
 layout(location=0) out vec4 out_color;
 
-vec3 decode_oct(vec2 e)
+vec3 decode_oct_unscaled(vec2 e)
 {
     vec2 f=e*2.0-1.0;
     vec3 n=vec3(f,1.0-abs(f.x)-abs(f.y));
     if(n.z<0.0)n.xy=(vec2(1.0)-abs(n.yx))*sign(n.xy);
-    return normalize(n);
+    return n;
 }
 void main()
 {
@@ -21,7 +21,10 @@ void main()
         out_color=vec4(0.0,origin.gba);
         return;
     }
-    vec3 N=decode_oct(origin.ba);
+    // For a positive dot, squaring the cosine test avoids normalizing
+    // either oct vector. Preserve the same strict 0.75 cutoff.
+    vec3 N=decode_oct_unscaled(origin.ba);
+    float normal_threshold=0.5625*dot(N,N);
     float tolerance=max(0.2,origin.g*0.0125);
     float total=0.0,weight_sum=0.0;
     // Identical 4x4 extent as baseline box4, evaluated on low-res texels.
@@ -31,8 +34,11 @@ void main()
            any(greaterThanEqual(p,size_px)))continue;
         vec4 s=texelFetch(source_image,p,0);
         if(s.g<=0.0 || s.g>=256.0 ||
-           abs(s.g-origin.g)>=tolerance ||
-           dot(N,decode_oct(s.ba))<=0.75)continue;
+           abs(s.g-origin.g)>=tolerance)continue;
+        vec3 candidate=decode_oct_unscaled(s.ba);
+        float ndot=dot(N,candidate);
+        if(ndot<=0.0 || ndot*ndot<=normal_threshold*dot(candidate,candidate))
+            continue;
         total+=s.r;
         weight_sum+=1.0;
     }

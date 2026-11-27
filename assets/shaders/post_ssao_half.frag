@@ -29,10 +29,8 @@ float sample_depth_direct(vec2 pos)
 }
 
 // Returns 1 if the sample is occluded, 0 otherwise
-float sample_depth(vec3 origin, vec3 offset)
+float sample_depth(vec3 origin, vec3 offset, float depth_radius)
 {
-    float depth_radius = kernel_size / max(32.0, origin.z);
-
     vec2 sample_tc = origin.xy + (offset.xy * depth_radius);
     float sample_z = origin.z + (offset.z * kernel_thickness);
 
@@ -74,27 +72,39 @@ void main()
     ivec2 base=ivec2(gl_FragCoord.xy)*2;
     float origin_depth=65504.0;
     vec3 normal_sample=vec3(0.0);
-    vec2 sample_uv=vp_texcoords;
+    vec4 packed_normal=vec4(0.0);
+    ivec2 selected=ivec2(0);
     for(int y=0;y<2;++y)for(int x=0;x<2;++x) {
         ivec2 p=base+ivec2(x,y);
         if(any(greaterThanEqual(p,dims)))continue;
         float z=texelFetch(depth_image,p,0).r;
-        vec3 n=gbuffer_unpack_normal(texelFetch(normal_image,p,0)).rgb;
-        if(z>0.0 && z<ssao_fade_end && dot(n,n)>0.0001 &&
-           z<origin_depth) {
-            origin_depth=z;
+        // A farther or invalid depth cannot replace the current winner.
+        if(!(z>0.0 && z<ssao_fade_end && z<origin_depth))continue;
+        vec4 encoded=texelFetch(normal_image,p,0);
+        if(gbuffer_packing!=0) {
+            // Packed classes 1 and 2 always decode to a unit normal.
+            // Delay oct decoding until the nearest valid candidate is known.
+            float cls=floor(encoded.a*3.0+0.5);
+            if(cls<0.5 || cls>2.5)continue;
+            packed_normal=encoded;
+        } else {
+            vec3 n=gbuffer_unpack_normal(encoded).rgb;
+            if(!(dot(n,n)>0.0001))continue;
             normal_sample=n;
-            sample_uv=(vec2(p)+vec2(0.5))/vec2(dims);
         }
+        origin_depth=z;
+        selected=p;
     }
 
-    // Skip unrendered pixels and degenerate normals.
-    if(origin_depth <= 0.0 || origin_depth >= ssao_fade_end ||
-       dot(normal_sample, normal_sample) < 0.0001) {
+    // The selected depth already guarantees a valid normal.
+    if(origin_depth >= ssao_fade_end) {
         out_color = vec4(0.0,65504.0,0.5,0.5);
         return;
     }
-    vec3 rndnrm = normalize(normal_sample);
+    vec3 rndnrm = gbuffer_packing!=0
+        ? gbuffer_oct_decode(packed_normal.rg)
+        : normalize(normal_sample);
+    vec2 sample_uv=(vec2(selected)+vec2(0.5))/vec2(dims);
 
     vec3 rndvec = texture(noise_image, gl_FragCoord.xy / 4.0).xyz;
 
@@ -106,9 +116,10 @@ void main()
     vec3 origin = vec3(sample_uv, origin_depth);
 
     float num_fail_samps = 0.0;
+    float depth_radius = kernel_size / max(32.0, origin.z);
 
     for (int i = 0; i < num_kernel_samples; ++i) {
-        num_fail_samps += sample_depth(origin, basis * samples[i]);
+        num_fail_samps += sample_depth(origin, basis * samples[i], depth_radius);
     }
 
     float fail_frac = num_fail_samps / num_kernel_samples;
