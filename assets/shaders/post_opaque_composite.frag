@@ -97,6 +97,40 @@ vec3 sun_shadow_coordinates(vec3 position,vec3 origin,vec3 right,
                 dot(p,up)/limits.y,
                 dot(p,forward)/limits.z);
 }
+// All three consumers use identical near/far projection coordinates.
+// Private per-fragment values; initialize before any sunlight consumer.
+// Lazy evaluation preserves near-only and half-visibility fast paths.
+#ifdef JKGM_COMPOSITE_SHARED_SUN
+vec3 sun_projection_near,sun_projection_far;
+bool sun_projection_near_ready=false,sun_projection_far_ready=false;
+#endif
+vec3 opaque_sun_near_coordinates(vec3 position)
+{
+#ifdef JKGM_COMPOSITE_SHARED_SUN
+    if(sun_projection_near_ready)return sun_projection_near;
+#endif
+    vec3 uv=sun_shadow_coordinates(position,sun_shadow_origin,
+        sun_shadow_right,sun_shadow_up,sun_shadow_forward,sun_shadow_limits);
+#ifdef JKGM_COMPOSITE_SHARED_SUN
+    sun_projection_near=uv;
+    sun_projection_near_ready=true;
+#endif
+    return uv;
+}
+vec3 opaque_sun_far_coordinates(vec3 position)
+{
+#ifdef JKGM_COMPOSITE_SHARED_SUN
+    if(sun_projection_far_ready)return sun_projection_far;
+#endif
+    vec3 uv=sun_shadow_coordinates(position,sun_shadow_far_origin,
+        sun_shadow_far_right,sun_shadow_far_up,sun_shadow_far_forward,
+        sun_shadow_far_limits);
+#ifdef JKGM_COMPOSITE_SHARED_SUN
+    sun_projection_far=uv;
+    sun_projection_far_ready=true;
+#endif
+    return uv;
+}
 bool sun_shadow_inside(vec3 coord)
 {
     return all(greaterThanEqual(coord,vec3(0.0))) &&
@@ -133,8 +167,7 @@ float sun_shadow_visibility(vec3 world_position,float incidence)
     if(sun_shadow_active==0)return 1.0;
     float camera_depth=dot(world_position-camera_origin.xyz,
                            camera_forward.xyz);
-    vec3 near_uv=sun_shadow_coordinates(world_position,sun_shadow_origin,
-        sun_shadow_right,sun_shadow_up,sun_shadow_forward,sun_shadow_limits);
+    vec3 near_uv=opaque_sun_near_coordinates(world_position);
     // Far cascade overlaps near coverage; never discard a receiver merely
     // because its near projection fell outside the map.
     bool use_near=camera_depth<sun_shadow_split && sun_shadow_inside(near_uv);
@@ -146,9 +179,7 @@ float sun_shadow_visibility(vec3 world_position,float incidence)
         return sun_shadow_filter(sun_shadow_image,near_uv,
                                  sun_shadow_limits.z,incidence,
                                  sun_shadow_pcf_radius.x);
-    vec3 far_uv=sun_shadow_coordinates(world_position,sun_shadow_far_origin,
-        sun_shadow_far_right,sun_shadow_far_up,
-        sun_shadow_far_forward,sun_shadow_far_limits);
+    vec3 far_uv=opaque_sun_far_coordinates(world_position);
     if(!sun_shadow_inside(far_uv))
         return use_near
             ? sun_shadow_filter(sun_shadow_image,near_uv,sun_shadow_limits.z,
@@ -184,11 +215,8 @@ float sun_sky_aperture(vec3 position)
 {
     if(sun_sky_aperture_active==0)return 1.0;
     float depth=dot(position-camera_origin.xyz,camera_forward.xyz);
-    vec3 near_uv=sun_shadow_coordinates(position,sun_shadow_origin,
-        sun_shadow_right,sun_shadow_up,sun_shadow_forward,sun_shadow_limits);
-    vec3 far_uv=sun_shadow_coordinates(position,sun_shadow_far_origin,
-        sun_shadow_far_right,sun_shadow_far_up,
-        sun_shadow_far_forward,sun_shadow_far_limits);
+    vec3 near_uv=opaque_sun_near_coordinates(position);
+    vec3 far_uv=opaque_sun_far_coordinates(position);
     bool n=depth<sun_shadow_split && sun_shadow_inside(near_uv);
     bool f=sun_shadow_inside(far_uv);
     if(n && !f)return sun_sky_aperture_sample(near_uv,0);
@@ -300,11 +328,8 @@ vec4 sample_sun_fluid_cascade(vec3 world_position,int layer,vec3 coord)
 vec4 sample_sun_fluid_light(vec3 world_position,float camera_depth)
 {
     if(sun_caustics_active==0)return vec4(0.0,1.0,1.0,1.0);
-    vec3 near_coord=sun_shadow_coordinates(world_position,sun_shadow_origin,
-        sun_shadow_right,sun_shadow_up,sun_shadow_forward,sun_shadow_limits);
-    vec3 far_coord=sun_shadow_coordinates(world_position,sun_shadow_far_origin,
-        sun_shadow_far_right,sun_shadow_far_up,sun_shadow_far_forward,
-        sun_shadow_far_limits);
+    vec3 near_coord=opaque_sun_near_coordinates(world_position);
+    vec3 far_coord=opaque_sun_far_coordinates(world_position);
     bool use_near=camera_depth<sun_shadow_split && sun_shadow_inside(near_coord);
     bool use_far=sun_shadow_inside(far_coord);
     if(!use_near)return use_far

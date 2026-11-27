@@ -13,7 +13,8 @@ namespace jkgm {
         full, simple_opaque, simple_alpha, simple_flare, simple_decal, simple_fluid,
         diffuse_opaque, diffuse_alpha, world_simple_opaque, world_simple_alpha,
         hud_only, emission_only, single_sector_ggx_opaque, single_sector_ggx_alpha,
-        composite_no_sun, composite_no_spotlight, composite_no_direct_light
+        composite_no_sun, composite_no_spotlight, composite_no_direct_light,
+        composite_shared_sun, composite_no_spotlight_shared_sun
     };
 
     class opengl_shader {

@@ -397,7 +397,9 @@ jkgm::opengl_state::opengl_state::opengl_state(size<2, int> screen_res,
         data_root)
     , game_post_ssao_program(data_root)
     , game_post_opaque_composite_program(
-        data_root)
+        data_root,false,the_config->experimental_opaque_shared_sun_projections
+            ?material_shader_variant::composite_shared_sun
+            :material_shader_variant::full)
     , game_transparency_pass_program(
         data_root)
     , post_box4(data_root)
@@ -431,7 +433,9 @@ jkgm::opengl_state::opengl_state::opengl_state(size<2, int> screen_res,
                 material_shader_variant::composite_no_sun);
         game_post_opaque_no_spotlight_program=std::make_unique<
             shaders::game_post_opaque_composite_shader>(data_root,false,
-                material_shader_variant::composite_no_spotlight);
+                the_config->experimental_opaque_shared_sun_projections
+                    ?material_shader_variant::composite_no_spotlight_shared_sun
+                    :material_shader_variant::composite_no_spotlight);
         game_post_opaque_no_direct_light_program=std::make_unique<
             shaders::game_post_opaque_composite_shader>(data_root,false,
                 material_shader_variant::composite_no_direct_light);

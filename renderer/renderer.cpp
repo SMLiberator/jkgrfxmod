@@ -12256,7 +12256,9 @@ namespace jkgm {
                              sun_caustic_target->valid[1]?1:0,
                          " radial_fog=",radial_fog_active?1:0,
                          " composite_variant=",composite_variant,
-                         " spotlight_candidates=",spots.size());
+                         " spotlight_candidates=",spots.size(),
+                         " shared_sun_projections=",the_config->experimental_opaque_shared_sun_projections &&
+                             sun_lit && cam.valid?1:0);
             prog.set_sun_half_visibility(half_sun_active,11);
             // HOM coverage reads normal.A on EVERY frame, including rooms
             // without sunlight or active spotlights. Always bind this

@@ -237,6 +237,10 @@ void jkgm::shaders::translucent_sun_uniforms::set_map(
                     define="#define JKGM_SIMPLE_OPAQUE 1\n#define JKGM_SINGLE_SECTOR_GGX 1\n"; break;
                 case material_shader_variant::single_sector_ggx_alpha:
                     define="#define JKGM_SIMPLE_ALPHA 1\n#define JKGM_SINGLE_SECTOR_GGX 1\n"; break;
+                case material_shader_variant::composite_shared_sun:
+                    define="#define JKGM_COMPOSITE_SHARED_SUN 1\n"; break;
+                case material_shader_variant::composite_no_spotlight_shared_sun:
+                    define="#define JKGM_COMPOSITE_NO_SPOTLIGHT 1\n#define JKGM_COMPOSITE_SHARED_SUN 1\n"; break;
                 case material_shader_variant::composite_no_sun:
                     define="#define JKGM_COMPOSITE_NO_SUN 1\n"; break;
                 case material_shader_variant::composite_no_spotlight:

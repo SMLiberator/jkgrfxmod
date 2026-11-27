@@ -566,6 +566,10 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             j.at("experimental_gpu_3do_single_sector_ggx_shader").get_to(
                 rv->experimental_gpu_3do_single_sector_ggx_shader);
         }
+        if(j.contains("experimental_opaque_shared_sun_projections")) {
+            j.at("experimental_opaque_shared_sun_projections").get_to(
+                rv->experimental_opaque_shared_sun_projections);
+        }
         if(j.contains("experimental_opaque_composite_specialization")) {
             j.at("experimental_opaque_composite_specialization").get_to(
                 rv->experimental_opaque_composite_specialization);
