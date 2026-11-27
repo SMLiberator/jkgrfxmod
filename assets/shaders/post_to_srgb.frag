@@ -92,6 +92,49 @@ float filmic_luminance(float x)
     return clamp(mix(aces,soft_toe,toe_weight),0.0,1.0);
 }
 
+#ifdef JKGM_HDR_OPTIMIZED
+// Same filmic curve and toe as the scalar reference. Uniform endpoints
+// can skip an entire mapping style or the soft toe without pixel divergence.
+vec4 filmic_luminance4(vec4 x)
+{
+    vec4 aces=(x*(2.51*x+0.03))/(x*(2.43*x+0.59)+0.14);
+    float softness=clamp(hdr_shadow_softness,0.0,1.0);
+    if(softness>0.0) {
+        vec4 soft_toe=x/(1.0+x);
+        vec4 toe_weight=softness*(1.0-smoothstep(vec4(0.015),vec4(0.10),x));
+        aces=mix(aces,soft_toe,toe_weight);
+    }
+    return clamp(aces,0.0,1.0);
+}
+
+vec3 hue_preserving_hdr(vec3 hdr,float lum,float mapped_lum)
+{
+    // Gamut compression and highlight desaturation are both lerps
+    // toward the SAME luminance. Combine their scales, not their curves.
+    vec3 mapped=hdr*(mapped_lum/max(lum,0.00001));
+    float peak=max(max(mapped.r,mapped.g),mapped.b);
+    float chroma_scale=min(1.0,
+        (1.0-mapped_lum)/max(peak-mapped_lum,0.00001));
+    float highlight_fade=0.08*smoothstep(0.7,2.5,lum);
+    return vec3(mapped_lum)+(mapped-vec3(mapped_lum))*
+        (chroma_scale*(1.0-highlight_fade));
+}
+
+vec3 optimized_hdr_tonemap(vec3 hdr)
+{
+    float crispness=clamp(hdr_color_crispness,0.0,1.0);
+    if(crispness>=1.0)
+        return filmic_luminance4(vec4(hdr,0.0)).rgb;
+
+    float lum=dot(hdr,vec3(0.2126,0.7152,0.0722));
+    if(crispness<=0.0)
+        return hue_preserving_hdr(hdr,lum,filmic_luminance4(vec4(lum)).r);
+
+    vec4 mapped=filmic_luminance4(vec4(hdr,lum));
+    return mix(hue_preserving_hdr(hdr,lum,mapped.a),mapped.rgb,crispness);
+}
+#endif
+
 void main()
 {
     ivec2 sc = ivec2(gl_FragCoord.xy);
@@ -141,6 +184,9 @@ void main()
         vec3 hdr = max(color*exp2(clamp(ev,-5.0,5.0)),vec3(0.0));
 #endif
 
+#ifdef JKGM_HDR_OPTIMIZED
+        color=optimized_hdr_tonemap(hdr);
+#else
         // Map luminance rather than R/G/B independently to retain hue.
         // Compress any out-of-gamut chroma toward mapped luminance instead
         // of clipping the strongest RGB channel into an oversaturated color.
@@ -167,6 +213,7 @@ void main()
             color=mix(consistent_color,crisp_color,
                       clamp(hdr_color_crispness,0.0,1.0));
         }
+#endif
     }
 
     // Apply color balancing

@@ -30,6 +30,7 @@ namespace jkgm {
         bool experimental_exponential_fog = false; // smooth radial attenuation with no hard clear radius
         bool enable_post = true;
         bool experimental_postfx_vertex_constants = false;
+        bool experimental_hdr_optimized_tonemap = false;
         bool experimental_bloom_bilinear_filters = false;
         bool experimental_bloom_hierarchical_accumulation = false;
         bool experimental_bloom_packed_buffers = false;

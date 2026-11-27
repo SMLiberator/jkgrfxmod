@@ -16,7 +16,8 @@ namespace jkgm {
         composite_no_sun, composite_no_spotlight, composite_no_direct_light,
         composite_shared_sun, composite_no_spotlight_shared_sun,
         postfx_vertex_constants, bloom_bilinear, bloom_hierarchy,
-        bloom_bilinear_hierarchy, bloom_scale, bloom_downsample
+        bloom_bilinear_hierarchy, bloom_scale, bloom_downsample,
+        hdr_optimized, postfx_vertex_constants_hdr_optimized
     };
 
     class opengl_shader {
@@ -896,7 +897,7 @@ namespace jkgm {
         public:
             explicit post_to_srgb_shader(fs::path const &data_root,
                                          bool vertex_constants=false,
-                                         int grain_style=0);
+                                         int grain_style=0,bool hdr_optimized=false);
 
             void set_fbuf_sampler(int sampler);
             void set_hdr(int sampler,bool hdr,bool adaptive,float compensation_ev,

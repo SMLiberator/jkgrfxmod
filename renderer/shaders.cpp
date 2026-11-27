@@ -223,6 +223,7 @@ void jkgm::shaders::translucent_sun_uniforms::set_map(
                 variant==material_shader_variant::hud_only ||
                 variant==material_shader_variant::emission_only ||
                 variant==material_shader_variant::postfx_vertex_constants ||
+                variant==material_shader_variant::postfx_vertex_constants_hdr_optimized ||
                 variant==material_shader_variant::bloom_scale ||
                 variant==material_shader_variant::bloom_downsample ||
                 variant==material_shader_variant::bloom_bilinear ||
@@ -271,6 +272,10 @@ void jkgm::shaders::translucent_sun_uniforms::set_map(
                     define="#define JKGM_SIMPLE_ALPHA 1\n#define JKGM_EMISSION_ONLY 1\n"; break;
                 case material_shader_variant::postfx_vertex_constants:
                     define="#define JKGM_POSTFX_VERTEX_CONSTANTS 1\n"; break;
+                case material_shader_variant::hdr_optimized:
+                    define="#define JKGM_HDR_OPTIMIZED 1\n"; break;
+                case material_shader_variant::postfx_vertex_constants_hdr_optimized:
+                    define="#define JKGM_POSTFX_VERTEX_CONSTANTS 1\n#define JKGM_HDR_OPTIMIZED 1\n"; break;
                 case material_shader_variant::bloom_bilinear:
                     define="#define JKGM_BLOOM_BILINEAR 1\n"; break;
                 case material_shader_variant::bloom_hierarchy:
@@ -2595,12 +2600,16 @@ void jkgm::shaders::post_auto_exposure_shader::set_params(point<4,float> params)
 }
 
 jkgm::shaders::post_to_srgb_shader::post_to_srgb_shader(
-    fs::path const &data_root,bool vertex_constants,int grain_style)
+    fs::path const &data_root,bool vertex_constants,int grain_style,bool hdr_optimized)
     : opengl_shader("post_to_srgb",
                     data_root / "shaders/postprocess.vert",
                     data_root / "shaders/post_to_srgb.frag",fs::path(),
-                    vertex_constants?material_shader_variant::postfx_vertex_constants
-                                    :material_shader_variant::full,false,grain_style)
+                    hdr_optimized
+                        ?(vertex_constants?material_shader_variant::postfx_vertex_constants_hdr_optimized
+                                          :material_shader_variant::hdr_optimized)
+                        :(vertex_constants?material_shader_variant::postfx_vertex_constants
+                                          :material_shader_variant::full),
+                    false,grain_style)
     , fbuf_image(gl::get_uniform_location(the_program, "fbuf_image"))
     , grain_params(gl::get_uniform_location(the_program, "grain_params"))
     , grain_noise_image(gl::get_uniform_location(the_program, "grain_noise_image"))

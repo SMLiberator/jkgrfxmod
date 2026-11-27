@@ -422,7 +422,8 @@ jkgm::opengl_state::opengl_state::opengl_state(size<2, int> screen_res,
     , post_low_pass(data_root)
     , post_scale(data_root)
     , post_to_srgb(data_root,the_config->experimental_postfx_vertex_constants,
-                   the_config->experimental_film_grain_style)
+                   the_config->experimental_film_grain_style,
+                   the_config->experimental_hdr_optimized_tonemap)
     , post_auto_exposure(data_root)
     , post_frame_blend(data_root)
     , post_spatial_blur(data_root)
@@ -442,7 +443,8 @@ jkgm::opengl_state::opengl_state::opengl_state(size<2, int> screen_res,
     LOG_DEBUG("Loading OpenGL assets");
     LOG_INFO("POSTFX vertex_constants=",
              the_config->experimental_postfx_vertex_constants?1:0,
-             " grain_style=",the_config->experimental_film_grain_style);
+             " grain_style=",the_config->experimental_film_grain_style,
+             " hdr_optimized=",the_config->experimental_hdr_optimized_tonemap?1:0);
     bool const bloom_bilinear=the_config->experimental_bloom_bilinear_filters;
     bloom_hierarchical_accumulation=
         the_config->experimental_bloom_hierarchical_accumulation;
