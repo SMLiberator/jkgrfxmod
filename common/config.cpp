@@ -944,6 +944,9 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("experimental_texture_compression_bc1"))
             j.at("experimental_texture_compression_bc1").get_to(
                 rv->experimental_texture_compression_bc1);
+        if(j.contains("experimental_native_texture_compression_bc1"))
+            j.at("experimental_native_texture_compression_bc1").get_to(
+                rv->experimental_native_texture_compression_bc1);
         if(j.contains("vram_texture_preload_size")) {
             j.at("vram_texture_preload_size").get_to(rv->vram_texture_preload_size);
         }

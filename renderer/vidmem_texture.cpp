@@ -199,9 +199,12 @@ HRESULT WINAPI jkgm::vidmem_texture::Load(LPDIRECT3DTEXTURE a)
         ++in_em;
     }
 
-    surf->albedo_map = surf->r->texture_cache->create_srgb_texture_from_buffer(
+    // Native albedo has its own A/B policy. Keep the original decoded
+    // bytes for alpha classification and do not touch palette masks.
+    surf->albedo_map = surf->r->texture_cache->create_native_albedo_texture(
         make_size((int)src->desc.dwWidth, (int)src->desc.dwHeight),
-        make_span(src->conv_buffer).as_const_bytes());
+        make_span(src->conv_buffer).as_const_bytes(),
+        surf->blend_mode==material_blend_mode::normal);
 
     if(repl_map.has_value()) {
         // The conversion above resets the alpha mode; put the material's own settings back

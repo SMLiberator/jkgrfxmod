@@ -61,6 +61,7 @@ namespace jkgm {
         bool enable_parallax = true;
         bool enable_texture_filtering = true;
         bool experimental_texture_compression_bc1 = false; // opaque static replacement albedo only
+        bool experimental_native_texture_compression_bc1 = false; // opaque native JK albedo only
         bool retro_mode = false; // CMP #0 RGB8 post-quantization, no dithering
         bool enable_posterized_lighting = false;
         bool enable_vsync = false;

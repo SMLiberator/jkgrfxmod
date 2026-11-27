@@ -22,6 +22,7 @@ namespace jkgm {
             int refct = 0;
             bool nonopaque_alpha = false;
             bool bc1 = false;
+            bool native_albedo = false;
             uint64_t compressed_bytes = 0;
             std::optional<fs::path> origin_filename;
 
@@ -126,6 +127,7 @@ namespace jkgm {
             bool bc1_supported=false;
             std::set<fs::path> bc1_albedo_paths;
             uint64_t bc1_uploads=0,bc1_fallbacks=0,bc1_upload_us=0;
+            uint64_t native_bc1_uploads=0,native_bc1_fallbacks=0,native_bc1_upload_us=0;
 
             explicit texture_cache_impl(config const *the_config)
                 : the_config(the_config)
@@ -154,6 +156,9 @@ namespace jkgm {
                         if(mat->matcap_map)excluded.insert(*mat->matcap_map);
                     }
                     for(auto const &path:excluded)bc1_albedo_paths.erase(path);
+                }
+                if(the_config->experimental_texture_compression_bc1 ||
+                   the_config->experimental_native_texture_compression_bc1) {
                     // Verify actual driver encoding AND mip generation, not
                     // just extension names or a compressed-format advertisement.
                     gl::texture probe;
@@ -167,9 +172,10 @@ namespace jkgm {
                 }
                 LOG_INFO("TEXTURE BC1 requested=",
                     the_config->experimental_texture_compression_bc1?1:0,
+                    " native_requested=",the_config->experimental_native_texture_compression_bc1?1:0,
                     " supported=",bc1_supported?1:0,
                     " eligible_albedo_paths=",bc1_albedo_paths.size(),
-                    " NOTE=opaque_file_backed_albedo_only;driver_encoded;sRGB");
+                    " NOTE=opaque_albedo_only;driver_encoded;sRGB");
 
                 std::vector<size_t> shuffled_materials;
                 shuffled_materials.resize(raw_materials.size());
@@ -260,12 +266,22 @@ namespace jkgm {
             srgb_texture_id create_srgb_texture_from_buffer(size<2, int> const &dims,
                                                             span<char const> data) override
             {
-                // Dynamic/native buffers are intentionally never compressed.
+                // Generic buffers (including palette masks) stay uncompressed.
                 return create_srgb_texture(dims,data,false);
             }
 
+            srgb_texture_id create_native_albedo_texture(size<2,int> const &dims,
+                                                        span<char const> data,
+                                                        bool normal_blend) override
+            {
+                return create_srgb_texture(dims,data,
+                    normal_blend && the_config->experimental_native_texture_compression_bc1,
+                    true);
+            }
+
             srgb_texture_id create_srgb_texture(size<2,int> const &dims,
-                                               span<char const> data,bool eligible)
+                                               span<char const> data,bool eligible,
+                                               bool native=false)
             {
                 bool const alpha=texture_has_nonopaque_alpha(data);
                 bool const try_bc1=bc1_supported && eligible && !alpha &&
@@ -281,22 +297,27 @@ namespace jkgm {
                 }
                 auto &em=at(srgb_textures,rv);
                 em.nonopaque_alpha=alpha;
+                em.native_albedo=native;
                 em.refct=1;
                 gl::bind_texture(gl::texture_bind_target::texture_2d,em.handle);
 
                 if(try_bc1) {
                     auto const started=std::chrono::steady_clock::now();
                     auto bytes=upload_bc1(dims,data);
-                    bc1_upload_us+=static_cast<uint64_t>(
+                    auto const elapsed=static_cast<uint64_t>(
                         std::chrono::duration_cast<std::chrono::microseconds>(
                             std::chrono::steady_clock::now()-started).count());
+                    bc1_upload_us+=elapsed;
+                    if(native)native_bc1_upload_us+=elapsed;
                     if(bytes) {
                         em.bc1=true;
                         em.compressed_bytes=*bytes;
                         ++bc1_uploads;
+                        if(native)++native_bc1_uploads;
                     }
                     else {
                         ++bc1_fallbacks;
+                        if(native)++native_bc1_fallbacks;
                         LOG_WARNING("TEXTURE BC1 upload failed dims=",get<x>(dims),
                                     "x",get<y>(dims),"; retrying RGBA8");
                         // A partial mip chain cannot be reused. A fresh GL
@@ -479,9 +500,22 @@ namespace jkgm {
             {
                 uint64_t srgb_bytes=0,linear_bytes=0,bc1_bytes=0,bc1_reference_bytes=0;
                 uint64_t bc1_count=0,bc1_referenced=0,srgb_referenced=0,linear_referenced=0;
+                uint64_t native_count=0,native_referenced=0,native_bc1_count=0,native_bc1_referenced=0;
+                uint64_t native_bc1_bytes=0,native_bc1_reference_bytes=0,native_bytes=0;
                 for(auto const &em:srgb_textures) {
                     if(em.refct>0)++srgb_referenced;
                     uint64_t const reference=rgba_mip_bytes(em.dims);
+                    if(em.native_albedo) {
+                        ++native_count;
+                        if(em.refct>0)++native_referenced;
+                        native_bytes+=em.bc1?em.compressed_bytes:reference;
+                        if(em.bc1) {
+                            ++native_bc1_count;
+                            if(em.refct>0)++native_bc1_referenced;
+                            native_bc1_bytes+=em.compressed_bytes;
+                            native_bc1_reference_bytes+=reference;
+                        }
+                    }
                     if(em.bc1) {
                         ++bc1_count;
                         if(em.refct>0)++bc1_referenced;
@@ -504,6 +538,16 @@ namespace jkgm {
                     " bc1_bytes=",bc1_bytes," bc1_rgba8_equiv_bytes=",bc1_reference_bytes,
                     " bc1_uploads_total=",bc1_uploads," bc1_fallbacks_total=",bc1_fallbacks,
                     " bc1_upload_us_total=",bc1_upload_us,
+                    " native_albedo_allocated=",native_count,
+                    " native_albedo_referenced=",native_referenced,
+                    " native_albedo_bytes=",native_bytes,
+                    " native_bc1_allocated=",native_bc1_count,
+                    " native_bc1_referenced=",native_bc1_referenced,
+                    " native_bc1_bytes=",native_bc1_bytes,
+                    " native_bc1_rgba8_equiv_bytes=",native_bc1_reference_bytes,
+                    " native_bc1_uploads_total=",native_bc1_uploads,
+                    " native_bc1_fallbacks_total=",native_bc1_fallbacks,
+                    " native_bc1_upload_us_total=",native_bc1_upload_us,
                     " NOTE=pooled_and_referenced;mip_payload_not_driver_overhead;upload_wall_time");
             }
 

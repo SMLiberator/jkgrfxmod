@@ -21,6 +21,14 @@ namespace jkgm {
 
         virtual srgb_texture_id create_srgb_texture_from_buffer(size<2, int> const &dims,
                                                                 span<char const> data) = 0;
+        // Explicit native albedo entry point. Generic buffers (palette
+        // masks and other generated images) never opt into compression.
+        virtual srgb_texture_id create_native_albedo_texture(size<2,int> const &dims,
+                                                              span<char const> data,
+                                                              bool normal_blend)
+        {
+            return create_srgb_texture_from_buffer(dims,data);
+        }
         virtual srgb_texture_id get_srgb_texture_from_filename(fs::path const &file) = 0;
         virtual linear_texture_id get_linear_texture_from_filename(fs::path const &file) = 0;
 
