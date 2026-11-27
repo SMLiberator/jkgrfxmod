@@ -231,19 +231,25 @@ jkgm::hud_model::hud_model(size<2, int> scr_res,
     num_indices = indices.size();
 }
 
-jkgm::post_buffer::post_buffer(size<2, int> dims)
+jkgm::post_buffer::post_buffer(size<2, int> dims,bool packed)
     : viewport(make_point(0, 0), dims)
+    , packed_rgb(packed)
 {
     gl::bind_framebuffer(gl::framebuffer_bind_target::any, fbo);
 
     gl::bind_texture(gl::texture_bind_target::texture_2d, tex);
-    gl::tex_image_2d(gl::texture_bind_target::texture_2d,
-                     /*level*/ 0,
-                     gl::texture_internal_format::rgba16f,
-                     dims,
-                     gl::texture_pixel_format::rgba,
-                     gl::texture_pixel_type::float32,
-                     span<char const>(nullptr, 0U));
+    auto const allocate=[&](bool rgb) {
+        gl::tex_image_2d(gl::texture_bind_target::texture_2d,
+                         /*level*/ 0,
+                         rgb?gl::texture_internal_format::r11f_g11f_b10f
+                            :gl::texture_internal_format::rgba16f,
+                         dims,
+                         rgb?gl::texture_pixel_format::rgb
+                            :gl::texture_pixel_format::rgba,
+                         gl::texture_pixel_type::float32,
+                         span<char const>(nullptr,0U));
+    };
+    allocate(packed_rgb);
     gl::set_texture_max_level(gl::texture_bind_target::texture_2d, 0U);
     gl::set_texture_mag_filter(gl::texture_bind_target::texture_2d, gl::mag_filter::linear);
     gl::set_texture_min_filter(gl::texture_bind_target::texture_2d, gl::min_filter::linear);
@@ -260,8 +266,14 @@ jkgm::post_buffer::post_buffer(size<2, int> dims)
     gl::draw_buffers(gl::draw_buffer::color0);
 
     auto fbs = gl::check_framebuffer_status(gl::framebuffer_bind_target::any);
-    if(gl::check_framebuffer_status(gl::framebuffer_bind_target::any) !=
-       gl::framebuffer_status::complete) {
+    if(packed_rgb && fbs!=gl::framebuffer_status::complete) {
+        gl::log_errors();
+        LOG_WARNING("Packed bloom framebuffer unsupported; retrying RGBA16F");
+        packed_rgb=false;
+        allocate(false);
+        fbs=gl::check_framebuffer_status(gl::framebuffer_bind_target::any);
+    }
+    if(fbs!=gl::framebuffer_status::complete) {
         gl::log_errors();
         LOG_ERROR("Failed to create render framebuffer: ", static_cast<int>(fbs));
     }
@@ -269,9 +281,9 @@ jkgm::post_buffer::post_buffer(size<2, int> dims)
     gl::bind_framebuffer(gl::framebuffer_bind_target::any, gl::default_framebuffer);
 }
 
-jkgm::hdr_stack_em::hdr_stack_em(size<2, int> dims, int taps, float weight)
-    : a(dims)
-    , b(dims)
+jkgm::hdr_stack_em::hdr_stack_em(size<2, int> dims,int taps,float weight,bool packed)
+    : a(dims,packed)
+    , b(dims,packed)
     , taps(taps)
     , weight(weight)
 {
@@ -286,13 +298,13 @@ namespace jkgm {
     }
 }
 
-jkgm::hdr_stack::hdr_stack(size<2, int> dims)
+jkgm::hdr_stack::hdr_stack(size<2, int> dims,bool packed)
 {
-    elements.emplace_back(scale_framebuffer_size(dims, 2), /*taps*/ 3, /*weight*/ 0.5f);
-    elements.emplace_back(scale_framebuffer_size(dims, 4), /*taps*/ 7, /*weight*/ 0.34f);
-    elements.emplace_back(scale_framebuffer_size(dims, 8), /*taps*/ 9, /*weight*/ 0.18f);
-    elements.emplace_back(scale_framebuffer_size(dims, 16), /*taps*/ 15, /*weight*/ 0.07f);
-    elements.emplace_back(scale_framebuffer_size(dims, 32), /*taps*/ 15, /*weight*/ 0.022f);
+    elements.emplace_back(scale_framebuffer_size(dims, 2), /*taps*/ 3, /*weight*/ 0.5f,packed);
+    elements.emplace_back(scale_framebuffer_size(dims, 4), /*taps*/ 7, /*weight*/ 0.34f,packed);
+    elements.emplace_back(scale_framebuffer_size(dims, 8), /*taps*/ 9, /*weight*/ 0.18f,packed);
+    elements.emplace_back(scale_framebuffer_size(dims, 16), /*taps*/ 15, /*weight*/ 0.07f,packed);
+    elements.emplace_back(scale_framebuffer_size(dims, 32), /*taps*/ 15, /*weight*/ 0.022f,packed);
 }
 
 jkgm::triangle_buffer_model::triangle_buffer_model()
@@ -425,7 +437,7 @@ jkgm::opengl_state::opengl_state::opengl_state(size<2, int> screen_res,
     , spatial_blur_result(screen_res)
     , frame_blend_history_a(screen_res)
     , frame_blend_history_b(screen_res)
-    , bloom_layers(screen_res)
+    , bloom_layers(screen_res,the_config->experimental_bloom_packed_buffers)
 {
     LOG_DEBUG("Loading OpenGL assets");
     LOG_INFO("POSTFX vertex_constants=",
@@ -434,8 +446,17 @@ jkgm::opengl_state::opengl_state::opengl_state(size<2, int> screen_res,
     bool const bloom_bilinear=the_config->experimental_bloom_bilinear_filters;
     bloom_hierarchical_accumulation=
         the_config->experimental_bloom_hierarchical_accumulation;
+    unsigned packed_bloom_buffers=0;
+    for(auto const &layer:bloom_layers.elements) {
+        packed_bloom_buffers+=layer.a.packed_rgb?1U:0U;
+        packed_bloom_buffers+=layer.b.packed_rgb?1U:0U;
+    }
     LOG_INFO("BLOOM bilinear=",bloom_bilinear?1:0,
-             " hierarchical=",bloom_hierarchical_accumulation?1:0);
+             " hierarchical=",bloom_hierarchical_accumulation?1:0,
+             " packed_requested=",the_config->experimental_bloom_packed_buffers?1:0,
+             " packed_buffers=",packed_bloom_buffers,
+             " total_buffers=",2U*bloom_layers.elements.size(),
+             " filter_revision=2");
     if(bloom_bilinear) {
         post_bloom_fast_scale=std::make_unique<shaders::post_scale_shader>(
             data_root,true);

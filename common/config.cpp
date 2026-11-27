@@ -96,6 +96,9 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("experimental_bloom_hierarchical_accumulation"))
             j.at("experimental_bloom_hierarchical_accumulation").get_to(
                 rv->experimental_bloom_hierarchical_accumulation);
+        if(j.contains("experimental_bloom_packed_buffers"))
+            j.at("experimental_bloom_packed_buffers").get_to(
+                rv->experimental_bloom_packed_buffers);
         if(j.contains("experimental_film_grain_style")) {
             j.at("experimental_film_grain_style").get_to(
                 rv->experimental_film_grain_style);

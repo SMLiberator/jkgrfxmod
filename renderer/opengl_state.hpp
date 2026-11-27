@@ -60,7 +60,8 @@ namespace jkgm {
         gl::texture tex;
         box<2, int> viewport;
 
-        explicit post_buffer(size<2, int> dims);
+        bool packed_rgb=false;
+        explicit post_buffer(size<2, int> dims,bool packed=false);
     };
 
     class hdr_stack_em {
@@ -70,14 +71,14 @@ namespace jkgm {
         int taps;
         float weight;
 
-        hdr_stack_em(size<2, int> dims, int taps, float weight);
+        hdr_stack_em(size<2, int> dims, int taps, float weight,bool packed=false);
     };
 
     class hdr_stack {
     public:
         std::vector<hdr_stack_em> elements;
 
-        explicit hdr_stack(size<2, int> dims);
+        explicit hdr_stack(size<2, int> dims,bool packed=false);
     };
 
     struct alignas(32) triangle_buffer_vertex {
