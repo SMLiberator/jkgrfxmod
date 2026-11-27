@@ -10,6 +10,7 @@
 #include "global_env_capture.hpp"
 #include "camera_to_mat.hpp"
 #include "native_3do_profile.hpp"
+#include "native_simulation_profile.hpp"
 #include "native_3do_draw_memo.hpp"
 #include "native_3do_direct_model_audit.hpp"
 #include <optional>
@@ -9495,7 +9496,11 @@ namespace {
         bool const previous_tick_state=saber_light_native_update_active;
         saber_light_native_update_active=true;
         detach_native_destroyed_children_pre_update();
-        RealNativeThingUpdate(seconds,milliseconds);
+        {
+            jkgm::native_simulation_profile::scope timer(
+                jkgm::native_simulation_profile::stage::thing_update);
+            RealNativeThingUpdate(seconds,milliseconds);
+        }
         saber_light_native_update_active=previous_tick_state;
         // The alternative native MAT format variant previously crashed at
         // 0x42A546. Its corrected, descriptor-verified loader is experimental
@@ -12345,6 +12350,8 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID /*lpRese
 
         renderer_hooks_active = true;
         native_node_attachment_hooks_active=attach_native_node_attachment_hooks();
+        if(the_config->experimental_simulation_profiling)
+            jkgm::native_simulation_profile::install(native_node_attachment_hooks_active);
         if(the_config->profile_renderer || the_config->use_gpu_cache ||
            the_config->enable_decals ||
            (the_config->enable_spotlights && the_config->enable_spotlight_shadows) ||
@@ -12354,6 +12361,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID /*lpRese
         LOG_DEBUG("Finished attaching renderer to process");
     }
     else if(ul_reason_for_call == DLL_PROCESS_DETACH && renderer_hooks_active) {
+        jkgm::native_simulation_profile::uninstall();
         if(native_node_attachment_hooks_active) {
             detach_native_node_attachment_hooks();
             native_node_attachment_hooks_active=false;

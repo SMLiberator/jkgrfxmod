@@ -3,6 +3,7 @@
 #include "frame_profile.hpp"
 #include "presentation_gpu_profile.hpp"
 #include "native_3do_profile.hpp"
+#include "native_simulation_profile.hpp"
 #include "gpu_3do_preview.hpp"
 #include "gpu_3do_index_coalescing.hpp"
 #include "gpu_3do_instancing_audit.hpp"
@@ -15893,6 +15894,7 @@ namespace jkgm {
 #include "hemi_reflection_capture.inc"
         void present_game() override
         {
+            native_simulation_profile::present();
             poll_audio_modules();
             bool const profiling = the_config->profile_renderer;
             auto const started = profile_clock::now();

@@ -285,6 +285,9 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("profile_renderer")) {
             j.at("profile_renderer").get_to(rv->profile_renderer);
         }
+        if(j.contains("experimental_simulation_profiling")) {
+            j.at("experimental_simulation_profiling").get_to(rv->experimental_simulation_profiling);
+        }
         if(j.contains("profile_gpu_3do_instancing_audit")) {
             j.at("profile_gpu_3do_instancing_audit").get_to(
                 rv->profile_gpu_3do_instancing_audit);
