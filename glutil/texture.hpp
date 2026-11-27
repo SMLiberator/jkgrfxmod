@@ -50,6 +50,7 @@ namespace jkgm::gl {
         srgb = 0x8C41,
         srgb_a8 = 0x8C43,
         srgb_bc1 = 0x8C4C, // GL_COMPRESSED_SRGB_S3TC_DXT1_EXT
+        srgb_bc3 = 0x8C4F, // GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT
         rgb16f = 0x881B,
         rgba16f = 0x881A,
         rgb10_a2 = 0x8059, // packed signed-view normal + 2-bit receiver class

@@ -21,7 +21,7 @@ namespace jkgm {
             gl::texture handle;
             int refct = 0;
             bool nonopaque_alpha = false;
-            bool bc1 = false;
+            gl::texture_internal_format storage=gl::texture_internal_format::srgb_a8;
             bool native_albedo = false;
             uint64_t compressed_bytes = 0;
             std::optional<fs::path> origin_filename;
@@ -67,11 +67,12 @@ namespace jkgm {
         // "compressed RGB" preference. Validate EVERY mip before accepting
         // the texture; an unsupported encoder/mipmap path must fall back.
         // Called only on texture upload, never on the draw path.
-        std::optional<uint64_t> upload_bc1(size<2,int> dims,span<char const> data)
+        std::optional<uint64_t> upload_compressed_albedo(size<2,int> dims,span<char const> data,
+                                                        gl::texture_internal_format storage)
         {
             gl::log_errors(); // attribute subsequent errors to this upload
             gl::tex_image_2d(gl::texture_bind_target::texture_2d,0,
-                gl::texture_internal_format::srgb_bc1,dims,
+                storage,dims,
                 gl::texture_pixel_format::rgba,gl::texture_pixel_type::uint8,data);
             if(glGetError()!=GL_NO_ERROR) {
                 gl::log_errors();
@@ -91,14 +92,15 @@ namespace jkgm {
                 glGetTexLevelParameteriv(GL_TEXTURE_2D,level,GL_TEXTURE_WIDTH,&width);
                 glGetTexLevelParameteriv(GL_TEXTURE_2D,level,GL_TEXTURE_HEIGHT,&height);
                 if(glGetError()!=GL_NO_ERROR || !compressed ||
-                   format!=static_cast<GLint>(gl::texture_internal_format::srgb_bc1) ||
+                   format!=static_cast<GLint>(storage) ||
                    width!=w || height!=h) {
                     gl::log_errors();
                     return std::nullopt;
                 }
                 glGetTexLevelParameteriv(GL_TEXTURE_2D,level,GL_TEXTURE_COMPRESSED_IMAGE_SIZE,
                                          &level_bytes);
-                uint64_t const expected=((uint64_t(w)+3U)/4U)*((uint64_t(h)+3U)/4U)*8U;
+                uint64_t const block_bytes=storage==gl::texture_internal_format::srgb_bc1?8U:16U;
+                uint64_t const expected=((uint64_t(w)+3U)/4U)*((uint64_t(h)+3U)/4U)*block_bytes;
                 if(glGetError()!=GL_NO_ERROR || level_bytes<=0 ||
                    uint64_t(level_bytes)!=expected) {
                     gl::log_errors();
@@ -124,10 +126,12 @@ namespace jkgm {
             std::map<fs::path, size_t> file_to_linear_texture_map;
 
             uint64_t current_capacity = 0U;
-            bool bc1_supported=false;
-            std::set<fs::path> bc1_albedo_paths;
+            bool bc1_supported=false,bc3_supported=false;
+            std::set<fs::path> compression_albedo_paths;
             uint64_t bc1_uploads=0,bc1_fallbacks=0,bc1_upload_us=0;
             uint64_t native_bc1_uploads=0,native_bc1_fallbacks=0,native_bc1_upload_us=0;
+            uint64_t bc3_uploads=0,bc3_fallbacks=0,bc3_upload_us=0;
+            uint64_t native_bc3_uploads=0,native_bc3_fallbacks=0,native_bc3_upload_us=0;
 
             explicit texture_cache_impl(config const *the_config)
                 : the_config(the_config)
@@ -139,7 +143,8 @@ namespace jkgm {
 
                 auto const &raw_materials = materials.get_materials();
 
-                if(the_config->experimental_texture_compression_bc1) {
+                if(the_config->experimental_texture_compression_bc1 ||
+                   the_config->experimental_texture_compression_bc3) {
                     // A filename can serve several roles. Keep emission,
                     // environment, matcap and special-blend sources intact,
                     // even if another material uses that same file as albedo.
@@ -147,7 +152,7 @@ namespace jkgm {
                     for(auto const &mat:raw_materials) {
                         if(mat->albedo_map) {
                             if(mat->blend_mode==material_blend_mode::normal)
-                                bc1_albedo_paths.insert(*mat->albedo_map);
+                                compression_albedo_paths.insert(*mat->albedo_map);
                             else
                                 excluded.insert(*mat->albedo_map);
                         }
@@ -155,7 +160,7 @@ namespace jkgm {
                         if(mat->env_map)excluded.insert(*mat->env_map);
                         if(mat->matcap_map)excluded.insert(*mat->matcap_map);
                     }
-                    for(auto const &path:excluded)bc1_albedo_paths.erase(path);
+                    for(auto const &path:excluded)compression_albedo_paths.erase(path);
                 }
                 if(the_config->experimental_texture_compression_bc1 ||
                    the_config->experimental_native_texture_compression_bc1) {
@@ -165,8 +170,9 @@ namespace jkgm {
                     gl::bind_texture(gl::texture_bind_target::texture_2d,probe);
                     std::array<char,64> white;
                     white.fill(static_cast<char>(255));
-                    bc1_supported=upload_bc1(make_size(4,4),
-                        span<char const>(white.data(),white.size())).has_value();
+                    bc1_supported=upload_compressed_albedo(make_size(4,4),
+                        span<char const>(white.data(),white.size()),
+                        gl::texture_internal_format::srgb_bc1).has_value();
                     if(!bc1_supported)
                         LOG_WARNING("TEXTURE BC1 driver upload/mipmap probe failed; using RGBA8");
                 }
@@ -174,8 +180,29 @@ namespace jkgm {
                     the_config->experimental_texture_compression_bc1?1:0,
                     " native_requested=",the_config->experimental_native_texture_compression_bc1?1:0,
                     " supported=",bc1_supported?1:0,
-                    " eligible_albedo_paths=",bc1_albedo_paths.size(),
+                    " eligible_albedo_paths=",compression_albedo_paths.size(),
                     " NOTE=opaque_albedo_only;driver_encoded;sRGB");
+
+                if(the_config->experimental_texture_compression_bc3 ||
+                   the_config->experimental_native_texture_compression_bc3) {
+                    gl::texture probe;
+                    gl::bind_texture(gl::texture_bind_target::texture_2d,probe);
+                    std::array<char,64> rgba;
+                    rgba.fill(static_cast<char>(255));
+                    for(size_t i=3;i<rgba.size();i+=4)
+                        rgba[i]=static_cast<char>((i/4)*17U);
+                    bc3_supported=upload_compressed_albedo(make_size(4,4),
+                        span<char const>(rgba.data(),rgba.size()),
+                        gl::texture_internal_format::srgb_bc3).has_value();
+                    if(!bc3_supported)
+                        LOG_WARNING("TEXTURE BC3 driver upload/mipmap probe failed; using RGBA8");
+                }
+                LOG_INFO("TEXTURE BC3 requested=",
+                    the_config->experimental_texture_compression_bc3?1:0,
+                    " native_requested=",the_config->experimental_native_texture_compression_bc3?1:0,
+                    " supported=",bc3_supported?1:0,
+                    " eligible_albedo_paths=",compression_albedo_paths.size(),
+                    " NOTE=alpha_bearing_albedo_only;driver_encoded;sRGB");
 
                 std::vector<size_t> shuffled_materials;
                 shuffled_materials.resize(raw_materials.size());
@@ -242,11 +269,12 @@ namespace jkgm {
                 return materials.get_pack_image(pack, image_id);
             }
 
-            std::optional<srgb_texture_id> get_existing_free_srgb_texture(size<2, int> const &dims,bool bc1)
+            std::optional<srgb_texture_id> get_existing_free_srgb_texture(size<2, int> const &dims,
+                                                                            gl::texture_internal_format storage)
             {
                 for(size_t i = 0; i < srgb_textures.size(); ++i) {
                     auto &em = srgb_textures[i];
-                    if(em.refct <= 0 && em.dims == dims && em.bc1==bc1) {
+                    if(em.refct <= 0 && em.dims == dims && em.storage==storage) {
                         // Match both dimensions and storage class. Native
                         // RGBA updates must never refill a compressed slot.
                         if(em.origin_filename.has_value()) {
@@ -274,9 +302,7 @@ namespace jkgm {
                                                         span<char const> data,
                                                         bool normal_blend) override
             {
-                return create_srgb_texture(dims,data,
-                    normal_blend && the_config->experimental_native_texture_compression_bc1,
-                    true);
+                return create_srgb_texture(dims,data,normal_blend,true);
             }
 
             srgb_texture_id create_srgb_texture(size<2,int> const &dims,
@@ -284,9 +310,17 @@ namespace jkgm {
                                                bool native=false)
             {
                 bool const alpha=texture_has_nonopaque_alpha(data);
-                bool const try_bc1=bc1_supported && eligible && !alpha &&
-                                   get<x>(dims)>=4 && get<y>(dims)>=4;
-                auto existing_buf=get_existing_free_srgb_texture(dims,try_bc1);
+                using format=gl::texture_internal_format;
+                bool const allow_bc1=native?the_config->experimental_native_texture_compression_bc1:
+                                            the_config->experimental_texture_compression_bc1;
+                bool const allow_bc3=native?the_config->experimental_native_texture_compression_bc3:
+                                            the_config->experimental_texture_compression_bc3;
+                auto storage=format::srgb_a8;
+                if(eligible && get<x>(dims)>=4 && get<y>(dims)>=4) {
+                    if(!alpha && allow_bc1 && bc1_supported)storage=format::srgb_bc1;
+                    if(alpha && allow_bc3 && bc3_supported)storage=format::srgb_bc3;
+                }
+                auto existing_buf=get_existing_free_srgb_texture(dims,storage);
                 srgb_texture_id rv=existing_buf.has_value()
                     ?*existing_buf:srgb_texture_id(srgb_textures.size());
                 bool allocate=!existing_buf.has_value();
@@ -301,35 +335,36 @@ namespace jkgm {
                 em.refct=1;
                 gl::bind_texture(gl::texture_bind_target::texture_2d,em.handle);
 
-                if(try_bc1) {
+                if(storage!=format::srgb_a8) {
+                    bool const bc1=storage==format::srgb_bc1;
                     auto const started=std::chrono::steady_clock::now();
-                    auto bytes=upload_bc1(dims,data);
+                    auto bytes=upload_compressed_albedo(dims,data,storage);
                     auto const elapsed=static_cast<uint64_t>(
                         std::chrono::duration_cast<std::chrono::microseconds>(
                             std::chrono::steady_clock::now()-started).count());
-                    bc1_upload_us+=elapsed;
-                    if(native)native_bc1_upload_us+=elapsed;
+                    (bc1?bc1_upload_us:bc3_upload_us)+=elapsed;
+                    if(native)(bc1?native_bc1_upload_us:native_bc3_upload_us)+=elapsed;
                     if(bytes) {
-                        em.bc1=true;
+                        em.storage=storage;
                         em.compressed_bytes=*bytes;
-                        ++bc1_uploads;
-                        if(native)++native_bc1_uploads;
+                        ++(bc1?bc1_uploads:bc3_uploads);
+                        if(native)++(bc1?native_bc1_uploads:native_bc3_uploads);
                     }
                     else {
-                        ++bc1_fallbacks;
-                        if(native)++native_bc1_fallbacks;
-                        LOG_WARNING("TEXTURE BC1 upload failed dims=",get<x>(dims),
+                        ++(bc1?bc1_fallbacks:bc3_fallbacks);
+                        if(native)++(bc1?native_bc1_fallbacks:native_bc3_fallbacks);
+                        LOG_WARNING("TEXTURE ",bc1?"BC1":"BC3"," upload failed dims=",get<x>(dims),
                                     "x",get<y>(dims),"; retrying RGBA8");
                         // A partial mip chain cannot be reused. A fresh GL
                         // object also restores default sampler state.
                         em.handle=gl::texture{};
                         gl::bind_texture(gl::texture_bind_target::texture_2d,em.handle);
-                        em.bc1=false;
+                        em.storage=format::srgb_a8;
                         em.compressed_bytes=0;
                         allocate=true;
                     }
                 }
-                if(!em.bc1) {
+                if(em.storage==format::srgb_a8) {
                     if(allocate)
                         gl::tex_image_2d(gl::texture_bind_target::texture_2d,0,
                             gl::texture_internal_format::srgb_a8,dims,
@@ -374,7 +409,7 @@ namespace jkgm {
 
                 auto rv = create_srgb_texture(img->dimensions,
                     make_span(img->data).as_const_bytes(),
-                    bc1_albedo_paths.count(file)!=0);
+                    compression_albedo_paths.count(file)!=0);
 
                 auto &em = at(srgb_textures, rv);
                 em.origin_filename = file;
@@ -502,25 +537,43 @@ namespace jkgm {
                 uint64_t bc1_count=0,bc1_referenced=0,srgb_referenced=0,linear_referenced=0;
                 uint64_t native_count=0,native_referenced=0,native_bc1_count=0,native_bc1_referenced=0;
                 uint64_t native_bc1_bytes=0,native_bc1_reference_bytes=0,native_bytes=0;
+                uint64_t bc3_count=0,bc3_referenced=0,bc3_bytes=0,bc3_reference_bytes=0;
+                uint64_t native_bc3_count=0,native_bc3_referenced=0;
+                uint64_t native_bc3_bytes=0,native_bc3_reference_bytes=0;
                 for(auto const &em:srgb_textures) {
                     if(em.refct>0)++srgb_referenced;
                     uint64_t const reference=rgba_mip_bytes(em.dims);
+                    bool const bc1=em.storage==gl::texture_internal_format::srgb_bc1;
+                    bool const bc3=em.storage==gl::texture_internal_format::srgb_bc3;
                     if(em.native_albedo) {
                         ++native_count;
                         if(em.refct>0)++native_referenced;
-                        native_bytes+=em.bc1?em.compressed_bytes:reference;
-                        if(em.bc1) {
+                        native_bytes+=(bc1||bc3)?em.compressed_bytes:reference;
+                        if(bc1) {
                             ++native_bc1_count;
                             if(em.refct>0)++native_bc1_referenced;
                             native_bc1_bytes+=em.compressed_bytes;
                             native_bc1_reference_bytes+=reference;
                         }
+                        if(bc3) {
+                            ++native_bc3_count;
+                            if(em.refct>0)++native_bc3_referenced;
+                            native_bc3_bytes+=em.compressed_bytes;
+                            native_bc3_reference_bytes+=reference;
+                        }
                     }
-                    if(em.bc1) {
+                    if(bc1) {
                         ++bc1_count;
                         if(em.refct>0)++bc1_referenced;
                         bc1_bytes+=em.compressed_bytes;
                         bc1_reference_bytes+=reference;
+                        srgb_bytes+=em.compressed_bytes;
+                    }
+                    else if(bc3) {
+                        ++bc3_count;
+                        if(em.refct>0)++bc3_referenced;
+                        bc3_bytes+=em.compressed_bytes;
+                        bc3_reference_bytes+=reference;
                         srgb_bytes+=em.compressed_bytes;
                     }
                     else srgb_bytes+=reference;
@@ -548,6 +601,17 @@ namespace jkgm {
                     " native_bc1_uploads_total=",native_bc1_uploads,
                     " native_bc1_fallbacks_total=",native_bc1_fallbacks,
                     " native_bc1_upload_us_total=",native_bc1_upload_us,
+                    " bc3_allocated=",bc3_count," bc3_referenced=",bc3_referenced,
+                    " bc3_bytes=",bc3_bytes," bc3_rgba8_equiv_bytes=",bc3_reference_bytes,
+                    " bc3_uploads_total=",bc3_uploads," bc3_fallbacks_total=",bc3_fallbacks,
+                    " bc3_upload_us_total=",bc3_upload_us,
+                    " native_bc3_allocated=",native_bc3_count,
+                    " native_bc3_referenced=",native_bc3_referenced,
+                    " native_bc3_bytes=",native_bc3_bytes,
+                    " native_bc3_rgba8_equiv_bytes=",native_bc3_reference_bytes,
+                    " native_bc3_uploads_total=",native_bc3_uploads,
+                    " native_bc3_fallbacks_total=",native_bc3_fallbacks,
+                    " native_bc3_upload_us_total=",native_bc3_upload_us,
                     " NOTE=pooled_and_referenced;mip_payload_not_driver_overhead;upload_wall_time");
             }
 
