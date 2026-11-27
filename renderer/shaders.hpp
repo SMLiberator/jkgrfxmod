@@ -26,7 +26,8 @@ namespace jkgm {
                       fs::path const &vertex_part,
                       fs::path const &fragment_part,
                       fs::path const &geometry_part = fs::path(),
-                      material_shader_variant variant = material_shader_variant::full);
+                      material_shader_variant variant = material_shader_variant::full,
+                      bool fused_ssao=false);
 
     public:
         opengl_shader(opengl_shader const &) = delete;
@@ -617,7 +618,8 @@ namespace jkgm {
         public:
             explicit game_post_opaque_composite_shader(
                 fs::path const &data_root,bool half_sun=false,
-                material_shader_variant variant=material_shader_variant::full);
+                material_shader_variant variant=material_shader_variant::full,
+                bool fused_ssao=false);
 
             void set_color_sampler(int sampler);
             void set_emissive_sampler(int sampler);

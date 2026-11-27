@@ -167,11 +167,14 @@ void jkgm::shaders::translucent_sun_uniforms::set_map(
 
         gl::shader compile_shader_from_file(fs::path const &filename,
                                             gl::shader_type type,
-                                            material_shader_variant variant=material_shader_variant::full)
+                                            material_shader_variant variant=material_shader_variant::full,
+                                            bool fused_ssao=false)
         {
             diagnostic_context dc(filename.generic_string());
             gl::shader rv(type);
             auto source=load_shader_source(filename);
+            if(fused_ssao && type==gl::shader_type::fragment)
+                source.insert(source.find('\n')+1U,"#define JKGM_COMPOSITE_FUSED_SSAO 1\n");
             // Optional array samplers require a unique forward unit (20).
             // When the GPU exposes fewer than 21 fragment units, remove the
             // sampler at compile-time, not merely via a runtime uniform.
@@ -318,11 +321,11 @@ void jkgm::shaders::translucent_sun_uniforms::set_map(
                                      fs::path const &vx,
                                      fs::path const &fg,
                                      fs::path const &geom,
-                                     material_shader_variant variant)
+                                     material_shader_variant variant,bool fused_ssao)
         {
             auto vx_shader = compile_shader_from_file(vx,gl::shader_type::vertex,variant);
             auto fg_shader = compile_shader_from_file(
-                fg,gl::shader_type::fragment,variant);
+                fg,gl::shader_type::fragment,variant,fused_ssao);
 
             gl::attach_shader(prog, vx_shader);
             gl::attach_shader(prog, fg_shader);
@@ -355,11 +358,11 @@ jkgm::opengl_shader::opengl_shader(std::string const &name,
                                    fs::path const &vertex_part,
                                    fs::path const &fragment_part,
                                    fs::path const &geometry_part,
-                                   material_shader_variant variant)
+                                   material_shader_variant variant,bool fused_ssao)
     : gbuffer_packing_uniform(gl::uniform_location_id(-1))
 {
     link_program_from_files(
-        name,the_program,vertex_part,fragment_part,geometry_part,variant);
+        name,the_program,vertex_part,fragment_part,geometry_part,variant,fused_ssao);
     gbuffer_packing_uniform=gl::get_uniform_location(the_program,"gbuffer_packing");
 }
 
@@ -1847,12 +1850,13 @@ void jkgm::shaders::spotlight_shadow_depth_shader::set_shadow_alpha(
 }
 
 jkgm::shaders::game_post_opaque_composite_shader::game_post_opaque_composite_shader(
-    fs::path const &data_root,bool half_sun,material_shader_variant variant)
+    fs::path const &data_root,bool half_sun,material_shader_variant variant,
+    bool fused_ssao)
     : opengl_shader(half_sun?"game_post_opaque_half_sun":"game_post_opaque_composite",
                     data_root / "shaders/postprocess.vert",
                     data_root / (half_sun?"shaders/post_sun_visibility_half.frag":
                                           "shaders/post_opaque_composite.frag"),
-                    fs::path(),variant)
+                    fs::path(),variant,fused_ssao && !half_sun)
     , color_image(gl::get_uniform_location(the_program, "color_image"))
     , emissive_image(gl::get_uniform_location(the_program, "emissive_image"))
     , occlusion_image(gl::get_uniform_location(the_program, "occlusion_image"))

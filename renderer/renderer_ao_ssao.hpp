@@ -21,6 +21,7 @@ namespace jkgm {
         ssao_occlusion_buffer ssao_occlusionbuffer;
         ssao_occlusion_buffer ssao_occlusionbuffer2;
         bool half_resolution_requested=false;
+        bool fused_requested=false,fused_active=false;
         std::unique_ptr<ssao_occlusion_buffer> half_raw,half_blurred;
         gl::texture ssao_noise_texture;
         std::vector<point<3, float>> ssao_kernel;
@@ -32,5 +33,10 @@ namespace jkgm {
                                  gl::texture_view normal_tex,
                                  gl::texture_view depth_tex) override;
         gl::texture_view get_ssao_texture() const override;
+        void request_fused_reconstruction(bool requested) override {
+            fused_requested=requested;
+        }
+        bool uses_fused_reconstruction() const override { return fused_active; }
+        gl::texture_view get_composite_ssao_texture() const override;
     };
 }

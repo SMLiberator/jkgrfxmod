@@ -170,6 +170,11 @@ namespace jkgm {
             game_post_opaque_no_sun_program,game_post_opaque_no_spotlight_program,
             game_post_opaque_no_direct_light_program;
         std::unique_ptr<shaders::game_post_opaque_composite_shader>
+            game_post_opaque_fused_ao_program,
+            game_post_opaque_fused_ao_no_sun_program,
+            game_post_opaque_fused_ao_no_spotlight_program,
+            game_post_opaque_fused_ao_no_direct_light_program;
+        std::unique_ptr<shaders::game_post_opaque_composite_shader>
             game_post_opaque_half_sun_program;
         std::unique_ptr<shaders::spotlight_shadow_depth_shader> spotlight_shadow_depth_program;
         shaders::game_transparency_pass_shader game_transparency_pass_program;

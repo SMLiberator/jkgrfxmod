@@ -49,6 +49,7 @@ namespace jkgm {
         bool enable_sector_crossing_lighting = false; // experimental 3DO sector light/CMP/tint
         bool experimental_sector_crossing_vertex = false; // A/B: vertex instead of fragment sector selection
         bool enable_ssao = true;
+        bool experimental_ssao_fused_reconstruction = false;
         bool enable_gbuffer_packing = true; // consolidated compact G-buffer; false=legacy A/B (restart required)
         bool retain_hom_pixels = true; // vanilla JK HOM default; false = Clear Display
         bool enable_parallax = true;

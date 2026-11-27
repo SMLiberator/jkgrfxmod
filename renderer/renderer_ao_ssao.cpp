@@ -100,6 +100,7 @@ void jkgm::renderer_ao_ssao::update_ssao_texture(opengl_state *ogs,
     // chooses the nearest valid surface from its 2x2 source footprint.
     // Packed half-res AO keeps that surface's depth/normal for edge-aware
     // filtering without extra G-buffer lookups in the blur stage.
+    fused_active=false;
     bool const half=half_resolution_requested && half_raw && half_blurred &&
         ogs->game_post_ssao_half_program &&
         ogs->post_ssao_half_blur_program &&
@@ -136,8 +137,13 @@ void jkgm::renderer_ao_ssao::update_ssao_texture(opengl_state *ogs,
         gl::draw_elements(gl::element_type::triangles,
                           ogs->postmdl.num_indices,gl::index_type::uint32);
 
-        // The existing opaque composite still consumes the identical
-        // full-resolution single-channel AO texture.
+        // The fused compositor consumes the packed blur directly. Only
+        // request this on frames without a full-resolution AO consumer.
+        if(fused_requested) {
+            fused_active=true;
+            return;
+        }
+        // The ordinary opaque composite and decals consume full-res AO.
         gl::bind_framebuffer(gl::framebuffer_bind_target::any,
                              ssao_occlusionbuffer.fbo);
         gl::set_viewport(ssao_occlusionbuffer.viewport);
@@ -208,4 +214,10 @@ void jkgm::renderer_ao_ssao::update_ssao_texture(opengl_state *ogs,
 jkgm::gl::texture_view jkgm::renderer_ao_ssao::get_ssao_texture() const
 {
     return ssao_occlusionbuffer.tex;
+}
+
+jkgm::gl::texture_view jkgm::renderer_ao_ssao::get_composite_ssao_texture() const
+{
+    if(fused_active)return half_blurred->tex;
+    return get_ssao_texture();
 }

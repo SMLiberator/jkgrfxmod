@@ -15,6 +15,12 @@ namespace jkgm {
                                          gl::texture_view normal_tex,
                                          gl::texture_view depth_tex) = 0;
         virtual gl::texture_view get_ssao_texture() const = 0;
+        // Only the opaque compositor may consume packed half-resolution AO.
+        virtual void request_fused_reconstruction(bool) {}
+        virtual bool uses_fused_reconstruction() const { return false; }
+        virtual gl::texture_view get_composite_ssao_texture() const {
+            return get_ssao_texture();
+        }
     };
 
     std::unique_ptr<renderer_ao> create_renderer_ao(config const *the_config,

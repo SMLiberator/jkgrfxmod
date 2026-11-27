@@ -11985,6 +11985,15 @@ namespace jkgm {
                     composite_variant="no_spotlight";
                 }
             }
+            if(frame_ao->uses_fused_reconstruction()) {
+                if(selected==ogs->game_post_opaque_no_sun_program.get())
+                    selected=ogs->game_post_opaque_fused_ao_no_sun_program.get();
+                else if(selected==ogs->game_post_opaque_no_spotlight_program.get())
+                    selected=ogs->game_post_opaque_fused_ao_no_spotlight_program.get();
+                else if(selected==ogs->game_post_opaque_no_direct_light_program.get())
+                    selected=ogs->game_post_opaque_fused_ao_no_direct_light_program.get();
+                else selected=ogs->game_post_opaque_fused_ao_program.get();
+            }
             auto &prog=*selected;
             prog.use_program();
             prog.set_color_sampler(0);
@@ -12256,6 +12265,7 @@ namespace jkgm {
                              sun_caustic_target->valid[1]?1:0,
                          " radial_fog=",radial_fog_active?1:0,
                          " composite_variant=",composite_variant,
+                         " ssao_fused=",frame_ao->uses_fused_reconstruction()?1:0,
                          " spotlight_candidates=",spots.size(),
                          " shared_sun_projections=",the_config->experimental_opaque_shared_sun_projections &&
                              sun_lit && cam.valid?1:0,
@@ -12279,7 +12289,8 @@ namespace jkgm {
                              frame_screen->get_resolved_depth_texture());
 
             gl::set_active_texture_unit(2);
-            gl::bind_texture(gl::texture_bind_target::texture_2d, frame_ao->get_ssao_texture());
+            gl::bind_texture(gl::texture_bind_target::texture_2d,
+                             frame_ao->get_composite_ssao_texture());
 
             gl::set_active_texture_unit(1);
             gl::bind_texture(gl::texture_bind_target::texture_2d,
@@ -12528,6 +12539,13 @@ namespace jkgm {
             if(detail_timing)opaque_detail_gpu_queries.timestamp(0U,false);
 
             if(detail_timing)opaque_detail_gpu_queries.timestamp(1U,true);
+            // Projected decals sample the resolved full-resolution AO later
+            // in the same frame. Keep the original path if any are queued.
+            bool const fuse_ao=ogs->game_post_opaque_fused_ao_program &&
+                (!the_config->enable_decals ||
+                 std::none_of(frame_gpu_3do_instances.begin(),frame_gpu_3do_instances.end(),
+                    [](gpu_3do_instance const &inst){return inst.is_projected_decal;}));
+            frame_ao->request_fused_reconstruction(fuse_ao);
             frame_ao->update_ssao_texture(ogs.get(),
                                           frame_screen->get_resolved_normal_texture(),
                                           frame_screen->get_resolved_depth_texture());

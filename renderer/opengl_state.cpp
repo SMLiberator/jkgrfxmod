@@ -440,6 +440,26 @@ jkgm::opengl_state::opengl_state::opengl_state(size<2, int> screen_res,
             shaders::game_post_opaque_composite_shader>(data_root,false,
                 material_shader_variant::composite_no_direct_light);
     }
+    // Compile separate fused programs only for the A/B experiment, so
+    // disabled and decal/scissor fallback frames retain the original code.
+    if(the_config->enable_ssao && the_config->experimental_ssao_fused_reconstruction) {
+        using variant=material_shader_variant;
+        auto make_fused=[&](variant v) {
+            return std::make_unique<shaders::game_post_opaque_composite_shader>(
+                data_root,false,v,true);
+        };
+        game_post_opaque_fused_ao_program=make_fused(
+            the_config->experimental_opaque_shared_sun_projections
+                ?variant::composite_shared_sun:variant::full);
+        if(the_config->experimental_opaque_composite_specialization) {
+            game_post_opaque_fused_ao_no_sun_program=make_fused(variant::composite_no_sun);
+            game_post_opaque_fused_ao_no_spotlight_program=make_fused(
+                the_config->experimental_opaque_shared_sun_projections
+                    ?variant::composite_no_spotlight_shared_sun:variant::composite_no_spotlight);
+            game_post_opaque_fused_ao_no_direct_light_program=make_fused(
+                variant::composite_no_direct_light);
+        }
+    }
     if(the_config->enable_sun && the_config->enable_sun_shadows) {
         game_post_opaque_half_sun_program=std::make_unique<
             shaders::game_post_opaque_composite_shader>(data_root,true);

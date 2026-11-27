@@ -529,11 +529,75 @@ bool has_opaque_coverage(ivec2 p)
     return gbuffer_unpack_normal(texelFetch(normal_image,p,0)).a>0.5;
 }
 
+#ifdef JKGM_COMPOSITE_FUSED_SSAO
+// Same bilateral reconstruction as post_ssao_half_upsample.frag, but
+// reuse the compositor's receiver depth/normal and avoid the R16F roundtrip.
+vec3 ssao_decode_oct(vec2 e)
+{
+    vec2 f=e*2.0-1.0;
+    vec3 n=vec3(f,1.0-abs(f.x)-abs(f.y));
+    if(n.z<0.0)n.xy=(vec2(1.0)-abs(n.yx))*sign(n.xy);
+    return normalize(n);
+}
+float reconstruct_half_ssao(sampler2D source_image, ivec2 full_dims,
+                            ivec2 p, float d, vec4 encoded_normal)
+{
+    if(d<=0.0 || d>=256.0) {
+        return 0.0;
+    }
+    ivec2 dims=textureSize(source_image,0);
+    vec2 low_position=(vec2(p)+0.5)*vec2(dims)/vec2(full_dims)-0.5;
+    ivec2 begin=ivec2(floor(low_position));
+    vec2 f=fract(low_position);
+    // Four zero AO taps reconstruct to zero regardless of edge weights.
+    // Load each once and avoid G-buffer normal access and all bilateral
+    // arithmetic on unoccluded regions.
+    ivec2 hi=dims-1;
+    vec4 taps[4];
+    taps[0]=texelFetch(source_image,clamp(begin,ivec2(0),hi),0);
+    taps[1]=texelFetch(source_image,clamp(begin+ivec2(1,0),ivec2(0),hi),0);
+    taps[2]=texelFetch(source_image,clamp(begin+ivec2(0,1),ivec2(0),hi),0);
+    taps[3]=texelFetch(source_image,clamp(begin+ivec2(1,1),ivec2(0),hi),0);
+    if(all(equal(vec4(taps[0].r,taps[1].r,taps[2].r,taps[3].r),vec4(0.0)))) {
+        return 0.0;
+    }
+    vec3 raw_normal=gbuffer_unpack_normal(encoded_normal).rgb;
+    if(dot(raw_normal,raw_normal)<0.0001) {
+        return 0.0;
+    }
+    vec3 N=gbuffer_packing!=0?raw_normal:normalize(raw_normal);
+    float total=0.0,weights=0.0;
+    float tolerance=max(0.2,d*0.0125);
+    for(int y=0;y<2;++y)for(int x=0;x<2;++x) {
+        vec4 s=taps[y*2+x];
+        if(s.g<=0.0 || s.g>=256.0)continue;
+        float difference=abs(d-s.g);
+        if(difference>=tolerance)continue;
+        float ndot=dot(N,ssao_decode_oct(s.ba));
+        if(ndot<=0.75)continue;
+        float geometric=(1.0-smoothstep(0.0,tolerance,difference))*
+                        smoothstep(0.75,1.0,ndot);
+        float bilinear=(x==0?1.0-f.x:f.x)*(y==0?1.0-f.y:f.y);
+        float w=geometric*bilinear;
+        total+=s.r*w;
+        weights+=w;
+    }
+    // No matched low-res surface: avoid unrelated AO rather than staining
+    // silhouettes. Thin geometry may lose AO, but never inherits a wall's.
+    return weights>0.00001?total/weights:0.0;
+}
+#endif
+
 void main()
 {
     ivec2 tc=ivec2(gl_FragCoord.xy);
     float depth=texelFetch(depth_image,tc,0).r;
+#ifdef JKGM_COMPOSITE_FUSED_SSAO
+    vec4 encoded_normal=texelFetch(normal_image,tc,0);
+    bool covered=floor(encoded_normal.a*3.0+0.5)>0.5;
+#else
     bool covered=has_opaque_coverage(tc);
+#endif
     // Preserve the previous scene only if NO opaque fragment was drawn.
     // In particular, a skybox beyond 65504/32 world units can overflow
     // half-float scene depth while its color and coverage are still valid.
@@ -544,7 +608,12 @@ void main()
 
     vec4 albedo = texelFetch(color_image, tc, 0);
     vec4 emissive = texelFetch(emissive_image, tc, 0);
+#ifdef JKGM_COMPOSITE_FUSED_SSAO
+    float occlusion=1.0-reconstruct_half_ssao(occlusion_image,
+        textureSize(depth_image,0),tc,depth,encoded_normal);
+#else
     float occlusion = 1.0 - texelFetch(occlusion_image, tc, 0).r;
+#endif
 
 
     // The G-buffer holds un-fogged pigment. AO applies only to that
@@ -594,7 +663,11 @@ void main()
     float sun_fade=(sun_lighting_active!=0 && depth>0.0 && depth<65500.0)
         ? sun_range_fade(depth/32.0) : 0.0;
     if(sun_fade>0.0) {
+#ifdef JKGM_COMPOSITE_FUSED_SSAO
+        vec4 normal_pixel=gbuffer_unpack_normal(encoded_normal);
+#else
         vec4 normal_pixel=gbuffer_unpack_normal(texelFetch(normal_image,tc,0));
+#endif
         vec3 vn=normal_pixel.rgb;
         if(dot(vn,vn)>0.0001) {
             vec3 normal=normalize(camera_right.xyz*(vn.x/camera_right.w)+
