@@ -128,6 +128,7 @@ namespace jkgm {
         bool experimental_gpu_3do_indexed_instancing = true; // collect exact mesh range batches directly
         bool enable_gpu_3do_instancing = false; // opt-in exact opaque 3DO batches
         bool experimental_multithreading = false; // opt-in CPU-only 3DO visibility workers
+        bool experimental_gpu_3do_parallel_compact_visibility = false; // worker-built ordered visible ranges for sparse intersecting meshes
         bool experimental_half_res_fluid_sprites = false; // opt-in half-size fluid SPR layer
         unsigned int fluid_sprite_layer_budget = 0U; // 0=unlimited; 1..255 surviving layers per half-size pixel
         bool enable_saber_trails = true; // GPU-cached saber fan during marker 4/5 collision windows

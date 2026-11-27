@@ -18,12 +18,17 @@ struct gpu_3do_parallel_visibility {
     gpu_3do_matrix34 modelview{};
     std::array<float,3> local_eye{};
     std::vector<gpu_3do_cull_reason> groups;
+    // Preserve the original indexed flags for specialized collection and
+    // fallback. The optional compact list follows cached opaque order.
+    std::vector<size_t> visible_opaque_groups;
+    size_t compact_frustum_rejected=0U,compact_backface_rejected=0U;
+    bool compact_ready=false;
     bool ready=false,mesh_outside=false,mesh_inside=false;
     size_t group_frustum_tests_avoided=0U;
     bool has_local_eye=false,reversed_winding=false;
 };
 
-// Reused per-Thing output owns only group cull flags; it never modifies
+// Reused per-Thing output owns cull flags and optional ordered indices; it never modifies
 // shared geometry. cached_group_bounds() uses std::call_once internally.
 inline void prepare_gpu_3do_parallel_visibility(
     gpu_3do_instance const &inst,
@@ -31,9 +36,13 @@ inline void prepare_gpu_3do_parallel_visibility(
     gpu_3do_native_frustum const &frustum,
     bool have_perspective_frustum,
     gpu_3do_parallel_visibility &out,
-    bool accept_whole_mesh=false,bool compact_backfaces=false)
+    bool accept_whole_mesh=false,bool compact_backfaces=false,
+    bool compact_visibility=false)
 {
     out.ready=false;
+    out.compact_ready=false;
+    out.visible_opaque_groups.clear();
+    out.compact_frustum_rejected=out.compact_backface_rejected=0U;
     out.mesh_outside=false;
     out.mesh_inside=false;
     out.group_frustum_tests_avoided=0U;
@@ -73,6 +82,20 @@ inline void prepare_gpu_3do_parallel_visibility(
                 reason=gpu_3do_cull_reason::backface;
         }
         out.groups[i]=reason;
+    }
+    // Leave fully contained meshes on the existing specialized path.
+    // For sparse intersecting meshes, move the second visibility walk
+    // onto the workers and avoid expensive serial metadata visits.
+    if(compact_visibility && !out.mesh_inside && geo.groups.size()>=32U) {
+        for(auto index:geo.cached_opaque_group_order()) {
+            auto const reason=out.groups[index];
+            if(reason==gpu_3do_cull_reason::frustum)
+                ++out.compact_frustum_rejected;
+            else if(reason==gpu_3do_cull_reason::backface)
+                ++out.compact_backface_rejected;
+            else out.visible_opaque_groups.push_back(index);
+        }
+        out.compact_ready=out.visible_opaque_groups.size()<=geo.groups.size()/2U;
     }
     out.ready=true;
 }

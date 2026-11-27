@@ -113,6 +113,30 @@ int main() {
         }
     }
 
+    // Sparse intersecting geometry must preserve exact original-index
+    // flags AND the collector's opaque ordering in the compact list.
+    auto sparse_geo=std::make_shared<gpu_3do_geometry>(*geo);
+    sparse_geo->groups.clear();
+    for(size_t i=0;i<32U;++i)
+        sparse_geo->groups.push_back(geo->groups[i%4U]);
+    auto sparse=base;
+    sparse.geometry=sparse_geo;
+    gpu_3do_parallel_visibility compact_result{},plain_result{};
+    prepare_gpu_3do_parallel_visibility(sparse,identity(),f,true,plain_result,true,true);
+    prepare_gpu_3do_parallel_visibility(sparse,identity(),f,true,compact_result,true,true,true);
+    assert(compact_result.compact_ready && !compact_result.mesh_inside);
+    assert(compact_result.groups==plain_result.groups);
+    assert(compact_result.compact_frustum_rejected==8U);
+    assert(compact_result.compact_backface_rejected==8U);
+    std::vector<size_t> expected_visible;
+    for(auto index:sparse_geo->cached_opaque_group_order())
+        if(plain_result.groups[index]==gpu_3do_cull_reason::visible)
+            expected_visible.push_back(index);
+    assert(expected_visible.size()==16U);
+    assert(compact_result.visible_opaque_groups==expected_visible);
+    prepare_gpu_3do_parallel_visibility(sparse,identity(),f,true,compact_result,true,true,false);
+    assert(!compact_result.compact_ready && compact_result.visible_opaque_groups.empty());
+
     // Acceptance must preserve every cull reason for contained and
     // intersecting meshes, including double-sided and back-facing groups.
     gpu_3do_parallel_visibility accepted{};

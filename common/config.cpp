@@ -641,6 +641,10 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             j.at("experimental_multithreading").get_to(
                 rv->experimental_multithreading);
         }
+        if(j.contains("experimental_gpu_3do_parallel_compact_visibility")) {
+            j.at("experimental_gpu_3do_parallel_compact_visibility").get_to(
+                rv->experimental_gpu_3do_parallel_compact_visibility);
+        }
         if(j.contains("experimental_half_res_fluid_sprites")) {
             j.at("experimental_half_res_fluid_sprites").get_to(
                 rv->experimental_half_res_fluid_sprites);

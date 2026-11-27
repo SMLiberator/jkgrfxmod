@@ -1634,6 +1634,9 @@ namespace jkgm {
                      " groups_avg=",profile_window.gpu_parallel_visibility_groups/frames,
                      " wall_us_avg=",profile_window.gpu_parallel_visibility_wall_us/frames,
                      " failures=",profile_window.gpu_parallel_visibility_failures,
+                     " compact_visibility=",the_config->experimental_gpu_3do_parallel_compact_visibility?1:0,
+                     " compact_meshes_avg=",profile_window.gpu_parallel_compact_meshes/frames,
+                     " compact_skipped_groups_avg=",profile_window.gpu_parallel_compact_skipped/frames,
                      " NOTE=main_camera_CPU_group_cull_prepass;included_in_collect_cpu;serial_below_threshold");
             LOG_INFO("PERF gpu_3do instancing_CPU_us_avg prep=",
                      profile_window.gpu_instancing_prepare_us/frames,
@@ -5744,7 +5747,8 @@ namespace jkgm {
                         prepared_parallel=workers.execute(
                             [&,indices=&prepared_indices,visibility=&prepared_visibility,
                              accept_mesh=the_config->experimental_gpu_3do_whole_mesh_acceptance,
-                             compact=the_config->experimental_gpu_3do_compact_backfaces]
+                             compact=the_config->experimental_gpu_3do_compact_backfaces,
+                             compact_visibility=the_config->experimental_gpu_3do_parallel_compact_visibility]
                             (unsigned lane) {
                             size_t count=0U;
                             for(size_t k=lane;k<indices->size();
@@ -5753,7 +5757,7 @@ namespace jkgm {
                                 prepare_gpu_3do_parallel_visibility(
                                     instances[index],native_view,native_frustum,
                                     have_perspective_frustum,
-                                    (*visibility)[index],accept_mesh,compact);
+                                    (*visibility)[index],accept_mesh,compact,compact_visibility);
                                 ++count;
                             }
                             completed[lane]=count;
@@ -6106,6 +6110,21 @@ namespace jkgm {
                             }
                             remaining=&fast_fallback;
                         }
+                    }
+                }
+                // This list is already in the same opaque visit order.
+                // Alpha tie keys remain based on ORIGINAL group indices.
+                // Never override the specialized collector's remaining list.
+                if(!remaining && opaque_order && parallel && parallel->compact_ready) {
+                    remaining=&parallel->visible_opaque_groups;
+                    if(gpu_profiling) {
+                        auto const f=parallel->compact_frustum_rejected;
+                        auto const b=parallel->compact_backface_rejected;
+                        profile_frame.gpu_groups_considered+=f+b;
+                        profile_frame.gpu_groups_frustum_culled+=f;
+                        profile_frame.gpu_groups_backface_culled+=b;
+                        ++profile_frame.gpu_parallel_compact_meshes;
+                        profile_frame.gpu_parallel_compact_skipped+=f+b;
                     }
                 }
                 size_t const visit_count=remaining?remaining->size():groups.size();
