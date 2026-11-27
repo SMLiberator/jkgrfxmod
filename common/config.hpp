@@ -64,6 +64,7 @@ namespace jkgm {
         bool experimental_native_texture_compression_bc1 = false; // opaque native JK albedo only
         bool experimental_texture_compression_bc3 = false; // alpha-bearing replacement albedo
         bool experimental_native_texture_compression_bc3 = false; // alpha-bearing native JK albedo
+        bool experimental_native_texture_deduplication = false; // reuse identical native albedo uploads
         bool retro_mode = false; // CMP #0 RGB8 post-quantization, no dithering
         bool enable_posterized_lighting = false;
         bool enable_vsync = false;

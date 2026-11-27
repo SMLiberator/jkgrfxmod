@@ -10,12 +10,18 @@
 #include <array>
 #include <chrono>
 #include <set>
+#include <tuple>
 #include <algorithm>
 #include <numeric>
 #include <random>
 
 namespace jkgm {
     namespace {
+        // The replacement MD5 is not by itself a decoded-pixel identity:
+        // the same 16-bit word can mean RGB565 or RGBA5551. Blend policy
+        // also participates because it controls compression eligibility.
+        using native_albedo_key=std::tuple<md5,bool,bool>;
+
         struct srgb_texture {
             size<2, int> dims;
             gl::texture handle;
@@ -23,6 +29,7 @@ namespace jkgm {
             bool nonopaque_alpha = false;
             gl::texture_internal_format storage=gl::texture_internal_format::srgb_a8;
             bool native_albedo = false;
+            std::optional<native_albedo_key> native_key;
             uint64_t compressed_bytes = 0;
             std::optional<fs::path> origin_filename;
 
@@ -121,6 +128,10 @@ namespace jkgm {
 
             std::vector<srgb_texture> srgb_textures;
             std::map<fs::path, size_t> file_to_srgb_texture_map;
+            std::map<native_albedo_key,srgb_texture_id> native_albedo_map;
+            uint64_t native_dedup_live_hits=0,native_dedup_idle_hits=0;
+            uint64_t native_dedup_misses=0,native_dedup_evictions=0;
+            uint64_t native_dedup_avoided_rgba_bytes=0;
 
             std::vector<linear_texture> linear_textures;
             std::map<fs::path, size_t> file_to_linear_texture_map;
@@ -204,6 +215,10 @@ namespace jkgm {
                     " eligible_albedo_paths=",compression_albedo_paths.size(),
                     " NOTE=alpha_bearing_albedo_only;driver_encoded;sRGB");
 
+                LOG_INFO("TEXTURE native_deduplication=",
+                    the_config->experimental_native_texture_deduplication?1:0,
+                    " NOTE=signature_and_decode_and_blend_policy;no_extra_texture_pinning");
+
                 std::vector<size_t> shuffled_materials;
                 shuffled_materials.resize(raw_materials.size());
                 std::iota(shuffled_materials.begin(), shuffled_materials.end(), size_t(0U));
@@ -281,6 +296,13 @@ namespace jkgm {
                             file_to_srgb_texture_map.erase(*em.origin_filename);
                             em.origin_filename.reset();
                         }
+                        // The idle GL object may now receive different pixels.
+                        // Remove its old content identity before any upload.
+                        if(em.native_key) {
+                            native_albedo_map.erase(*em.native_key);
+                            em.native_key.reset();
+                            ++native_dedup_evictions;
+                        }
 
                         em.refct = 0;
 
@@ -298,11 +320,40 @@ namespace jkgm {
                 return create_srgb_texture(dims,data,false);
             }
 
+            std::optional<srgb_texture_id> find_native_albedo_texture(
+                md5 const &signature,bool rgba5551,bool normal_blend) override
+            {
+                if(!the_config->experimental_native_texture_deduplication)
+                    return std::nullopt;
+                native_albedo_key const key{signature,rgba5551,normal_blend};
+                auto const it=native_albedo_map.find(key);
+                if(it==native_albedo_map.end()) {
+                    ++native_dedup_misses;
+                    return std::nullopt;
+                }
+                auto &em=at(srgb_textures,it->second);
+                // Each caller owns an independent reference, even when the
+                // same underlying image is used by many D3D material handles.
+                if(em.refct>0)++native_dedup_live_hits;
+                else ++native_dedup_idle_hits;
+                ++em.refct;
+                native_dedup_avoided_rgba_bytes+=dims_to_bytes(em.dims);
+                return it->second;
+            }
+
             srgb_texture_id create_native_albedo_texture(size<2,int> const &dims,
                                                         span<char const> data,
+                                                        md5 const &signature,
+                                                        bool rgba5551,
                                                         bool normal_blend) override
             {
-                return create_srgb_texture(dims,data,normal_blend,true);
+                auto const id=create_srgb_texture(dims,data,normal_blend,true);
+                if(the_config->experimental_native_texture_deduplication) {
+                    auto &em=at(srgb_textures,id);
+                    em.native_key=native_albedo_key{signature,rgba5551,normal_blend};
+                    native_albedo_map.emplace(*em.native_key,id);
+                }
+                return id;
             }
 
             srgb_texture_id create_srgb_texture(size<2,int> const &dims,
@@ -613,6 +664,14 @@ namespace jkgm {
                     " native_bc3_fallbacks_total=",native_bc3_fallbacks,
                     " native_bc3_upload_us_total=",native_bc3_upload_us,
                     " NOTE=pooled_and_referenced;mip_payload_not_driver_overhead;upload_wall_time");
+                if(the_config->experimental_native_texture_deduplication)
+                    LOG_INFO("PERF native_texture_dedup entries=",native_albedo_map.size(),
+                        " live_hits_total=",native_dedup_live_hits,
+                        " idle_hits_total=",native_dedup_idle_hits,
+                        " misses_total=",native_dedup_misses,
+                        " evictions_total=",native_dedup_evictions,
+                        " avoided_rgba_upload_bytes_total=",native_dedup_avoided_rgba_bytes,
+                        " NOTE=logical_level0_bytes;not_GPU_transfer_measurement");
             }
 
             gl::texture_view get_texture_handle(srgb_texture_id id) const override

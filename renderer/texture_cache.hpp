@@ -23,8 +23,17 @@ namespace jkgm {
                                                                 span<char const> data) = 0;
         // Explicit native albedo entry point. Generic buffers (palette
         // masks and other generated images) never opt into compression.
+        // A hit retains the texture for the new surface. The signature
+        // already includes dimensions and the original 16-bit source bytes.
+        virtual std::optional<srgb_texture_id> find_native_albedo_texture(
+            md5 const &signature,bool rgba5551,bool normal_blend)
+        {
+            return std::nullopt;
+        }
         virtual srgb_texture_id create_native_albedo_texture(size<2,int> const &dims,
                                                               span<char const> data,
+                                                              md5 const &signature,
+                                                              bool rgba5551,
                                                               bool normal_blend)
         {
             return create_srgb_texture_from_buffer(dims,data);

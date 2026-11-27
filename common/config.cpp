@@ -953,6 +953,9 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("experimental_native_texture_compression_bc3"))
             j.at("experimental_native_texture_compression_bc3").get_to(
                 rv->experimental_native_texture_compression_bc3);
+        if(j.contains("experimental_native_texture_deduplication"))
+            j.at("experimental_native_texture_deduplication").get_to(
+                rv->experimental_native_texture_deduplication);
         if(j.contains("vram_texture_preload_size")) {
             j.at("vram_texture_preload_size").get_to(rv->vram_texture_preload_size);
         }

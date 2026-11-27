@@ -181,30 +181,31 @@ HRESULT WINAPI jkgm::vidmem_texture::Load(LPDIRECT3DTEXTURE a)
         // This material keeps the game's own texture as its albedo: carry on below to convert it.
     }
 
-    // No replacements found (or one that keeps the original albedo). Create standard material.
-    uint16_t const *in_em = (uint16_t const *)src->buffer.data();
-
-    for(auto &out_em : src->conv_buffer) {
-        // Convert from indexed to RGB888
-        if(src->desc.ddpfPixelFormat.dwRGBAlphaBitMask) {
-            // Convert from RGBA5551 to RGBA8888
-            out_em = rgba5551_to_srgb_a8(*in_em);
-            surf->alpha_mode = material_alpha_mode::blend;
+    // No replacement albedo (or a material retaining the original).
+    // Reuse the already computed content signature BEFORE converting pixels.
+    // Texture IDs are shared, not D3D material handles or authored state.
+    bool const rgba5551=src->desc.ddpfPixelFormat.dwRGBAlphaBitMask!=0;
+    bool const normal_blend=surf->blend_mode==material_blend_mode::normal;
+    if(rgba5551)surf->alpha_mode=material_alpha_mode::blend;
+    surf->albedo_map=surf->r->texture_cache->find_native_albedo_texture(
+        sig,rgba5551,normal_blend);
+    if(!surf->albedo_map) {
+        uint16_t const *in_em=(uint16_t const *)src->buffer.data();
+        // The decode policy is uniform for this entire texture.
+        if(rgba5551) {
+            for(auto &out_em:src->conv_buffer)
+                out_em=rgba5551_to_srgb_a8(*in_em++);
         }
         else {
-            // Convert from RGB565 to RGBA8888
-            out_em = rgb565_to_srgb_a8(*in_em);
+            for(auto &out_em:src->conv_buffer)
+                out_em=rgb565_to_srgb_a8(*in_em++);
         }
 
-        ++in_em;
+        surf->albedo_map=surf->r->texture_cache->create_native_albedo_texture(
+            make_size((int)src->desc.dwWidth,(int)src->desc.dwHeight),
+            make_span(src->conv_buffer).as_const_bytes(),
+            sig,rgba5551,normal_blend);
     }
-
-    // Native albedo has its own A/B policy. Keep the original decoded
-    // bytes for alpha classification and do not touch palette masks.
-    surf->albedo_map = surf->r->texture_cache->create_native_albedo_texture(
-        make_size((int)src->desc.dwWidth, (int)src->desc.dwHeight),
-        make_span(src->conv_buffer).as_const_bytes(),
-        surf->blend_mode==material_blend_mode::normal);
 
     if(repl_map.has_value()) {
         // The conversion above resets the alpha mode; put the material's own settings back
