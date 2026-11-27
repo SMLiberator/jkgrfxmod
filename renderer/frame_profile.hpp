@@ -1,5 +1,6 @@
 #pragma once
 // Optional CPU submission timings: NOT GPU elapsed time.
+#include "cpu_render_workers.hpp"
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -144,7 +145,7 @@ struct profile_sample {
   uint64_t gpu_parallel_visibility_failures=0;
   uint64_t gpu_parallel_compact_meshes=0,gpu_parallel_compact_skipped=0;
   uint64_t gpu_parallel_schedule_us=0;
-  std::array<uint64_t,3> gpu_parallel_lane_groups{},gpu_parallel_lane_busy_us{};
+  std::array<uint64_t,cpu_render_workers::max_lanes> gpu_parallel_lane_groups{},gpu_parallel_lane_busy_us{};
   uint64_t gpu_preview_cpu_us=0;
   // Separate opaque/transparent visible 3DO CPU work. These are subsets
   // of gpu_preview_cpu_us (which also includes shader/pipeline setup).

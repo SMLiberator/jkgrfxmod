@@ -1,7 +1,7 @@
 #pragma once
 // Small persistent CPU worker pool for renderer-only, immutable work.
 // No OpenGL context, engine pointers, COG or physics calls are permitted
-// inside a dispatched job. The submitting render thread is the third lane.
+// inside a dispatched job. The submitting render thread is the final lane.
 #include <array>
 #include <cstddef>
 #include <condition_variable>
@@ -16,22 +16,26 @@ namespace jkgm {
 class cpu_render_workers {
 public:
     static constexpr unsigned background_workers=2U;
-    static constexpr unsigned lanes=background_workers+1U;
+    static constexpr unsigned lanes=background_workers+1U; // default layout
+    static constexpr unsigned max_background_workers=5U;
+    static constexpr unsigned max_lanes=max_background_workers+1U;
 
     // Cheap greedy assignment, without sorting or shared atomic work queues.
     // The caller estimates work; this helper does not access engine state.
-    static unsigned weighted_lane(std::array<std::size_t,lanes> &weights,
-                                  std::size_t cost) {
+    template<std::size_t N>
+    static unsigned weighted_lane(std::array<std::size_t,N> &weights,
+                                  std::size_t cost,unsigned active_lanes=unsigned(N)) {
         unsigned lane=0U;
-        for(unsigned i=1U;i<lanes;++i)
+        for(unsigned i=1U;i<active_lanes && i<N;++i)
             if(weights[i]<weights[lane])lane=i;
         weights[lane]+=cost;
         return lane;
     }
 
-    cpu_render_workers() {
+    explicit cpu_render_workers(unsigned count=background_workers)
+        :worker_count_(count<1U?1U:count>max_background_workers?max_background_workers:count) {
         try {
-            for(unsigned i=0;i<background_workers;++i)
+            for(unsigned i=0;i<worker_count_;++i)
                 threads_[i]=std::thread([this,i] { worker_loop(i); });
             available_=true;
         } catch(...) {
@@ -43,6 +47,7 @@ public:
     ~cpu_render_workers() { shutdown(); }
 
     bool available() const { return available_; }
+    unsigned lane_count() const { return worker_count_+1U; }
 
     // Synchronous barrier: all worker reads and writes finish before the
     // render thread processes the prepared results. Failure is reported so
@@ -60,14 +65,14 @@ public:
         wake_.notify_all();
         std::exception_ptr local_failure;
         try {
-            task_(background_workers);
+            task_(worker_count_);
         } catch(...) {
             local_failure=std::current_exception();
         }
         {
             std::unique_lock<std::mutex> lock(mutex_);
             finished_.wait(lock,[this] {
-                return complete_==background_workers;
+                return complete_==worker_count_;
             });
             // Avoid dangling references after the caller returns.
             task_={};
@@ -77,7 +82,8 @@ public:
     }
 
 private:
-    std::thread threads_[background_workers]{};
+    unsigned const worker_count_;
+    std::thread threads_[max_background_workers]{};
     std::mutex mutex_;
     std::condition_variable wake_,finished_;
     std::function<void(unsigned)> task_;
@@ -104,7 +110,7 @@ private:
             }
             lock.lock();
             if(failure && !failure_)failure_=failure;
-            if(++complete_==background_workers)
+            if(++complete_==worker_count_)
                 finished_.notify_one();
         }
     }

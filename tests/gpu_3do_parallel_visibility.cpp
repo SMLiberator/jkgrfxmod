@@ -138,6 +138,36 @@ int main() {
     for(auto const &result:results)
         assert(result.ready && result.groups==expected.groups);
 
+    // Exercise every supported worker count, including the main lane,
+    // repeated barriers, failure recovery and weighted assignment.
+    for(unsigned count=1U;count<=cpu_render_workers::max_background_workers;++count) {
+        cpu_render_workers variable(count);
+        assert(variable.available());
+        auto const active=variable.lane_count();
+        assert(active==count+1U);
+        for(int pass=0;pass<2;++pass) {
+            for(auto &result:results)result.ready=false;
+            std::array<size_t,cpu_render_workers::max_lanes> visited{};
+            assert(variable.execute([&](unsigned lane) {
+                for(size_t i=lane;i<instances.size();i+=active) {
+                    prepare_gpu_3do_parallel_visibility(instances[i],identity(),f,true,results[i]);
+                    ++visited[lane];
+                }
+            }));
+            for(unsigned lane=0;lane<active;++lane)
+                assert(visited[lane]==(instances.size()+active-1U-lane)/active);
+            for(auto const &result:results)
+                assert(result.ready && result.groups==expected.groups);
+        }
+        std::array<size_t,cpu_render_workers::max_lanes> variable_weights{};
+        for(size_t i=0;i<instances.size();++i)
+            assert(cpu_render_workers::weighted_lane(variable_weights,i%7U+1U,active)<active);
+        assert(!variable.execute([&](unsigned lane) {
+            if(lane==active-1U)throw std::runtime_error("render lane failure");
+        }));
+        assert(variable.execute([](unsigned){}));
+    }
+
     // Sparse intersecting geometry must preserve exact original-index
     // flags AND the collector's opaque ordering in the compact list.
     auto sparse_geo=std::make_shared<gpu_3do_geometry>(*geo);

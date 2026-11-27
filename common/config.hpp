@@ -128,6 +128,7 @@ namespace jkgm {
         bool experimental_gpu_3do_indexed_instancing = true; // collect exact mesh range batches directly
         bool enable_gpu_3do_instancing = false; // opt-in exact opaque 3DO batches
         bool experimental_multithreading = false; // opt-in CPU-only 3DO visibility workers
+        int experimental_render_worker_threads = 2; // background workers, 1..5; render thread participates
         bool experimental_gpu_3do_parallel_weighted_schedule = false; // balance estimated group work across visibility lanes
         bool experimental_gpu_3do_parallel_compact_visibility = false; // worker-built ordered visible ranges for sparse intersecting meshes
         bool experimental_half_res_fluid_sprites = false; // opt-in half-size fluid SPR layer

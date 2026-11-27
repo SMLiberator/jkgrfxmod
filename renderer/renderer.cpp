@@ -1626,9 +1626,13 @@ namespace jkgm {
                      " saved_draw_calls_avg=",
                      (profile_window.gpu_sprite_instanced_quads-
                       profile_window.gpu_sprite_instanced_calls)/frames);
+            auto const configured_workers=unsigned(the_config->experimental_render_worker_threads);
+            auto const active_workers=cpu_visibility_workers && cpu_visibility_workers->available()
+                ?cpu_visibility_workers->lane_count()-1U:0U;
             LOG_INFO("PERF gpu_3do multithreading enabled=",
                      the_config->experimental_multithreading?1:0,
-                     " worker_threads=2",
+                     " worker_threads=",configured_workers,
+                     " active_worker_threads=",active_workers,
                      " dispatches=",profile_window.gpu_parallel_visibility_calls,
                      " instances_avg=",profile_window.gpu_parallel_visibility_instances/frames,
                      " groups_avg=",profile_window.gpu_parallel_visibility_groups/frames,
@@ -1638,16 +1642,20 @@ namespace jkgm {
                      " compact_meshes_avg=",profile_window.gpu_parallel_compact_meshes/frames,
                      " compact_skipped_groups_avg=",profile_window.gpu_parallel_compact_skipped/frames,
                      " NOTE=main_camera_CPU_group_cull_prepass;included_in_collect_cpu;serial_below_threshold");
+            auto const lane_average_string=[&](auto const &values) {
+                std::string out;
+                for(unsigned lane=0U;lane<configured_workers+1U && lane<values.size();++lane) {
+                    if(lane)out+="/";
+                    out+=std::to_string(values[lane]/frames);
+                }
+                return out;
+            };
             LOG_INFO("PERF gpu_3do parallel_schedule weighted=",
                      the_config->experimental_gpu_3do_parallel_weighted_schedule?1:0,
                      " schedule_us_avg=",profile_window.gpu_parallel_schedule_us/frames,
-                     " lane_groups_avg=",profile_window.gpu_parallel_lane_groups[0]/frames,
-                     "/",profile_window.gpu_parallel_lane_groups[1]/frames,
-                     "/",profile_window.gpu_parallel_lane_groups[2]/frames,
-                     " lane_busy_us_avg=",profile_window.gpu_parallel_lane_busy_us[0]/frames,
-                     "/",profile_window.gpu_parallel_lane_busy_us[1]/frames,
-                     "/",profile_window.gpu_parallel_lane_busy_us[2]/frames,
-                     " NOTE=worker0/worker1/render_lane;assigned_groups;busy_CPU_wall_time_per_frame");
+                     " lane_groups_avg=",lane_average_string(profile_window.gpu_parallel_lane_groups),
+                     " lane_busy_us_avg=",lane_average_string(profile_window.gpu_parallel_lane_busy_us),
+                     " NOTE=background_workers_then_render_lane;assigned_groups;busy_CPU_wall_time_per_frame");
             LOG_INFO("PERF gpu_3do instancing_CPU_us_avg prep=",
                      profile_window.gpu_instancing_prepare_us/frames,
                      " audit=",profile_window.gpu_instancing_audit_us/frames,
@@ -5724,7 +5732,7 @@ namespace jkgm {
             static thread_local std::vector<gpu_3do_parallel_visibility>
                 prepared_visibility;
             static thread_local std::vector<size_t> prepared_indices;
-            static thread_local std::array<std::vector<size_t>,cpu_render_workers::lanes>
+            static thread_local std::array<std::vector<size_t>,cpu_render_workers::max_lanes>
                 prepared_lane_indices;
             bool prepared_parallel=false;
             if(prepare_both && the_config->experimental_multithreading) {
@@ -5744,7 +5752,8 @@ namespace jkgm {
                 if(prepared_indices.size()>=48U && group_work>=256U) {
                     if(!cpu_visibility_workers)
                         cpu_visibility_workers=
-                            std::make_unique<cpu_render_workers>();
+                            std::make_unique<cpu_render_workers>(
+                                unsigned(the_config->experimental_render_worker_threads));
                     auto &workers=*cpu_visibility_workers;
                     if(workers.available()) {
                         prepared_visibility.resize(instances.size());
@@ -5755,21 +5764,22 @@ namespace jkgm {
                         // the job resolves to the EXECUTING thread's storage.
                         // Capture pointers to the submitting thread's vectors
                         // before dispatch, and retain the synchronous barrier.
-                        std::array<size_t,cpu_render_workers::lanes> completed{};
-                        std::array<size_t,cpu_render_workers::lanes> lane_groups{};
-                        std::array<uint64_t,cpu_render_workers::lanes> lane_busy_us{};
+                        auto const active_lanes=workers.lane_count();
+                        std::array<size_t,cpu_render_workers::max_lanes> completed{};
+                        std::array<size_t,cpu_render_workers::max_lanes> lane_groups{};
+                        std::array<uint64_t,cpu_render_workers::max_lanes> lane_busy_us{};
                         bool const weighted=the_config->experimental_gpu_3do_parallel_weighted_schedule;
                         uint64_t schedule_us=0U;
                         if(weighted) {
                             auto const schedule_begin=gpu_profiling
                                 ?profile_clock::now():profile_clock::time_point{};
                             for(auto &list:prepared_lane_indices)list.clear();
-                            std::array<size_t,cpu_render_workers::lanes> weights{};
+                            std::array<size_t,cpu_render_workers::max_lanes> weights{};
                             for(auto index:prepared_indices) {
                                 // Include a small fixed cost for each mesh's
                                 // modelview, bounds and local-eye preparation.
                                 auto const lane=cpu_render_workers::weighted_lane(
-                                    weights,instances[index].geometry->groups.size()+8U);
+                                    weights,instances[index].geometry->groups.size()+8U,active_lanes);
                                 prepared_lane_indices[lane].push_back(index);
                             }
                             if(gpu_profiling)
@@ -5777,7 +5787,8 @@ namespace jkgm {
                         }
                         prepared_parallel=workers.execute(
                             [&,indices=&prepared_indices,visibility=&prepared_visibility,
-                             lane_indices=&prepared_lane_indices,weighted,profile_workers=gpu_profiling,
+                             lane_indices=&prepared_lane_indices,weighted,active_lanes,
+                             profile_workers=gpu_profiling,
                              accept_mesh=the_config->experimental_gpu_3do_whole_mesh_acceptance,
                              compact=the_config->experimental_gpu_3do_compact_backfaces,
                              compact_visibility=the_config->experimental_gpu_3do_parallel_compact_visibility]
@@ -5785,7 +5796,7 @@ namespace jkgm {
                             auto const begin=profile_workers
                                 ?profile_clock::now():profile_clock::time_point{};
                             auto const &list=weighted?(*lane_indices)[lane]:*indices;
-                            size_t const step=weighted?1U:cpu_render_workers::lanes;
+                            size_t const step=weighted?1U:active_lanes;
                             size_t count=0U,groups=0U;
                             for(size_t k=weighted?0U:lane;k<list.size();k+=step) {
                                 size_t const index=list[k];
@@ -5820,7 +5831,7 @@ namespace jkgm {
                                 prepared_indices.size();
                             profile_frame.gpu_parallel_visibility_groups+=group_work;
                             profile_frame.gpu_parallel_schedule_us+=schedule_us;
-                            for(unsigned lane=0U;lane<cpu_render_workers::lanes;++lane) {
+                            for(unsigned lane=0U;lane<active_lanes;++lane) {
                                 profile_frame.gpu_parallel_lane_groups[lane]+=lane_groups[lane];
                                 profile_frame.gpu_parallel_lane_busy_us[lane]+=lane_busy_us[lane];
                             }
@@ -15394,7 +15405,8 @@ namespace jkgm {
                 if(planar_parallel_work>=512U) {
                     if(!cpu_visibility_workers)
                         cpu_visibility_workers=
-                            std::make_unique<cpu_render_workers>();
+                            std::make_unique<cpu_render_workers>(
+                                unsigned(the_config->experimental_render_worker_threads));
                     auto &workers=*cpu_visibility_workers;
                     if(workers.available()) {
                         planar_model_visibility.resize(planar_models.size());
@@ -15402,14 +15414,15 @@ namespace jkgm {
                             planar_frame_candidates.size(),0U);
                         auto const &cached_world=*world_cache_target;
                         auto const parallel_started=profile_clock::now();
-                        planar_parallel=workers.execute([&](unsigned lane) {
+                        auto const active_lanes=workers.lane_count();
+                        planar_parallel=workers.execute([&,active_lanes](unsigned lane) {
                             for(size_t i=lane;i<planar_models.size();
-                                i+=cpu_render_workers::lanes)
+                                i+=active_lanes)
                                 prepare_reflection_capture_parallel_visibility(
                                     *planar_models[i],view,reflected_frustum,
                                     false,0.0f,planar_model_visibility[i]);
                             for(size_t i=lane;i<planar_frame_candidates.size();
-                                i+=cpu_render_workers::lanes) {
+                                i+=active_lanes) {
                                 auto const &face=planar_frame_candidates[i];
                                 if(face.count==0U || face.passable_adjoin ||
                                    face.sky_flags!=0U ||

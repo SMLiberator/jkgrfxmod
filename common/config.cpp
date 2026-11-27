@@ -641,6 +641,10 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             j.at("experimental_multithreading").get_to(
                 rv->experimental_multithreading);
         }
+        if(j.contains("experimental_render_worker_threads")) {
+            auto const count=j.at("experimental_render_worker_threads").get<int>();
+            rv->experimental_render_worker_threads=count<1?1:count>5?5:count;
+        }
         if(j.contains("experimental_gpu_3do_parallel_weighted_schedule")) {
             j.at("experimental_gpu_3do_parallel_weighted_schedule").get_to(
                 rv->experimental_gpu_3do_parallel_weighted_schedule);
