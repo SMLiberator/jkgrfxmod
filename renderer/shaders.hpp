@@ -15,7 +15,8 @@ namespace jkgm {
         hud_only, emission_only, single_sector_ggx_opaque, single_sector_ggx_alpha,
         composite_no_sun, composite_no_spotlight, composite_no_direct_light,
         composite_shared_sun, composite_no_spotlight_shared_sun,
-        postfx_vertex_constants
+        postfx_vertex_constants, bloom_bilinear, bloom_hierarchy,
+        bloom_bilinear_hierarchy, bloom_scale
     };
 
     class opengl_shader {
@@ -759,6 +760,19 @@ namespace jkgm {
             void set_blur_direction(direction<2, int> dir) override;
         };
 
+        // Optional bloom-only program; leave other Gaussian users untouched.
+        class post_bloom_gauss_shader : public post_gauss_shader {
+        private:
+            gl::uniform_location_id fbuf_image,blur_direction;
+            gl::uniform_location_id coarse_image,coarse_enabled,layer_weight;
+        public:
+            post_bloom_gauss_shader(fs::path const &data_root,int taps,
+                                    bool bilinear,bool hierarchy);
+            void set_fbuf_sampler(int sampler) override;
+            void set_blur_direction(direction<2,int> dir) override;
+            void set_accumulation(int sampler,bool enabled,float weight);
+        };
+
         class post_low_pass_shader : public opengl_shader {
         private:
             gl::uniform_location_id fbuf_image;
@@ -780,7 +794,7 @@ namespace jkgm {
             gl::uniform_location_id hdr_exposure_compensation;
 
         public:
-            explicit post_scale_shader(fs::path const &data_root);
+            explicit post_scale_shader(fs::path const &data_root,bool bloom_fast=false);
 
             void set_fbuf_sampler(int sampler);
             void set_fused_bloom(bool first_pass,int exposure_sampler,

@@ -222,7 +222,8 @@ void jkgm::shaders::translucent_sun_uniforms::set_map(
                 variant==material_shader_variant::single_sector_ggx_alpha ||
                 variant==material_shader_variant::hud_only ||
                 variant==material_shader_variant::emission_only ||
-                variant==material_shader_variant::postfx_vertex_constants;
+                variant==material_shader_variant::postfx_vertex_constants ||
+                variant==material_shader_variant::bloom_scale;
             if(variant!=material_shader_variant::full &&
                (type==gl::shader_type::fragment ||
                 (specialize_vertex && type==gl::shader_type::vertex))) {
@@ -267,6 +268,14 @@ void jkgm::shaders::translucent_sun_uniforms::set_map(
                     define="#define JKGM_SIMPLE_ALPHA 1\n#define JKGM_EMISSION_ONLY 1\n"; break;
                 case material_shader_variant::postfx_vertex_constants:
                     define="#define JKGM_POSTFX_VERTEX_CONSTANTS 1\n"; break;
+                case material_shader_variant::bloom_bilinear:
+                    define="#define JKGM_BLOOM_BILINEAR 1\n"; break;
+                case material_shader_variant::bloom_hierarchy:
+                    define="#define JKGM_BLOOM_HIERARCHY 1\n"; break;
+                case material_shader_variant::bloom_bilinear_hierarchy:
+                    define="#define JKGM_BLOOM_BILINEAR 1\n#define JKGM_BLOOM_HIERARCHY 1\n"; break;
+                case material_shader_variant::bloom_scale:
+                    define="#define JKGM_BLOOM_FAST_SCALE 1\n"; break;
                 default: break;
                 }
                 source.insert(newline+1U,define);
@@ -2298,6 +2307,41 @@ void jkgm::shaders::post_gauss15_shader::set_blur_direction(direction<2, int> di
     gl::set_uniform_vector(blur_direction, dir);
 }
 
+jkgm::shaders::post_bloom_gauss_shader::post_bloom_gauss_shader(
+    fs::path const &data_root,int taps,bool bilinear,bool hierarchy)
+    : post_gauss_shader("post_bloom_gauss"+std::to_string(taps),
+                        data_root/"shaders/postprocess.vert",
+                        data_root/("shaders/post_gauss"+std::to_string(taps)+".frag"),
+                        fs::path(),bilinear
+                            ?(hierarchy?material_shader_variant::bloom_bilinear_hierarchy
+                                       :material_shader_variant::bloom_bilinear)
+                            :material_shader_variant::bloom_hierarchy)
+    , fbuf_image(gl::get_uniform_location(the_program,"fbuf_image"))
+    , blur_direction(gl::get_uniform_location(the_program,"blur_direction"))
+    , coarse_image(gl::get_uniform_location(the_program,"coarse_image"))
+    , coarse_enabled(gl::get_uniform_location(the_program,"coarse_enabled"))
+    , layer_weight(gl::get_uniform_location(the_program,"layer_weight"))
+{
+}
+
+void jkgm::shaders::post_bloom_gauss_shader::set_fbuf_sampler(int sampler)
+{
+    gl::set_uniform_integer(fbuf_image,sampler);
+}
+
+void jkgm::shaders::post_bloom_gauss_shader::set_blur_direction(direction<2,int> dir)
+{
+    gl::set_uniform_vector(blur_direction,dir);
+}
+
+void jkgm::shaders::post_bloom_gauss_shader::set_accumulation(
+    int sampler,bool enabled,float weight)
+{
+    gl::set_uniform_integer(coarse_image,sampler);
+    gl::set_uniform_integer(coarse_enabled,enabled?1:0);
+    gl::set_uniform_float(layer_weight,weight);
+}
+
 jkgm::shaders::post_low_pass_shader::post_low_pass_shader(fs::path const &data_root)
     : opengl_shader("post_low_pass",
                     data_root / "shaders/postprocess.vert",
@@ -2339,10 +2383,13 @@ void jkgm::shaders::post_smoke_composite_shader::set_samplers(
     gl::set_uniform_integer(opaque_depth,depth_sampler);
 }
 
-jkgm::shaders::post_scale_shader::post_scale_shader(fs::path const &data_root)
+jkgm::shaders::post_scale_shader::post_scale_shader(
+    fs::path const &data_root,bool bloom_fast)
     : opengl_shader("post_scale",
                     data_root / "shaders/postprocess.vert",
-                    data_root / "shaders/post_scale.frag")
+                    data_root / "shaders/post_scale.frag",fs::path(),
+                    bloom_fast?material_shader_variant::bloom_scale
+                              :material_shader_variant::full)
     , fbuf_image(gl::get_uniform_location(the_program, "fbuf_image"))
     , fused_bloom_first_pass(gl::get_uniform_location(
         the_program,"fused_bloom_first_pass"))

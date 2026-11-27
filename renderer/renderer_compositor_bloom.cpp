@@ -1,5 +1,6 @@
 #include "renderer_compositor_bloom.hpp"
 #include "math/colors.hpp"
+#include "base/log.hpp"
 #include "opengl_state.hpp"
 #include "frameblend.hpp"
 #include "postfx.hpp"
@@ -19,6 +20,15 @@ void jkgm::renderer_compositor_bloom::end_frame(opengl_state *ogs,
     // Optimized fused bloom and redundant-clear elimination are standard.
     // Scissored FBO draws cannot overwrite all pixels: preserve the safe path.
     bool const full_viewport=glIsEnabled(GL_SCISSOR_TEST)==GL_FALSE;
+    bool const bilinear=full_viewport && bool(ogs->post_bloom_fast_scale);
+    bool const hierarchical=full_viewport && ogs->bloom_hierarchical_accumulation;
+    int const bloom_path=(bilinear?1:0)|(hierarchical?2:0);
+    if(bloom_path!=last_bloom_path) {
+        LOG_INFO("BLOOM active bilinear=",bilinear?1:0,
+                 " hierarchical=",hierarchical?1:0,
+                 " scissored=",full_viewport?0:1);
+        last_bloom_path=bloom_path;
+    }
     if(full_viewport) {
         // A skipped clear is safe only if each pass overwrites ALL pixels.
         // In particular, retained GL blending would otherwise accumulate
@@ -61,11 +71,12 @@ void jkgm::renderer_compositor_bloom::end_frame(opengl_state *ogs,
                 :gl::default_texture);
         gl::set_active_texture_unit(0);
     }
-    ogs->post_scale.use_program();
-    ogs->post_scale.set_fbuf_sampler(0);
+    auto &scale=bilinear?*ogs->post_bloom_fast_scale:ogs->post_scale;
+    scale.use_program();
+    scale.set_fbuf_sampler(0);
     unsigned level=0U;
     for(auto &hdr_stack_em : ogs->bloom_layers.elements) {
-        ogs->post_scale.set_fused_bloom(full_viewport && level==0U,1,
+        scale.set_fused_bloom(full_viewport && level==0U,1,
             adaptive,hdr_enabled(ogs)?ogs->hdr_exposure_compensation:0.0f);
         gl::bind_framebuffer(gl::framebuffer_bind_target::any,
                              hdr_stack_em.a.fbo);
@@ -84,19 +95,26 @@ void jkgm::renderer_compositor_bloom::end_frame(opengl_state *ogs,
     // Blur:
     gl::set_active_texture_unit(0);
 
-    for(auto &hdr_stack_em : ogs->bloom_layers.elements) {
+    auto &layers=ogs->bloom_layers.elements;
+    for(size_t step=0;step<layers.size();++step) {
+        size_t const index=hierarchical?layers.size()-1U-step:step;
+        auto &hdr_stack_em=layers[index];
+        size_t kernel=0;
         shaders::post_gauss_shader *curr_prog = &ogs->post_gauss3;
         switch(hdr_stack_em.taps) {
         case 15:
             curr_prog = &ogs->post_gauss15;
+            kernel=3U;
             break;
 
         case 9:
             curr_prog = &ogs->post_gauss9;
+            kernel=2U;
             break;
 
         case 7:
             curr_prog = &ogs->post_gauss7;
+            kernel=1U;
             break;
 
         default:
@@ -105,8 +123,17 @@ void jkgm::renderer_compositor_bloom::end_frame(opengl_state *ogs,
             break;
         }
 
+        auto *fast=(bilinear || hierarchical)?ogs->post_bloom_gauss[kernel].get():nullptr;
+        if(fast)curr_prog=fast;
         curr_prog->use_program();
         curr_prog->set_fbuf_sampler(0);
+        if(hierarchical) {
+            // Horizontal pass stays unweighted; no texture feedback.
+            fast->set_accumulation(1,false,1.0f);
+            gl::set_active_texture_unit(1);
+            gl::bind_texture(gl::texture_bind_target::texture_2d,gl::default_texture);
+            gl::set_active_texture_unit(0);
+        }
 
         // Blur horizontally
         gl::bind_framebuffer(gl::framebuffer_bind_target::any, hdr_stack_em.b.fbo);
@@ -129,6 +156,16 @@ void jkgm::renderer_compositor_bloom::end_frame(opengl_state *ogs,
             gl::clear({gl::clear_flag::color,gl::clear_flag::depth});
         }
         curr_prog->set_blur_direction(make_direction(0, 1));
+        if(hierarchical) {
+            // Vertical blur writes the weighted current layer plus the
+            // already accumulated coarser image. Distinct source/FBO.
+            bool const has_coarse=index+1U<layers.size();
+            fast->set_accumulation(1,has_coarse,hdr_stack_em.weight);
+            gl::set_active_texture_unit(1);
+            gl::bind_texture(gl::texture_bind_target::texture_2d,
+                has_coarse?gl::texture_view(layers[index+1U].a.tex):gl::default_texture);
+            gl::set_active_texture_unit(0);
+        }
         gl::bind_texture(gl::texture_bind_target::texture_2d, hdr_stack_em.b.tex);
         gl::draw_elements(
             gl::element_type::triangles, ogs->postmdl.num_indices, gl::index_type::uint32);
@@ -176,12 +213,18 @@ void jkgm::renderer_compositor_bloom::end_frame(opengl_state *ogs,
     for(int i = 0; i < shaders::post_to_srgb_shader::num_bloom_layers; ++i) {
         auto const &hdr_stack_em = ogs->bloom_layers.elements.at(i);
 
-        bloom_samplers.at(i) = curr_sampler;
-        gl::set_active_texture_unit(curr_sampler);
-        gl::bind_texture(gl::texture_bind_target::texture_2d, hdr_stack_em.a.tex);
-        ++curr_sampler;
-
-        bloom_weights.at(i) = hdr_stack_em.weight;
+        if(hierarchical && i!=0) {
+            // Existing uniform-zero branches skip all unused layer fetches.
+            bloom_samplers.at(i)=1;
+            bloom_weights.at(i)=0.0f;
+        }
+        else {
+            bloom_samplers.at(i) = curr_sampler;
+            gl::set_active_texture_unit(curr_sampler);
+            gl::bind_texture(gl::texture_bind_target::texture_2d, hdr_stack_em.a.tex);
+            ++curr_sampler;
+            bloom_weights.at(i) = hierarchical?1.0f:hdr_stack_em.weight;
+        }
     }
 
     ogs->post_to_srgb.set_bloom_samplers(make_span(bloom_samplers));

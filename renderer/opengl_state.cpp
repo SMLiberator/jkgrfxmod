@@ -431,6 +431,20 @@ jkgm::opengl_state::opengl_state::opengl_state(size<2, int> screen_res,
     LOG_INFO("POSTFX vertex_constants=",
              the_config->experimental_postfx_vertex_constants?1:0,
              " grain_style=",the_config->experimental_film_grain_style);
+    bool const bloom_bilinear=the_config->experimental_bloom_bilinear_filters;
+    bloom_hierarchical_accumulation=
+        the_config->experimental_bloom_hierarchical_accumulation;
+    LOG_INFO("BLOOM bilinear=",bloom_bilinear?1:0,
+             " hierarchical=",bloom_hierarchical_accumulation?1:0);
+    if(bloom_bilinear)
+        post_bloom_fast_scale=std::make_unique<shaders::post_scale_shader>(
+            data_root,true);
+    if(bloom_bilinear || bloom_hierarchical_accumulation) {
+        constexpr int taps[]={3,7,9,15};
+        for(size_t i=0;i<post_bloom_gauss.size();++i)
+            post_bloom_gauss[i]=std::make_unique<shaders::post_bloom_gauss_shader>(
+                data_root,taps[i],bloom_bilinear,bloom_hierarchical_accumulation);
+    }
     if(the_config->experimental_film_grain_style&1) {
         // Sixteen independent 256x256 white-noise tiles in a 1024x1024
         // single-channel linear atlas. No frame uploads or mip generation.

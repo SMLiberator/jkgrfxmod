@@ -90,6 +90,12 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             j.at("experimental_postfx_vertex_constants").get_to(
                 rv->experimental_postfx_vertex_constants);
         }
+        if(j.contains("experimental_bloom_bilinear_filters"))
+            j.at("experimental_bloom_bilinear_filters").get_to(
+                rv->experimental_bloom_bilinear_filters);
+        if(j.contains("experimental_bloom_hierarchical_accumulation"))
+            j.at("experimental_bloom_hierarchical_accumulation").get_to(
+                rv->experimental_bloom_hierarchical_accumulation);
         if(j.contains("experimental_film_grain_style")) {
             j.at("experimental_film_grain_style").get_to(
                 rv->experimental_film_grain_style);

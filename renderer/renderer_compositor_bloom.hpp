@@ -4,6 +4,7 @@
 
 namespace jkgm {
     class renderer_compositor_bloom : public renderer_compositor {
+        int last_bloom_path=-1;
     public:
         void end_frame(opengl_state *ogs,
                        size<2, int> screen_size,

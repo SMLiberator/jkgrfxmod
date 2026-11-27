@@ -186,6 +186,9 @@ namespace jkgm {
         shaders::post_gauss15_shader post_gauss15;
         shaders::post_low_pass_shader post_low_pass;
         shaders::post_scale_shader post_scale;
+        std::unique_ptr<shaders::post_scale_shader> post_bloom_fast_scale;
+        std::array<std::unique_ptr<shaders::post_bloom_gauss_shader>,4> post_bloom_gauss;
+        bool bloom_hierarchical_accumulation=false;
         std::unique_ptr<shaders::post_smoke_composite_shader> post_smoke_composite;
         shaders::post_to_srgb_shader post_to_srgb;
         std::unique_ptr<gl::texture> grain_noise_atlas;
