@@ -141,6 +141,9 @@ void jkgm::renderer_ao_ssao::update_ssao_texture(opengl_state *ogs,
         // request this on frames without a full-resolution AO consumer.
         if(fused_requested) {
             fused_active=true;
+            // begin_compose_opaque_pass only binds its FBO; restore the
+            // full-resolution viewport normally set by the upsample pass.
+            gl::set_viewport(ssao_occlusionbuffer.viewport);
             return;
         }
         // The ordinary opaque composite and decals consume full-res AO.
