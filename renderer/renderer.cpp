@@ -1503,9 +1503,9 @@ namespace jkgm {
                      " between=", profile_window.between_executes_us / frames,
                      " after_last=", profile_window.after_last_execute_us / frames,
                      " frames_with_execute=", profile_window.frames_with_execute, "/", frames);
-            LOG_INFO("PERF execute_buffers calls_avg=", profile_window.execute_calls / frames,
+            { if(the_config->profile_renderer_verbose) LOG_INFO("PERF execute_buffers calls_avg=", profile_window.execute_calls / frames,
                      " vertices_avg=", profile_window.execute_vertices / frames,
-                     " instruction_bytes_avg=", profile_window.execute_instruction_bytes / frames);
+                     " instruction_bytes_avg=", profile_window.execute_instruction_bytes / frames); }
             if(native_3do_available()) {
                 LOG_INFO("PERF native_3do inclusive_us model=",
                          (profile_window.native_model_ns / 1000) / frames,
@@ -1544,20 +1544,20 @@ namespace jkgm {
                          " fallback_mesh_calls_avg=",
                          profile_window.native_mesh_native_calls/frames,
                          " NOTE=model_includes_mesh; engine_excluding_mesh_is_estimate");
-                LOG_INFO("PERF native_3do draw_memo camera_reads_avg=",
+                { if(the_config->profile_renderer_verbose) LOG_INFO("PERF native_3do draw_memo camera_reads_avg=",
                          profile_window.native_mesh_camera_reads/frames,
                          " static_decal_calls_avg=",
                          profile_window.native_static_decal_capture_calls/frames,
                          " static_decal_skipped_avg=",
-                         profile_window.native_static_decal_capture_skipped/frames);
+                         profile_window.native_static_decal_capture_skipped/frames); }
                 if(profile_window.native_prepared_hits || profile_window.native_prepared_misses)
-                    LOG_INFO("PERF native_3do prepared_models hits=",
+                    { if(the_config->profile_renderer_verbose) LOG_INFO("PERF native_3do prepared_models hits=",
                         profile_window.native_prepared_hits,
                         " misses=",profile_window.native_prepared_misses,
                         " empty_hits=",profile_window.native_prepared_empty_hits,
-                        " NOTE=window_totals;empty_hits_subset_of_hits;frame_local_GeoSet_joint_slots");
+                        " NOTE=window_totals;empty_hits_subset_of_hits;frame_local_GeoSet_joint_slots"); }
                 if(profile_window.native_direct_attempts)
-                    LOG_INFO("PERF native_3do direct_model_draw attempts=",
+                    { if(the_config->profile_renderer_verbose) LOG_INFO("PERF native_3do direct_model_draw attempts=",
                              profile_window.native_direct_attempts,
                              " drawn=",profile_window.native_direct_drawn,
                              " rejected=",profile_window.native_direct_rejected,
@@ -1568,7 +1568,7 @@ namespace jkgm {
                              " pose_refreshes=",profile_window.native_direct_pose_refreshes,
                              " rollbacks=",profile_window.native_direct_rollbacks,
                              " queue_us_avg=",(profile_window.native_direct_queue_ns/1000)/frames,
-                             " NOTE=window_totals_except_queue_us;native_mesh_calls_exclude_direct");
+                             " NOTE=window_totals_except_queue_us;native_mesh_calls_exclude_direct"); }
                 if(profile_window.native_audit_models)
                     LOG_INFO("PERF native_3do direct_model_audit models=",
                              profile_window.native_audit_models,
@@ -1651,36 +1651,36 @@ namespace jkgm {
                 }
                 return out;
             };
-            LOG_INFO("PERF gpu_3do parallel_schedule weighted=",
+            { if(the_config->profile_renderer_verbose) LOG_INFO("PERF gpu_3do parallel_schedule weighted=",
                      the_config->experimental_gpu_3do_parallel_weighted_schedule?1:0,
                      " schedule_us_avg=",profile_window.gpu_parallel_schedule_us/frames,
                      " lane_groups_avg=",lane_average_string(profile_window.gpu_parallel_lane_groups),
                      " lane_busy_us_avg=",lane_average_string(profile_window.gpu_parallel_lane_busy_us),
-                     " NOTE=background_workers_then_render_lane;assigned_groups;busy_CPU_wall_time_per_frame");
+                     " NOTE=background_workers_then_render_lane;assigned_groups;busy_CPU_wall_time_per_frame"); }
             LOG_INFO("PERF gpu_3do instancing_CPU_us_avg prep=",
                      profile_window.gpu_instancing_prepare_us/frames,
                      " audit=",profile_window.gpu_instancing_audit_us/frames,
                      " schedule=",profile_window.gpu_instancing_schedule_us/frames,
                      " reorder=",profile_window.gpu_instancing_reorder_us/frames,
                      " NOTE=CPU_us_per_frame;audit_opt_in_sampled_every_30_frames");
-            LOG_INFO("PERF gpu_3do collection_layout hits_avg=",
+            { if(the_config->profile_renderer_verbose) LOG_INFO("PERF gpu_3do collection_layout hits_avg=",
                 profile_window.gpu_collection_layout_hits/frames,
                 " misses_avg=",profile_window.gpu_collection_layout_misses/frames,
                 " direct_members_avg=",profile_window.gpu_collection_direct_members/frames,
-                " NOTE=visible_groups_only;frame_local_exact_mesh_state");
-            LOG_INFO("PERF gpu_3do specialized_collection meshes_avg=",
+                " NOTE=visible_groups_only;frame_local_exact_mesh_state"); }
+            { if(the_config->profile_renderer_verbose) LOG_INFO("PERF gpu_3do specialized_collection meshes_avg=",
                 profile_window.gpu_specialized_collection_meshes/frames,
                 " groups_avg=",profile_window.gpu_specialized_collection_groups/frames,
-                " NOTE=anchored_ranges_backface_rejected_or_inserted");
-            LOG_INFO("PERF gpu_3do simd_backfaces groups_avg=",
+                " NOTE=anchored_ranges_backface_rejected_or_inserted"); }
+            { if(the_config->profile_renderer_verbose) LOG_INFO("PERF gpu_3do simd_backfaces groups_avg=",
                 profile_window.gpu_simd_backface_groups/frames,
                 " uncertain_avg=",profile_window.gpu_simd_backface_uncertain/frames,
-                " NOTE=four_single_plane_groups_per_SSE_block;uncertain_uses_original");
-            LOG_INFO("PERF gpu_3do instance_buffer bytes_avg=",
+                " NOTE=four_single_plane_groups_per_SSE_block;uncertain_uses_original"); }
+            { if(the_config->profile_renderer_verbose) LOG_INFO("PERF gpu_3do instance_buffer bytes_avg=",
                 profile_window.gpu_instance_buffer_bytes/frames,
                 " uploads_avg=",profile_window.gpu_instance_buffer_uploads/frames,
                 " draws_avg=",profile_window.gpu_instance_buffer_draws/frames,
-                " NOTE=affine_rows_and_membership_texels");
+                " NOTE=affine_rows_and_membership_texels"); }
             LOG_INFO("PERF gpu_3do_instancing enabled=",
                       the_config->enable_gpu_3do_instancing?1:0,
                       " calls_avg=",
@@ -1692,14 +1692,14 @@ namespace jkgm {
                        profile_window.gpu_3do_instanced_calls)/frames,
                       " NOTE=actual_instanced_opaque_GL_calls;not_total_GL_savings");
             auto const &rejects=profile_window.sprite_gpu_quad_rejects;
-            LOG_INFO("PERF sprite_gpu_reject_avg source=",rejects[0]/frames,
+            { if(the_config->profile_renderer_verbose) LOG_INFO("PERF sprite_gpu_reject_avg source=",rejects[0]/frames,
                      " geomode=",rejects[1]/frames,
                      " lightmode=",rejects[2]/frames,
                      " texmode=",rejects[3]/frames,
                      " face_flags=",rejects[4]/frames,
                      " resource_uv=",rejects[5]/frames,
                      " camera_pose=",rejects[6]/frames,
-                     " capacity=",rejects[7]/frames);
+                     " capacity=",rejects[7]/frames); }
             {
                 auto const &s=gpu_gl_sweep_window;
                 LOG_INFO("PERF gpu_gl_sweep sweeps=",s.sweeps,
@@ -1716,14 +1716,14 @@ namespace jkgm {
                          " peak_examined=",s.peak_scanned,
                          " peak_evicted=",s.peak_evicted,
                          " NOTE=instrumented_CPU_wall_clock;GL_vertex_and_index_payload_only");
-                LOG_INFO("PERF gpu_gl_sweep_reuse reappeared_within_256_frames=",
+                { if(the_config->profile_renderer_verbose) LOG_INFO("PERF gpu_gl_sweep_reuse reappeared_within_256_frames=",
                          s.reappeared,
                          " reappeared_within_64_frames=",s.reappeared_within_64,
                          " recent_evicted_ids_remaining=",
                          gpu_gl_recent_swept_ids.size(),
                          " reappearance_scan_us_total=",
                          s.reappearance_scan_ns/1000U,
-                         " NOTE=observed_at_subsequent_sweep;lower_bound_of_reuploads");
+                         " NOTE=observed_at_subsequent_sweep;lower_bound_of_reuploads"); }
                 gpu_gl_sweep_window={};
             }
             LOG_INFO("PERF sorting_us opaque=", avg(profile_stage::sort_opaque),
@@ -1731,23 +1731,23 @@ namespace jkgm {
                      " peaks=", peak_sort_opaque, "/", peak_sort_trans,
                      " upload_us=", avg(profile_stage::upload),
                      " nativeMAT_us=", avg(profile_stage::mat_resolve));
-            LOG_INFO("PERF transparent_sort_fallback groups=",
+            { if(the_config->profile_renderer_verbose) LOG_INFO("PERF transparent_sort_fallback groups=",
                      profile_window.sort_fallback_groups,
                      " triangles=",profile_window.sort_fallback_triangles,
                      " frames=",profile_window.sort_fallback_frames,
                      "/",frames,
-                     " NOTE=approximate_eye_depth_only_on_budget_exhaustion");
+                     " NOTE=approximate_eye_depth_only_on_budget_exhaustion"); }
             LOG_INFO("PERF passes_us opaque=", avg(profile_stage::opaque_pass),
                      " transparent=", avg(profile_stage::transparent_pass),
                      " post_swap=", avg(profile_stage::present_swap),
                      " HUDupload=", avg(profile_stage::hud_upload),
                      " HUDdraw=", avg(profile_stage::hud_draw));
-            LOG_INFO("PERF HUD_dirty_regions bytes_uploaded_avg=",hud_bytes_uploaded_window/frames,
+            { if(the_config->profile_renderer_verbose) LOG_INFO("PERF HUD_dirty_regions bytes_uploaded_avg=",hud_bytes_uploaded_window/frames,
                      " gl_upload_calls_avg=",hud_upload_calls_window/frames,
                      " converted_pixels_avg=",hud_converted_pixels_window/frames,
                      " changed_pixels_avg=",hud_changed_pixels_window/frames,
                      " full_uploads=",hud_full_uploads_window,
-                     " skipped_frames=",hud_skipped_frames_window);
+                     " skipped_frames=",hud_skipped_frames_window); }
             hud_bytes_uploaded_window=hud_upload_calls_window=0;
             hud_converted_pixels_window=hud_changed_pixels_window=0;
             hud_full_uploads_window=hud_skipped_frames_window=0;
@@ -1872,14 +1872,14 @@ namespace jkgm {
                 auto per_capture=[&](size_t stage)->uint64_t {
                     return s.attempts?(s.cpu_ns[stage]/1000U)/s.attempts:0U;
                 };
-                LOG_INFO("PERF shared_capture_eligibility checked_frames=",
+                { if(the_config->profile_renderer_verbose) LOG_INFO("PERF shared_capture_eligibility checked_frames=",
                          s.eligibility_frames,
                          " requested_frames=",s.eligibility_requested_frames,
                          " matched_3do_but_culled_frames=",
                          s.eligibility_culled_frames,
                          " rejected_3do_groups=",s.eligibility_3do_rejected,
                          " rejected_world_faces=",s.eligibility_world_rejected,
-                         " NOTE=main_camera_conservative_frustum_only;no_GPU_readback");
+                         " NOTE=main_camera_conservative_frustum_only;no_GPU_readback"); }
                 LOG_INFO("PERF shared_capture_gpu_us mode=cube",
                          " capture_per_sample=",
                          shared_capture_gpu_samples_window
@@ -1903,7 +1903,7 @@ namespace jkgm {
                          " total_per_refresh=",per_capture(6),
                          " attempts=",s.attempts," completed=",s.completed,
                          " NOTE=CPU_wall_clock_including_possible_driver_stalls");
-                LOG_INFO("PERF shared_capture_batches per_refresh_models=",
+                { if(the_config->profile_renderer_verbose) LOG_INFO("PERF shared_capture_batches per_refresh_models=",
                          s.attempts?s.model_batches/s.attempts:0U,
                          " model_ranges=",s.attempts?s.model_ranges/s.attempts:0U,
                          " single=",s.model_single_batches,
@@ -1914,22 +1914,22 @@ namespace jkgm {
                          " nodes_acquired=",s.acquired_nodes,
                          " groups_examined=",s.groups_checked,
                          " groups_passed_culling=",s.groups_selected,
-                         " NOTE=batch_buckets_are_window_totals");
-                LOG_INFO("PERF shared_capture_whole_mesh_cull rejected=",
+                         " NOTE=batch_buckets_are_window_totals"); }
+                { if(the_config->profile_renderer_verbose) LOG_INFO("PERF shared_capture_whole_mesh_cull rejected=",
                          s.whole_mesh_rejections,
                          " group_walks_avoided=",s.group_walks_avoided,
-                         " NOTE=window_totals;conservative_mesh_bounds");
-                LOG_INFO("PERF shared_capture_opaque_order sortable_ranges=",
+                         " NOTE=window_totals;conservative_mesh_bounds"); }
+                { if(the_config->profile_renderer_verbose) LOG_INFO("PERF shared_capture_opaque_order sortable_ranges=",
                          s.reorder_opaque_ranges,
                          " source_order_barriers=",s.reorder_barriers,
                          " sorted_spans=",s.reorder_spans,
-                         " NOTE=window_totals;shared_only;cutout_order_preserved");
-                LOG_INFO("PERF shared_capture_gl_sample call_us=",
+                         " NOTE=window_totals;shared_only;cutout_order_preserved"); }
+                { if(the_config->profile_renderer_verbose) LOG_INFO("PERF shared_capture_gl_sample call_us=",
                          s.sampled_gl_calls
                             ?(s.sampled_gl_ns/1000U)/s.sampled_gl_calls:0U,
                          " samples=",s.sampled_gl_calls,
                          " every_n_model_calls=32",
-                         " NOTE=sampled_glMultiDrawElements_CPU_entry_only");
+                         " NOTE=sampled_glMultiDrawElements_CPU_entry_only"); }
                 shared_capture_profile_window={};
             }
             if(the_config->use_gpu_cache ||
@@ -1941,29 +1941,29 @@ namespace jkgm {
                          " lighting_or_camera=",profile_window.gpu_lighting_native/frames,
                          " empty_mesh_nodes=",profile_window.gpu_empty_mesh_native/frames,
                          " NOTE=empty_nodes_do_not_generate_GPU_draws");
-                LOG_INFO("PERF native_memory_checks avg_cache_hits=",
+                { if(the_config->profile_renderer_verbose) LOG_INFO("PERF native_memory_checks avg_cache_hits=",
                          profile_window.gpu_native_span_cache_hits/frames,
                          " avg_VirtualQuery=",
                          profile_window.gpu_native_span_queries/frames,
-                         " NOTE=positive_regions_only_per_frame");
+                         " NOTE=positive_regions_only_per_frame"); }
                 {
                     // Cumulative since start; subtract consecutive lines for a
                     // rate. Every guarded native read goes through this cache.
                     auto const &shared=
                         engine_camera_detail::shared_readable_cache();
-                    LOG_INFO("PERF shared_readable_cache hits_total=",shared.hits,
+                    { if(the_config->profile_renderer_verbose) LOG_INFO("PERF shared_readable_cache hits_total=",shared.hits,
                              " VirtualQuery_total=",shared.queries,
-                             " NOTE=cumulative_render_thread");
+                             " NOTE=cumulative_render_thread"); }
                 }
                 auto const &current_fog=get_fog_settings();
                 auto const fog_params=current_fog.info.value();
                 // The lightweight logger only formats integral values and
                 // strings. Convert the animated floating-point fog settings
                 // explicitly instead of passing unsupported float types.
-                LOG_INFO("PERF gpu_3do fog start=",std::to_string(fog_params[0]),
+                { if(the_config->profile_renderer_verbose) LOG_INFO("PERF gpu_3do fog start=",std::to_string(fog_params[0]),
                          " end=",std::to_string(fog_params[1]),
                          " opacity=",std::to_string(
-                             the_config->enable_fog?fog_params[2]:0.0f));
+                             the_config->enable_fog?fog_params[2]:0.0f)); }
                 LOG_INFO("PERF gpu_3do candidates_avg=",profile_window.gpu_candidates/frames,
                          " sphere_culled_avg=",profile_window.gpu_culled/frames,
                          " instances_avg=",profile_window.gpu_queued/frames,
@@ -1991,22 +1991,23 @@ namespace jkgm {
                          " evictions_total=",profile_window.gpu_cache_evictions,
                          " deferred_trims_total=",
                          profile_window.gpu_cache_trim_deferred);
-                LOG_INFO("PERF gpu_3do hash_causes_total new=",
+                { if(the_config->profile_renderer_verbose) LOG_INFO("PERF gpu_3do hash_causes_total new=",
                          profile_window.gpu_cache_hash_new,
                          " header=",profile_window.gpu_cache_hash_header,
                          " revision=",profile_window.gpu_cache_hash_revision,
                          " fallback=",profile_window.gpu_cache_hash_fallback,
-                         " NOTE=includes_offscreen_planar_hashes");
-                LOG_INFO("PERF gpu_3do lazy_mutations material_checks=",
+                         " NOTE=includes_offscreen_planar_hashes"); }
+                { if(the_config->profile_renderer_verbose) LOG_INFO("PERF gpu_3do lazy_mutations material_checks=",
                          profile_window.gpu_mutation_scans,
                          " meshes_checked=",profile_window.gpu_mutation_scanned,
                          " changed_materials=",
                          profile_window.gpu_mutation_invalidated,
                          " CPU_us_avg=",
                          (profile_window.gpu_mutation_ns/1000)/frames,
-                         " NOTE=no_cache_wide_scan_full_edits_hash_on_next_use");
-                if(the_config->gpu_3do_vertex_format!=0 ||
-                   the_config->experimental_3do_index_u16) {
+                         " NOTE=no_cache_wide_scan_full_edits_hash_on_next_use"); }
+                if(the_config->profile_renderer_verbose &&
+                   (the_config->gpu_3do_vertex_format!=0 ||
+                    the_config->experimental_3do_index_u16)) {
                     auto const &packing=packed_3do_upload_profile;
                     uint64_t const attempted=packing.accepted_uploads+
                                              packing.rejected_uploads;
@@ -2130,12 +2131,12 @@ namespace jkgm {
                          profile_window.gpu_preview_calls[0]/frames,"/",
                          profile_window.gpu_preview_calls[1]/frames,
                          " NOTE=opaque_collect_prepares_ordinary_alpha_setup_and_restoration_not_in_substages");
-                LOG_INFO("PERF gpu_3do filter_state updates_avg=",
+                { if(the_config->profile_renderer_verbose) LOG_INFO("PERF gpu_3do filter_state updates_avg=",
                          profile_window.gpu_filter_state_sets/frames,
                          " skipped_updates_avg=",profile_window.gpu_filter_state_skips/frames,
                          " avoided_glTexParameter_calls_avg=",
                          (profile_window.gpu_filter_state_skips*3U)/frames,
-                         " NOTE=albedo_emission_and_transition_textures_only");
+                         " NOTE=albedo_emission_and_transition_textures_only"); }
                 if(profile_window.gpu_instancing_audit_samples>0U) {
                     auto const sample_count=
                         profile_window.gpu_instancing_audit_samples;
@@ -2240,10 +2241,10 @@ namespace jkgm {
                          " backface_culled_avg=",
                          profile_window.gpu_groups_backface_culled/frames,
                          " NOTE=actual_group_walks_shared_ordinary_alpha_counted_once");
-                LOG_INFO("PERF gpu_3do frustum_acceptance meshes_avg=",
+                { if(the_config->profile_renderer_verbose) LOG_INFO("PERF gpu_3do frustum_acceptance meshes_avg=",
                          profile_window.gpu_mesh_frustum_accepted/frames,
                          " group_tests_avoided_avg=",
-                         profile_window.gpu_group_frustum_tests_avoided/frames);
+                         profile_window.gpu_group_frustum_tests_avoided/frames); }
             }
             LOG_INFO("PERF geometry tris avg/max=", profile_window.tris / frames,
                      "/", peak_triangles,

@@ -70,6 +70,7 @@ namespace jkgm {
         bool enable_vsync = false;
         bool profile_renderer = false; // opt-in CPU and async GPU frame timings
         bool experimental_simulation_profiling = false; // native physics/COG elapsed timings
+        bool experimental_cog_verb_profiling = false; // requires simulation profiling; optional per-verb clocks
         bool profile_gpu_3do_instancing_audit = false; // expensive sampled feasibility diagnostics
         bool profile_renderer_verbose = false; // opt-in detailed renderer diagnostics
         bool profile_audio = false; // read-only A3D/DirectSound DLL diagnostics

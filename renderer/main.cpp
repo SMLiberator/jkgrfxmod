@@ -11960,6 +11960,23 @@ bool native_compressed_sound_hook_active=false;
     }
 } // anonymous
 
+namespace {
+    // Original CALLFUNC site has EAX=symbol, ESI=context. cdecl preserves
+    // EBX/ESI/EDI/EBP; the original indirect call also clobbers volatile regs.
+    void __cdecl profile_native_verb(void const *symbol,void *context) {
+        jkgm::native_simulation_profile::invoke_verb(symbol,context);
+    }
+    __declspec(naked) void native_verb_profile_bridge() {
+        __asm {
+            push esi
+            push eax
+            call profile_native_verb
+            add esp,8
+            ret
+        }
+    }
+}
+
 bool attach_hooks()
 {
     DetourRestoreAfterWith();
@@ -12352,6 +12369,9 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID /*lpRese
         native_node_attachment_hooks_active=attach_native_node_attachment_hooks();
         if(the_config->experimental_simulation_profiling)
             jkgm::native_simulation_profile::install(native_node_attachment_hooks_active);
+        if(the_config->experimental_cog_verb_profiling)
+            jkgm::native_simulation_profile::install_verbs(hModule,native_verb_profile_bridge,
+                                                          the_config->profile_renderer_verbose);
         if(the_config->profile_renderer || the_config->use_gpu_cache ||
            the_config->enable_decals ||
            (the_config->enable_spotlights && the_config->enable_spotlight_shadows) ||
