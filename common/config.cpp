@@ -285,6 +285,15 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("profile_renderer")) {
             j.at("profile_renderer").get_to(rv->profile_renderer);
         }
+        if(j.contains("experimental_collision_broadphase")) {
+            j.at("experimental_collision_broadphase").get_to(rv->experimental_collision_broadphase);
+        }
+        if(j.contains("experimental_collision_plane_fast")) {
+            j.at("experimental_collision_plane_fast").get_to(rv->experimental_collision_plane_fast);
+        }
+        if(j.contains("experimental_collision_mesh_fast")) {
+            j.at("experimental_collision_mesh_fast").get_to(rv->experimental_collision_mesh_fast);
+        }
         if(j.contains("experimental_simulation_profiling")) {
             j.at("experimental_simulation_profiling").get_to(rv->experimental_simulation_profiling);
         }

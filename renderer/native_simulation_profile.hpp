@@ -181,7 +181,8 @@ struct hook {
 };
 using update=hook<stage::simulation,0x004C4DF0U,int>;
 using integrate=hook<stage::physics_integrate,0x004F5B70U,void,void*,float>;
-using move=hook<stage::thing_move,0x004CC790U,void,void*,float>;
+// Native caller pushes Thing, delta seconds AND delta milliseconds.
+using move=hook<stage::thing_move,0x004CC790U,void,void*,float,int>;
 using floor=hook<stage::floor,0x004F57C0U,void,void*,int>;
 using collision_move=hook<stage::collision_move,0x004E7BE0U,float,void*,void*,float,int>;
 using search=hook<stage::collision_search,0x004E83F0U,float,void*,void*,void const*,void const*,float,float,int>;

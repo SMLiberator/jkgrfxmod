@@ -363,6 +363,8 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\mots_native_collision_query.cpp /Fe:mots_native_collision_query_test.exe || exit /b 1
         mots_native_collision_query_test.exe || exit /b 1
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\native_collision_fast.cpp /Fe:native_collision_fast_test.exe || exit /b 1
+        native_collision_fast_test.exe || exit /b 1
         cl.exe /nologo /EHsc /std:c++17 /I. tests\native_sprite_cel.cpp /Fe:native_sprite_cel_test.exe || exit /b 1
         native_sprite_cel_test.exe || exit /b 1
         cl.exe /nologo /EHsc /std:c++17 /I. tests\sprite_instance_info.cpp /Fe:sprite_instance_info_test.exe || exit /b 1

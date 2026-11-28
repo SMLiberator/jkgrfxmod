@@ -69,6 +69,9 @@ namespace jkgm {
         bool enable_posterized_lighting = false;
         bool enable_vsync = false;
         bool profile_renderer = false; // opt-in CPU and async GPU frame timings
+        bool experimental_collision_broadphase = false; // fast native sphere misses
+        bool experimental_collision_plane_fast = false; // fast native plane misses
+        bool experimental_collision_mesh_fast = false; // ordered mesh face traversal
         bool experimental_simulation_profiling = false; // native physics/COG elapsed timings
         bool experimental_cog_verb_profiling = false; // requires simulation profiling; optional per-verb clocks
         bool profile_gpu_3do_instancing_audit = false; // expensive sampled feasibility diagnostics

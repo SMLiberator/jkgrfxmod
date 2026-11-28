@@ -395,6 +395,12 @@
     <ClInclude Include="native_simulation_profile.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="native_collision_fast.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="native_collision_fast_hook.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="native_3do_lod_override.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
