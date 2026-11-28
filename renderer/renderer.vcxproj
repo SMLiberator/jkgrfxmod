@@ -173,6 +173,8 @@
     <ClInclude Include="native_3do_draw_memo.hpp" />
     <ClInclude Include="native_3do_profile.hpp" />
     <ClInclude Include="native_simulation_profile.hpp" />
+    <ClInclude Include="native_cog_vm_fast.hpp" />
+    <ClInclude Include="native_cog_vm_fast_hook.hpp" />
     <ClInclude Include="native_collision_fast.hpp" />
     <ClInclude Include="native_collision_fast_hook.hpp" />
     <ClInclude Include="native_3do_lod_override.hpp" />

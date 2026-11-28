@@ -303,6 +303,12 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("experimental_cog_verb_profiling")) {
             j.at("experimental_cog_verb_profiling").get_to(rv->experimental_cog_verb_profiling);
         }
+        if(j.contains("experimental_cog_vm_fast")) {
+            j.at("experimental_cog_vm_fast").get_to(rv->experimental_cog_vm_fast);
+        }
+        if(j.contains("experimental_cog_vm_direct_dispatch")) {
+            j.at("experimental_cog_vm_direct_dispatch").get_to(rv->experimental_cog_vm_direct_dispatch);
+        }
         if(j.contains("profile_gpu_3do_instancing_audit")) {
             j.at("profile_gpu_3do_instancing_audit").get_to(
                 rv->profile_gpu_3do_instancing_audit);

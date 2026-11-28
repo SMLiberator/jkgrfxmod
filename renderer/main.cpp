@@ -11,6 +11,7 @@
 #include "camera_to_mat.hpp"
 #include "native_3do_profile.hpp"
 #include "native_simulation_profile.hpp"
+#include "native_cog_vm_fast_hook.hpp"
 #include "native_collision_fast_hook.hpp"
 #include "native_3do_draw_memo.hpp"
 #include "native_3do_direct_model_audit.hpp"
@@ -12379,6 +12380,8 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID /*lpRese
                                       the_config->experimental_collision_mesh_fast);
         jkgm::collision_fast::install_sector(the_config->experimental_collision_sector_scan,
             the_config->enable_mesh_collision,[](){return !raycast_ex_precise_active;});
+        jkgm::cog_vm_fast::install(the_config->experimental_cog_vm_fast,
+                                   the_config->experimental_cog_vm_direct_dispatch);
         if(the_config->experimental_simulation_profiling)
             jkgm::native_simulation_profile::install(native_node_attachment_hooks_active);
         if(the_config->experimental_cog_verb_profiling)
@@ -12394,6 +12397,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID /*lpRese
     }
     else if(ul_reason_for_call == DLL_PROCESS_DETACH && renderer_hooks_active) {
         jkgm::native_simulation_profile::uninstall();
+        jkgm::cog_vm_fast::uninstall();
         jkgm::collision_fast::uninstall_sector();
         jkgm::collision_fast::uninstall();
         if(native_node_attachment_hooks_active) {
