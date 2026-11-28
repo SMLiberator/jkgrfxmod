@@ -128,6 +128,7 @@
 #include <string>
 #include <sstream>
 #include <tuple>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -777,6 +778,9 @@ namespace jkgm {
         renderer_mode mode = renderer_mode::menu;
         // Actual GDI/8-bit menu presentation need not switch display mode.
         bool menu_frame_pending = false;
+        std::chrono::steady_clock::time_point last_fps_gate{};
+        HANDLE fps_wait_timer=nullptr;
+        bool fps_wait_timer_attempted=false;
         std::atomic<unsigned> pending_png_screenshots{0};
         unsigned next_png_screenshot_number=0U;
         size<2, int> conf_scr_res;
@@ -1757,6 +1761,7 @@ namespace jkgm {
                      " compositor=",avg(profile_stage::present_composite),
                      " swapbuffers=",avg(profile_stage::present_swapbuffers),
                      " beginframe=",avg(profile_stage::present_beginframe),
+                     " fps_wait=",avg(profile_stage::present_fps_wait),
                      " NOTE=substages_of_post_swap");
             uint64_t const gpu_samples=present_gpu_samples;
             LOG_INFO("PERF present_gpu_us resolve=",
@@ -2336,6 +2341,7 @@ namespace jkgm {
 
         ~renderer_impl() override
         {
+            if(fps_wait_timer)CloseHandle(fps_wait_timer);
             cpu_visibility_workers.reset(); // join while the DLL is still live
             // Photos belong to this renderer/GL context; never carry pending
             // Thing identities into a replacement renderer instance.
@@ -2414,6 +2420,7 @@ namespace jkgm {
         void set_renderer_mode(renderer_mode mode) override
         {
             if(this->mode != mode) {
+                last_fps_gate={};
                 // The previous scene's Camera HUD may still be waiting for
                 // present_game() when JK switches into its pause or end menu.
                 // Invalidate it before clearing GPU/MAT resources: otherwise
@@ -2684,6 +2691,8 @@ namespace jkgm {
                             ")")));
             }
 
+            LOG_INFO("PRESENT vsync_requested=",present_interval,
+                     " fps_limit=",the_config->fps_limit);
             if(!gladLoadGL()) {
                 report_fatal_message("JkGfxMod could not initialize OpenGL.\n\nDetails: Failed to "
                                      "load extensions (gladLoadGL)");
@@ -3307,6 +3316,60 @@ namespace jkgm {
             gl::invalidate_cached_state();
         }
 
+        // Pace consecutive gameplay frames using actual wall time. No
+        // simulation-delta writes, busy spinning or accumulated catch-up debt.
+        // In the unsynchronized path gate immediately before presentation;
+        // with VSync gate after SwapBuffers so its wait counts toward the cap.
+        void pace_game_frame(bool measure)
+        {
+            if(the_config->fps_limit<=0.0 || mode!=renderer_mode::ingame) {
+                last_fps_gate={};
+                return;
+            }
+            using clock=std::chrono::steady_clock;
+            auto now=clock::now();
+            if(last_fps_gate!=clock::time_point{}) {
+                auto const period=std::chrono::ceil<clock::duration>(
+                    std::chrono::duration<double>(1.0/the_config->fps_limit));
+                auto const deadline=last_fps_gate+period;
+                if(now<deadline) {
+                    profile_scope wait_cpu(measure,profile_frame.timings[
+                        profile_idx(profile_stage::present_fps_wait)]);
+                    if(!fps_wait_timer_attempted) {
+                        fps_wait_timer_attempted=true;
+                        // CREATE_WAITABLE_TIMER_HIGH_RESOLUTION (Windows 10
+                        // 1803+; older Windows/Wine may reject the flag).
+                        // Do not change process/system timer resolution.
+                        fps_wait_timer=CreateWaitableTimerExW(
+                            nullptr,nullptr,0x00000002U,
+                            TIMER_MODIFY_STATE|SYNCHRONIZE);
+                        LOG_INFO("PRESENT fps_wait_backend=",
+                            fps_wait_timer?"high_resolution_timer":"sleep_until");
+                    }
+                    while((now=clock::now())<deadline) {
+                        if(fps_wait_timer) {
+                            using ticks100ns=std::chrono::duration<LONGLONG,
+                                std::ratio<1,10000000>>;
+                            LARGE_INTEGER due{};
+                            due.QuadPart=-std::chrono::ceil<ticks100ns>(
+                                deadline-now).count();
+                            if(SetWaitableTimer(fps_wait_timer,&due,0,
+                                                nullptr,nullptr,FALSE) &&
+                               WaitForSingleObject(fps_wait_timer,INFINITE)==WAIT_OBJECT_0)
+                                continue;
+                            CloseHandle(fps_wait_timer);
+                            fps_wait_timer=nullptr;
+                            LOG_WARNING("PRESENT fps timer failed; using sleep_until");
+                        }
+                        std::this_thread::sleep_until(deadline);
+                    }
+                }
+            }
+            // Rebase on actual elapsed time after an overrun (including OS
+            // oversleep). Never try to repay missed frames with a burst.
+            last_fps_gate=now;
+        }
+
         void end_frame()
         {
             bool const presenting_menu = menu_frame_pending ||
@@ -3338,6 +3401,7 @@ namespace jkgm {
             gl::texture_view scene = frame_screen->get_resolved_final_texture();
 
             if(presenting_menu) {
+                last_fps_gate={};
                 deferred_gpu_3do_instances.clear();
                 clear_deferred_gpu_hud_materials();
                 deferred_gpu_3do_camera={};
@@ -3532,12 +3596,16 @@ namespace jkgm {
                 }
             }
             if(gpu_timing)present_gpu_queries.end();
+            if(the_config->fps_limit>0.0 && !the_config->enable_vsync)
+                pace_game_frame(measure);
             {
                 profile_scope cpu(measure,profile_frame.timings[
                     profile_idx(profile_stage::present_swapbuffers)]);
                 capture_pending_screenshot_png();
                 SwapBuffers(hDC);
             }
+            if(the_config->fps_limit>0.0 && the_config->enable_vsync)
+                pace_game_frame(measure);
             {
                 profile_scope cpu(measure,profile_frame.timings[
                     profile_idx(profile_stage::present_beginframe)]);

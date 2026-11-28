@@ -35,6 +35,7 @@
     "retro_mode": false,
     "enable_posterized_lighting": false,
     "enable_vsync": false,
+    "fps_limit": 0,
     "profile_renderer": false,
     "profile_gpu_3do_instancing_audit": false,
     "experimental_gpu_3do_material_instancing": false,

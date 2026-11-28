@@ -282,6 +282,16 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("enable_vsync")) {
             j.at("enable_vsync").get_to(rv->enable_vsync);
         }
+        if(j.contains("fps_limit")) {
+            auto const &v=j.at("fps_limit");
+            if(!v.is_number())
+                throw std::runtime_error("fps_limit must be numeric (0 or 10..1000 FPS)");
+            double const limit=v.get<double>();
+            if(!std::isfinite(limit) || limit<0.0 || limit>1000.0 ||
+               (limit>0.0 && limit<10.0))
+                throw std::runtime_error("fps_limit must be 0 (disabled) or between 10 and 1000 FPS");
+            rv->fps_limit=limit;
+        }
         if(j.contains("profile_renderer")) {
             j.at("profile_renderer").get_to(rv->profile_renderer);
         }

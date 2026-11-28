@@ -68,6 +68,7 @@ namespace jkgm {
         bool retro_mode = false; // CMP #0 RGB8 post-quantization, no dithering
         bool enable_posterized_lighting = false;
         bool enable_vsync = false;
+        double fps_limit = 0.0; // gameplay cap, 0 = disabled
         bool profile_renderer = false; // opt-in CPU and async GPU frame timings
         bool experimental_collision_broadphase = false; // fast native sphere misses
         bool experimental_collision_plane_fast = false; // fast native plane misses
