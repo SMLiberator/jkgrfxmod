@@ -8314,8 +8314,14 @@ namespace {
                    std::memcmp(reinterpret_cast<void const *>(address),
                                signature.begin(),signature.size())==0;
         };
-        return matches(native_raycast_search_addr,
-                       {0x83,0xec,0x08,0xa1,0xa0,0xba,0x54,0x00}) &&
+        // The simulation profiler verifies this exact search prologue before
+        // committing its Detours transaction. Once installed, the native
+        // entry has a jump to the timing hook, not the original bytes.
+        // Keep using that entry (not the trampoline) so RayCast is measured.
+        bool const search_verified=jkgm::native_simulation_profile::enabled ||
+            matches(native_raycast_search_addr,
+                    {0x83,0xec,0x08,0xa1,0xa0,0xba,0x54,0x00});
+        return search_verified &&
                matches(native_raycast_pop_addr,
                        {0x56,0x57,0x8b,0x3d,0xa0,0xba,0x54,0x00}) &&
                matches(native_raycast_decrease_addr,
