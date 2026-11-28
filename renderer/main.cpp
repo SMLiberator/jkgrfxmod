@@ -12377,6 +12377,8 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID /*lpRese
         jkgm::collision_fast::install(the_config->experimental_collision_broadphase,
                                       the_config->experimental_collision_plane_fast,
                                       the_config->experimental_collision_mesh_fast);
+        jkgm::collision_fast::install_sector(the_config->experimental_collision_sector_scan,
+            the_config->enable_mesh_collision,[](){return !raycast_ex_precise_active;});
         if(the_config->experimental_simulation_profiling)
             jkgm::native_simulation_profile::install(native_node_attachment_hooks_active);
         if(the_config->experimental_cog_verb_profiling)
@@ -12392,6 +12394,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID /*lpRese
     }
     else if(ul_reason_for_call == DLL_PROCESS_DETACH && renderer_hooks_active) {
         jkgm::native_simulation_profile::uninstall();
+        jkgm::collision_fast::uninstall_sector();
         jkgm::collision_fast::uninstall();
         if(native_node_attachment_hooks_active) {
             detach_native_node_attachment_hooks();

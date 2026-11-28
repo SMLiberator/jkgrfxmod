@@ -51,7 +51,7 @@ int main() {
     assert(!sphere_miss(query(s,d,-1,0.1f),far,0.1f,false));
     std::mt19937 rng(91813);
     std::uniform_real_distribution<float> uniform(-1,1),positive(0,1);
-    unsigned sphere_reject=0,plane_reject=0;
+    unsigned sphere_reject=0,plane_reject=0,sector_reject=0;
     for(int i=0;i<250000;++i) {
         float const scale=i%4==0?30000.0f:i%4==1?100.0f:i%4==2?1.0f:0.001f;
         float p[3],axis[3];
@@ -71,6 +71,15 @@ int main() {
         for(int k=0;k<3;++k)p[k]=s[k]+d[k]*along+axis[k]*(r+size);
         query test(s,d,len,r);
         bool const initial=(i&1)!=0;
+        // The fused sector scan must remain conservative even for
+        // non-unit directions and for native initial-overlap behavior.
+        float nonunit[3]={d[0]*(i%3==0?1.7f:1.0f),d[1]*(i%3==0?1.7f:1.0f),d[2]*(i%3==0?1.7f:1.0f)};
+        sector_envelope const envelope(s,nonunit,len,r);
+        if(envelope.misses(p,size)) {
+            ++sector_reject;
+            assert(!native_sphere_hit<float>(s,nonunit,len,r,p,size,true));
+            assert(!native_sphere_hit<double>(s,nonunit,len,r,p,size,true));
+        }
         if(sphere_miss(test,p,size,initial)) {
             ++sphere_reject;
             assert(!native_sphere_hit<float>(s,d,len,r,p,size,initial));
@@ -82,5 +91,10 @@ int main() {
             assert(!native_plane_hit<double>(s,d,len,r,n,p));
         }
     }
-    assert(sphere_reject>10000 && plane_reject>10000);
+    assert(sphere_reject>10000 && plane_reject>10000 && sector_reject>10000);
+    float origin[3]={0,0,0},direction[3]={1,0,0};
+    float extended_hit[3]={1.8f,0.59f,0},obvious_miss[3]={10,10,0};
+    sector_envelope const bounds(origin,direction,1.0f,0.4f);
+    assert(!bounds.misses(extended_hit,0.5f));
+    assert(bounds.misses(obvious_miss,0.5f));
 }

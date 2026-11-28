@@ -72,6 +72,7 @@ namespace jkgm {
         bool experimental_collision_broadphase = false; // fast native sphere misses
         bool experimental_collision_plane_fast = false; // fast native plane misses
         bool experimental_collision_mesh_fast = false; // ordered mesh face traversal
+        bool experimental_collision_sector_scan = false; // live ordered sector candidate rejection
         bool experimental_simulation_profiling = false; // native physics/COG elapsed timings
         bool experimental_cog_verb_profiling = false; // requires simulation profiling; optional per-verb clocks
         bool profile_gpu_3do_instancing_audit = false; // expensive sampled feasibility diagnostics

@@ -143,6 +143,135 @@ inline bool matches(uintptr_t address,std::initializer_list<unsigned char> sig) 
     return end>=address && end-address>=sig.size() &&
            std::memcmp(p,sig.begin(),sig.size())==0;
 }
+// Native sector-list acceleration. Keep the original search's complete
+// eligibility logic, hit stack, handlers and distance updates for survivors.
+// A live walk starts AFTER the last candidate was fully processed, so no
+// cached pointer, position or flag survives a callback. Do not touch the
+// sector's head or any links, and do not run the extension's custom paths
+// (Type 2 and scoped precise RayCastEx) through a native-only spatial proof.
+using sector_allow_fn=bool(*)();
+inline sector_allow_fn sector_allow=nullptr;
+inline bool sector_active=false;
+inline constexpr uintptr_t sector_tail=0x004E8946U;
+inline uintptr_t sector_loop_more=0x004E86F9U,sector_loop_done=0x004E8951U;
+inline constexpr unsigned char sector_original[]={
+    0x8b,0x76,0x60,0x85,0xf6,0x0f,0x85,0xa8,0xfd,0xff,0xff
+};
+inline unsigned char sector_patch[sizeof(sector_original)]={};
+
+__declspec(noinline) inline void* __cdecl advance_sector_candidates(
+    void *previous,void *moving,float const *start,float const *dir,
+    float distance,float radius,uint32_t flags) noexcept
+{
+    auto *candidate=field<void*>(previous,0x60);
+    // For a scoped custom ray query, preserve its own broad phase and
+    // per-candidate accounting. With the optional Type 2 path enabled
+    // this entire experiment is disabled at install time.
+    if(!candidate || !sector_allow || !sector_allow())return candidate;
+    sector_envelope const envelope(start,dir,distance,radius);
+    uint32_t const required=((flags&8U)?0x80U:0U)|((flags&0x10U)?0x40U:0U);
+    while(candidate) {
+        auto const thing_flags=field<uint32_t>(candidate,0);
+        // These are the exact unconditional filters in 0x4e86fd..0x4e874a.
+        // No handler or collision-result side effect occurs on these misses.
+        bool const eligible=(thing_flags&required)==required &&
+            !(thing_flags&0x80002U) && field<uint32_t>(candidate,0x28)!=0 &&
+            (!(flags&0x2000U) || field<uint32_t>(candidate,0x0c)==7U) &&
+            (!moving || (moving!=candidate && !(thing_flags&0x200U)));
+        if(eligible) {
+            auto const center=reinterpret_cast<float const*>(
+                static_cast<unsigned char const*>(candidate)+0xb8);
+            // The original 0x508360 routine always tests the checked
+            // Thing's live position (+0xb8) and collideSize (+0x30)
+            // before choosing the face/sphere narrow phase, including
+            // reversed Type 3 and force-sphere searches.
+            if(!envelope.misses(center,field<float>(candidate,0x30)))
+                return candidate;
+        }
+        candidate=field<void*>(candidate,0x60);
+    }
+    return nullptr;
+}
+
+// Patch only the original 11-byte tail, never the function entry (the
+// simulation profiler owns the entry detour). At this point ESI is the last
+// processed Thing, EBP the moving Thing, EBX searchFlags. The original
+// stack frame has start +34h, direction +38h, distance +3ch, radius +40h.
+// The native code reloads EAX before the next flag test, and ECX/EDX are
+// dead; preserve all nonvolatile registers via the ordinary cdecl helper.
+__declspec(naked) void sector_advance_bridge()
+{
+    __asm {
+        mov eax,dword ptr [esp+40h]
+        mov ecx,dword ptr [esp+3ch]
+        mov edx,dword ptr [esp+38h]
+        push ebx
+        push eax
+        push ecx
+        push edx
+        push dword ptr [esp+44h]
+        push ebp
+        push esi
+        call advance_sector_candidates
+        add esp,28
+        mov esi,eax
+        test esi,esi
+        jz sector_finish
+        jmp dword ptr [sector_loop_more]
+    sector_finish:
+        jmp dword ptr [sector_loop_done]
+    }
+}
+inline bool write_sector_tail(unsigned char const *bytes)
+{
+    auto *p=reinterpret_cast<void*>(sector_tail);
+    DWORD old=0;
+    if(!VirtualProtect(p,sizeof(sector_original),PAGE_EXECUTE_READWRITE,&old))return false;
+    std::memcpy(p,bytes,sizeof(sector_original));
+    FlushInstructionCache(GetCurrentProcess(),p,sizeof(sector_original));
+    DWORD ignored=0;
+    if(!VirtualProtect(p,sizeof(sector_original),old,&ignored))
+        LOG_WARNING("Sector collision tail protection restore failed");
+    return true;
+}
+inline bool install_sector(bool requested,bool custom_type2,sector_allow_fn allow)
+{
+    if(!requested)return true;
+    if(custom_type2 || !allow) {
+        LOG_INFO("Native sector candidate scan skipped: custom Type 2 collision enabled");
+        return false;
+    }
+    if(reinterpret_cast<uintptr_t>(GetModuleHandleA(nullptr))!=0x00400000U ||
+       !matches(0x004E86C0U,{0x83,0xec,0x18,0x8b,0x44,0x24,0x1c,0x56}) ||
+       !matches(0x004E86F9U,{0x8b,0x44,0x24,0x18,0x85,0xc0,0x74,0x09}) ||
+       !matches(0x004E8888U,{0xe8,0xd3,0xfa,0x01,0x00,0x83,0xc4,0x2c}) ||
+       !matches(sector_tail,{0x8b,0x76,0x60,0x85,0xf6,0x0f,0x85,0xa8,0xfd,0xff,0xff,
+                            0x5b,0x5d,0x5f})) {
+        LOG_WARNING("Native sector candidate scan skipped: unsupported search layout");
+        return false;
+    }
+    std::memset(sector_patch,0x90,sizeof(sector_patch));
+    sector_patch[0]=0xe9;
+    uint32_t const relative=uint32_t(reinterpret_cast<uintptr_t>(&sector_advance_bridge)
+                                     -(sector_tail+5U));
+    std::memcpy(sector_patch+1,&relative,4);
+    sector_allow=allow;
+    sector_active=write_sector_tail(sector_patch);
+    if(sector_active)
+        LOG_INFO("Native sector candidate scan enabled: live ordered swept-box rejection");
+    else LOG_WARNING("Native sector candidate scan patch failed");
+    return sector_active;
+}
+inline void uninstall_sector()
+{
+    if(!sector_active)return;
+    if(std::memcmp(reinterpret_cast<void const*>(sector_tail),sector_patch,sizeof(sector_patch))!=0) {
+        LOG_WARNING("Native sector candidate scan tail changed; not restoring");
+        return;
+    }
+    if(write_sector_tail(sector_original))sector_active=false;
+}
+
 inline bool install(bool sphere,bool plane,bool mesh) {
     if(!sphere && !plane && !mesh)return true;
     if(reinterpret_cast<uintptr_t>(GetModuleHandleA(nullptr))!=0x00400000U ||

@@ -64,6 +64,43 @@ inline bool plane_miss(query const &q,float const *normal,float const *point) no
     return approach < -0.000008f || gap > q.distance*approach+margin;
 }
 
+// Enclose every possible center accepted by the native sphere test, not
+// merely a physically correct swept capsule. Native accepts a projection
+// parameter up to distance + combined radius, or an initial overlap. The
+// direction need not be unit length. A miss must be outside the resulting
+// enlarged swept box. The padding covers x87/SSE rounding differences.
+// All query-dependent terms are computed once per uninterrupted list run.
+struct sector_envelope {
+    __m128 start{},low{},high{},growth{};
+    float radius=0.0f,margin=0.0f;
+    bool valid=false;
+    sector_envelope(float const *s,float const *d,float length,float r) noexcept {
+        query const q(s,d,length,r);
+        if(!q.valid)return;
+        start=q.start;
+        auto const zero=_mm_setzero_ps();
+        auto const travel=_mm_mul_ps(q.dir,_mm_set1_ps(length));
+        low=_mm_min_ps(zero,travel);
+        high=_mm_max_ps(zero,travel);
+        growth=_mm_add_ps(_mm_set1_ps(1.0f),abs4(q.dir));
+        radius=r;
+        margin=0.00004f+0.000032f*(1.0f+q.start_scale+length+r);
+        valid=true;
+    }
+    bool misses(float const *center,float size) const noexcept {
+        if(!valid || !center || !valid_scalar(size))return false;
+        auto const c=load3(center);
+        if(!bounded(c,65536.0f))return false;
+        auto const delta=_mm_sub_ps(c,start);
+        auto const extra=_mm_set1_ps(margin+0.000032f*(sum_abs3(c)+size));
+        auto const pad=_mm_add_ps(_mm_mul_ps(growth,_mm_set1_ps(radius+size)),extra);
+        auto const outside=_mm_or_ps(
+            _mm_cmplt_ps(delta,_mm_sub_ps(low,pad)),
+            _mm_cmpgt_ps(delta,_mm_add_ps(high,pad)));
+        return (_mm_movemask_ps(outside)&7)!=0;
+    }
+};
+
 // Match the native projection interval [0, moveDist+combinedRadius],
 // not the physical ray segment. Native sphere tests use the projected
 // point on the *infinite line*, then may return a zero-distance hit when
